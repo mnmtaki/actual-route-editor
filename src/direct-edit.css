@@ -1,0 +1,41 @@
+body { min-width: 0; overscroll-behavior:none; }
+.network-canvas { cursor:grab; }
+.network-canvas.is-drawing { cursor:crosshair; }
+.segment-selected { filter:drop-shadow(0 0 5px #ffd25f); }
+.station-extend { cursor:pointer; }
+.station-extend-hit { cursor:pointer; }
+.station-extend-button { filter:drop-shadow(0 1px 1px #0002); transition:fill .14s ease, stroke-width .14s ease; }
+.station-extend:hover .station-extend-button { fill:#f7f7f3; stroke-width:2; }
+.station-extend-plus { fill:none; }
+.creation-banner { position:absolute; z-index:5; left:50%; top:12px; transform:translateX(-50%); padding:8px 14px; border-radius:999px; background:#15191aeb; color:#f0cd72; font-size:12px; box-shadow:0 4px 18px #0005; }
+.context-sheet { position:absolute; z-index:6; left:50%; bottom:14px; transform:translateX(-50%); min-width:310px; padding:12px; border:1px solid #414848; border-radius:12px; background:#171b1ced; box-shadow:0 12px 30px #0008; }
+.context-sheet strong { display:block; margin-bottom:9px; }
+.context-buttons { display:flex; gap:7px; }
+.sheet-handle { display:none; }
+.line-dialog-backdrop { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:20px; background:#0009; }
+.line-dialog { width:min(390px,100%); padding:22px; border:1px solid #444b4b; border-radius:14px; background:#181c1d; box-shadow:0 22px 70px #000c; }
+.line-dialog h2 { margin:0 0 18px; }
+.line-dialog-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+.line-choice { position:fixed; z-index:21; left:50%; bottom:18px; transform:translateX(-50%); width:min(420px,calc(100% - 24px)); padding:16px; border:1px solid #444b4b; border-radius:14px; background:#181c1d; box-shadow:0 20px 60px #000b; }
+.line-choice h3 { margin:0 0 10px; }.line-choice button { width:100%; margin-top:7px; }
+@media (max-width:720px) {
+  .app-shell { height:100dvh; grid-template-rows:calc(52px + env(safe-area-inset-top)) 1fr calc(62px + env(safe-area-inset-bottom)); }
+  .toolbar { height:auto; padding:env(safe-area-inset-top) 10px 0; gap:7px; }
+  .brand { min-width:0; flex:1; }.brand-mark,.brand small { display:none; }.brand strong { font-size:13px; }
+  .desktop-tools { display:none; }.tool-group { border:0; padding:0; }.creation-group { order:3; }.creation-group button { font-size:12px; padding:8px; }.mobile-core { position:fixed; z-index:8; left:10px; right:10px; bottom:calc(9px + env(safe-area-inset-bottom)); display:flex; justify-content:flex-start; pointer-events:none; }.mobile-core button { pointer-events:auto; min-width:62px; }
+  .workspace { display:block; position:relative; min-height:0; }.left-panel,.right-panel { display:none; }.canvas-wrap { width:100%; height:100%; }.canvas-status { top:8px; left:8px; }.canvas-status span:first-child,.canvas-status span:last-child { display:none; }
+  .timeline { position:relative; z-index:7; height:auto; grid-template-columns:1fr auto; gap:6px; padding:5px 10px calc(7px + env(safe-area-inset-bottom)); }.timeline-title,.date-end,.timeline>input[type=range] { display:none; }.timeline-controls { grid-column:2; }.timeline-controls button:first-child,.timeline-controls button:last-child { display:none; }
+  .context-sheet { position:fixed; left:0; right:0; bottom:calc(59px + env(safe-area-inset-bottom)); transform:none; min-width:0; padding:10px 12px 12px; border-radius:16px 16px 0 0; }.sheet-handle { display:block; width:38px; height:4px; margin:0 auto 8px; border-radius:3px; background:#596060; }.context-buttons { overflow-x:auto; }.context-buttons button { flex:0 0 auto; min-height:42px; }
+  .station-label { font-size:16px; }.creation-banner { top:8px; max-width:calc(100% - 20px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+}
+
+.build-version { color:#6f7777!important; font:8px ui-monospace,Consolas,monospace; letter-spacing:0!important; }
+.station-hit-target { cursor:grab; }
+.station-hit-target:active { cursor:grabbing; }
+
+
+
+.style-range { display:grid; gap:7px; color:#c9cdca; font-size:12px; }
+.style-range div { display:grid; grid-template-columns:1fr 32px; align-items:center; gap:7px; }
+.style-range input { width:100%; accent-color:var(--accent); }
+.style-range output { color:#8f9795; text-align:right; font:11px ui-monospace,Consolas,monospace; }

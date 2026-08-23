@@ -1,0 +1,12 @@
+node_modules/
+.vite/
+*.log
+.DS_Store
+Thumbs.db
+
+# TypeScript/Vite transient build metadata
+*.tsbuildinfo
+
+# Local development process artifacts
+.dev-server.pid
+

@@ -1,0 +1,30 @@
+{
+  "name": "fictional-metro-actual-route-editor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && node scripts/build-single-html.mjs",
+    "build:vite": "tsc -b && vite build --outDir dist-vite",
+    "diagnose:offline": "node scripts/diagnose-offline.mjs dist/index.html",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "latest",
+    "@testing-library/react": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "esbuild": "latest",
+    "jsdom": "^26.1.0",
+    "vitest": "latest"
+  }
+}

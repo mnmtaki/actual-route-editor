@@ -1,0 +1,50 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { demoProject } from '../data/demo'
+import { getSegmentPath } from '../geometry/path'
+import { NetworkCanvas } from './NetworkCanvas'
+
+beforeAll(() => {
+  class TestPointerEvent extends MouseEvent { pointerId: number; constructor(type: string, init: MouseEventInit & { pointerId?: number } = {}) { super(type, init); this.pointerId = init.pointerId ?? 1 } }
+  Object.defineProperty(window, 'PointerEvent', { configurable: true, value: TestPointerEvent })
+  Object.defineProperty(SVGElement.prototype, 'setPointerCapture', { configurable: true, value: vi.fn() })
+  Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, value: class { observe() {} disconnect() {} } })
+})
+
+const baseProps = { selection: null, drawing: null, onSelect: vi.fn(), onCreatePoint: vi.fn(), onConnectStation: vi.fn(), onExtend: vi.fn(), onSegmentPoint: vi.fn(), onPreview: vi.fn(), onDragCommit: vi.fn(), view: { x: 0, y: 0, width: 920, height: 680 }, setView: vi.fn() }
+
+describe('direct manipulation gestures', () => {
+  it('drags a station directly and commits the whole drag once', () => {
+    const onPreview = vi.fn(), onDragCommit = vi.fn(), setView = vi.fn()
+    const { container } = render(<NetworkCanvas {...baseProps} project={demoProject} onPreview={onPreview} onDragCommit={onDragCommit} setView={setView} />)
+    const svg = container.querySelector('svg')!
+    Object.defineProperty(svg, 'clientWidth', { configurable: true, value: 920 })
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+    const stationGroup = screen.getByTestId('transfer-s2').closest('.station-hit')!
+    const original = demoProject.stations.find(station => station.id === 's2')!
+    fireEvent.pointerDown(stationGroup, { pointerId: 7, clientX: original.x, clientY: original.y, bubbles: true })
+    fireEvent.pointerMove(svg, { pointerId: 7, clientX: original.x + 80, clientY: original.y + 35, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 7, clientX: original.x + 80, clientY: original.y + 35, bubbles: true })
+    expect(onDragCommit).toHaveBeenCalledTimes(1)
+    const moved = onDragCommit.mock.calls[0][1]
+    const movedStation = moved.stations.find((station: { id: string }) => station.id === 's2')
+    expect(movedStation.x).toBeCloseTo(original.x + 80)
+    expect(movedStation.y).toBeCloseTo(original.y + 35)
+    expect(getSegmentPath(moved, moved.geometry.segments.find((segment: { id: string }) => segment.id === 'a-1')!)).toContain(`${original.x + 80} ${original.y + 35}`)
+  })
+
+  it('pans from canvas background without starting an object drag', () => {
+    const setView = vi.fn(), onDragCommit = vi.fn()
+    const { container } = render(<NetworkCanvas {...baseProps} project={demoProject} setView={setView} onDragCommit={onDragCommit} />)
+    const svg = container.querySelector('svg')!
+    Object.defineProperty(svg, 'clientWidth', { configurable: true, value: 920 })
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+    const background = container.querySelector('.canvas-bg')!
+    fireEvent.pointerDown(background, { pointerId: 8, clientX: 100, clientY: 100, bubbles: true })
+    fireEvent.pointerMove(svg, { pointerId: 8, clientX: 140, clientY: 120, bubbles: true })
+    expect(setView).toHaveBeenCalledTimes(1)
+    expect(onDragCommit).not.toHaveBeenCalled()
+  })
+})
+
+

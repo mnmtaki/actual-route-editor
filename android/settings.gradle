@@ -1,0 +1,19 @@
+def useReliableAndroidRepository = { repository ->
+    if (!repository.hasProperty('url')) return
+    if (repository.url?.host in ['repo.maven.apache.org', 'repo1.maven.org']) {
+        repository.setUrl('https://maven.aliyun.com/repository/central/')
+    } else if (repository.url?.host in ['dl.google.com', 'maven.google.com']) {
+        repository.setUrl('https://maven.aliyun.com/repository/google/')
+    }
+}
+
+gradle.beforeProject { project ->
+    project.buildscript.repositories.whenObjectAdded(useReliableAndroidRepository)
+    project.repositories.whenObjectAdded(useReliableAndroidRepository)
+}
+
+include ':app'
+include ':capacitor-cordova-android-plugins'
+project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
+
+apply from: 'capacitor.settings.gradle'

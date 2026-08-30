@@ -1,5 +1,5 @@
 import type { ActualRouteProject } from './model'
-import { DEFAULT_SETTINGS } from './model'
+import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from './model'
 
 export const demoProject: ActualRouteProject = {
   version: 1,
@@ -24,18 +24,21 @@ export const demoProject: ActualRouteProject = {
     ...['s5', 's2', 's6'].map((stationId) => ({ id: `r-b-${stationId}`, stationId, lineId: 'line-b', openedAt: '2010-01-01' })),
     ...['s7', 's2', 's8'].map((stationId) => ({ id: `r-c-${stationId}`, stationId, lineId: 'line-c', openedAt: '2020-01-01' })),
   ],
+  openingPhases: [],
   geometry: {
     segments: [
-      { id: 'a-1', lineId: 'line-a', fromStationId: 's1', toStationId: 's2', mode: 'smooth', waypoints: [{ id: 'w1', x: 300, y: 455, type: 'smooth' }], openedAt: '2000-01-01' },
-      { id: 'a-2', lineId: 'line-a', fromStationId: 's2', toStationId: 's3', mode: 'smooth', waypoints: [{ id: 'w2', x: 500, y: 300, type: 'smooth' }], openedAt: '2000-01-01' },
-      { id: 'a-3', lineId: 'line-a', fromStationId: 's3', toStationId: 's4', mode: 'smooth', waypoints: [{ id: 'w3', x: 760, y: 430, type: 'smooth' }], openedAt: '2000-01-01' },
-      { id: 'b-1', lineId: 'line-b', fromStationId: 's5', toStationId: 's2', mode: 'smooth', waypoints: [], openedAt: '2010-01-01' },
-      { id: 'b-2', lineId: 'line-b', fromStationId: 's2', toStationId: 's6', mode: 'smooth', waypoints: [], openedAt: '2010-01-01' },
-      { id: 'c-1', lineId: 'line-c', fromStationId: 's7', toStationId: 's2', mode: 'smooth', waypoints: [], openedAt: '2020-01-01' },
-      { id: 'c-2', lineId: 'line-c', fromStationId: 's2', toStationId: 's8', mode: 'smooth', waypoints: [{ id: 'w4', x: 525, y: 185, type: 'smooth' }], openedAt: '2020-01-01' },
+      { id: 'a-1', lineId: 'line-a', fromStationId: 's1', toStationId: 's2', mode: 'smooth', structureType: 'underground', structureNodes: [], waypoints: [{ id: 'w1', x: 300, y: 455, type: 'smooth' }], openedAt: '2000-01-01' },
+      { id: 'a-2', lineId: 'line-a', fromStationId: 's2', toStationId: 's3', mode: 'smooth', structureType: 'underground', structureNodes: [], waypoints: [{ id: 'w2', x: 500, y: 300, type: 'smooth' }], openedAt: '2000-01-01' },
+      { id: 'a-3', lineId: 'line-a', fromStationId: 's3', toStationId: 's4', mode: 'smooth', structureType: 'underground', structureNodes: [], waypoints: [{ id: 'w3', x: 760, y: 430, type: 'smooth' }], openedAt: '2000-01-01' },
+      { id: 'b-1', lineId: 'line-b', fromStationId: 's5', toStationId: 's2', mode: 'smooth', structureType: 'underground', structureNodes: [], waypoints: [], openedAt: '2010-01-01' },
+      { id: 'b-2', lineId: 'line-b', fromStationId: 's2', toStationId: 's6', mode: 'smooth', structureType: 'underground', structureNodes: [], waypoints: [], openedAt: '2010-01-01' },
+      { id: 'c-1', lineId: 'line-c', fromStationId: 's7', toStationId: 's2', mode: 'smooth', structureType: 'underground', structureNodes: [], waypoints: [], openedAt: '2020-01-01' },
+      { id: 'c-2', lineId: 'line-c', fromStationId: 's2', toStationId: 's8', mode: 'smooth', structureType: 'underground', structureNodes: [], waypoints: [{ id: 'w4', x: 525, y: 185, type: 'smooth' }], openedAt: '2020-01-01' },
     ],
   },
+  mapElements: [],
   background: null,
   timeline: { currentDate: '2025-01-01', startDate: '2000-01-01', endDate: '2025-01-01', playing: false },
+  presentation: { ...DEFAULT_PRESENTATION_SETTINGS, startDate: '2000-01-01', endDate: '2020-01-01' },
   settings: DEFAULT_SETTINGS,
 }

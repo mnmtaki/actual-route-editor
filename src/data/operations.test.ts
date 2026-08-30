@@ -3,6 +3,8 @@ import { demoProject } from './demo'
 import { appendStationToLine, connectExistingStation, createLine, deleteLineAndOrphans, insertStationIntoSegment } from './operations'
 
 describe('line-driven editing operations', () => {
+  it('leaves new Lines and Stations inheriting visual defaults',()=>{const source=structuredClone(demoProject);source.settings.lineWidth=23;source.settings.stationSize=8;source.settings.stationLabelSize=17;const created=createLine(source,{name:'默认样式线',color:'#123456'}),line=created.project.lines.find(item=>item.id===created.lineId)!;expect(line.lineWidth).toBeUndefined();const result=appendStationToLine(created.project,created.lineId,{x:1,y:2}),station=result.project.stations.find(item=>item.id===result.stationId)!;for(const key of ['stationSize','transferMinorAxis','transferEndPadding','transferDotGap','labelSize','foreignLabelSize','foreignLabelGap','labelRotation'])expect(station[key as keyof typeof station]).toBeUndefined()})
+  it('uses the default label direction and distance without creating a rotation override',()=>{const source=structuredClone(demoProject);source.settings.defaultLabelDirection='right';source.settings.defaultLabelDistance=10;source.settings.defaultStationLabelRotation=15;const result=appendStationToLine(source,'line-a',{x:900,y:300},'s4'),station=result.project.stations.find(item=>item.id===result.stationId)!;expect(station.labelOffsetX).toBe(10);expect(station.labelOffsetY).toBe(0);expect(station.labelRotation).toBeUndefined()})
   it('makes the first created station a line member immediately', () => {
     const created = createLine(demoProject, { name: '测试线', color: '#123456', openedAt: '2025-01-01' })
     const result = appendStationToLine(created.project, created.lineId, { x: 10, y: 20 })
@@ -38,4 +40,11 @@ describe('line-driven editing operations', () => {
     expect(next.stations.some((station) => station.id === 's2')).toBe(true)
     expect(next.stations.every((station) => next.stationLineRelations.some((relation) => relation.stationId === station.id))).toBe(true)
   })
+})
+
+describe('station coordinates remain pointer-authored', () => {
+  it('keeps four consecutive new-line clicks without layout or rounding', () => { const created=createLine(demoProject,{name:'坐标线',color:'#112233'}); const points=[{x:300.25,y:200.75},{x:455.5,y:160.125},{x:612.875,y:330.625},{x:760.0625,y:510.9375}]; let project=created.project; let anchor:string|null=null; const ids:string[]=[]; for(const point of points){const result=appendStationToLine(project,created.lineId,point,anchor);project=result.project;anchor=result.stationId;ids.push(result.stationId)} ids.forEach((id,index)=>{const station=project.stations.find(item=>item.id===id)!;expect(station.x).toBe(points[index].x);expect(station.y).toBe(points[index].y)}) })
+  it('keeps the exact endpoint-extension click', () => { const point={x:937.375,y:482.625}; const result=appendStationToLine(demoProject,'line-a',point,'s4'); const station=result.project.stations.find(item=>item.id===result.stationId)!; expect({x:station.x,y:station.y}).toEqual(point) })
+  it('keeps the exact middle-station branch click', () => { const point={x:444.125,y:647.875}; const result=appendStationToLine(demoProject,'line-a',point,'s2'); const station=result.project.stations.find(item=>item.id===result.stationId)!; expect({x:station.x,y:station.y}).toEqual(point) })
+  it('keeps the explicit projected Segment click instead of using its midpoint', () => { const point={x:281.375,y:431.625}; const result=insertStationIntoSegment(demoProject,'a-1',point); const station=result.project.stations.find(item=>item.id===result.stationId)!; expect({x:station.x,y:station.y}).toEqual(point); expect(station.x).not.toBe((180+390)/2) })
 })

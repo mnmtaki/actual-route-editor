@@ -1,5 +1,5 @@
 import type { ActualRouteProject, Line, Segment, Station, StationLineRelation } from '../data/model'
-import { DEFAULT_SETTINGS } from '../data/model'
+import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from '../data/model'
 
 interface LegacyPoint { id: string | number; name?: string; pos?: [number, number]; sta?: number; isFake?: boolean }
 interface LegacyLine { id: string | number; name?: string; color?: string; pts?: (string | number)[]; type?: number; isFake?: boolean }
@@ -44,7 +44,7 @@ export function importTopologyJson(text: string): ActualRouteProject {
   const segments: Segment[] = []
   lines.forEach((line) => {
     line.stationSequence.forEach((stationId) => relations.push({ id: `rel_${line.id}_${stationId}`, stationId, lineId: line.id }))
-    line.stationSequence.slice(1).forEach((to, index) => segments.push({ id: `segment_${line.id}_${index}`, lineId: line.id, fromStationId: line.stationSequence[index], toStationId: to, mode: 'straight', waypoints: [] }))
+    line.stationSequence.slice(1).forEach((to, index) => segments.push({ id: `segment_${line.id}_${index}`, lineId: line.id, fromStationId: line.stationSequence[index], toStationId: to, mode: 'straight', structureType: 'underground', waypoints: [] }))
   })
-  return { version: 1, name: '导入的架空线网', stations, lines, stationLineRelations: relations, geometry: { segments }, background: null, timeline: { currentDate: '2026-01-01', startDate: '2000-01-01', endDate: '2026-01-01', playing: false }, settings: DEFAULT_SETTINGS }
+  return { version: 1, name: '导入的架空线网', stations, lines, stationLineRelations: relations, openingPhases: [], geometry: { segments }, mapElements: [], background: null, timeline: { currentDate: '2026-01-01', startDate: '2000-01-01', endDate: '2026-01-01', playing: false }, presentation: { ...DEFAULT_PRESENTATION_SETTINGS, startDate: '2000-01-01', endDate: '2026-01-01' }, settings: DEFAULT_SETTINGS }
 }

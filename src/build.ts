@@ -1,1 +1,1 @@
-export const BUILD_VERSION = '2026-08-24-station-size-1'
+export const BUILD_VERSION = '2026-08-30-presentation-view-map-elements-21'

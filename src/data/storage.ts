@@ -1,6 +1,6 @@
 import { demoProject } from './demo'
 import type { ActualRouteProject } from './model'
-import { DEFAULT_SETTINGS } from './model'
+import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from './model'
 import { parseProjectJson, serializeProject } from '../import-export/projectJson'
 
 export const STORAGE_KEY = 'actual-route-editor.project.v1'
@@ -13,9 +13,12 @@ export function createEmptyProject(): ActualRouteProject {
     stations: [],
     lines: [],
     stationLineRelations: [],
+    openingPhases: [],
     geometry: { segments: [] },
+    mapElements: [],
     background: null,
     timeline: { currentDate: today, startDate: today, endDate: today, playing: false },
+    presentation: { ...DEFAULT_PRESENTATION_SETTINGS, startDate: today, endDate: today },
     settings: { ...DEFAULT_SETTINGS },
   }
 }

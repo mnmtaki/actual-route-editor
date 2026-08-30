@@ -1,39 +1,21 @@
 import type { Line, Station } from '../data/model'
 
 export interface OrdinaryStationRenderProps { station: Station; size: number }
-export interface TransferStationRenderProps { station: Station; lines: Line[]; size: number; rotation: number; gapRatio: number; paddingRatio: number }
-export interface StationStyleDefinition {
-  id: string
-  name: string
-  renderOrdinary: (props: OrdinaryStationRenderProps) => React.ReactNode
-  renderTransfer: (props: TransferStationRenderProps) => React.ReactNode
-}
+export interface TransferStationRenderProps { station: Station; lines: Line[]; size: number; minorAxis: number; dotGap: number; endPadding: number; rotation: number }
+export interface PresentationStationRenderProps extends TransferStationRenderProps { previousLines: Line[]; morphProgress: number; opacity: number; scale: number }
+export const TRANSFER_CONTAINER_STYLE = { fill: 'white', stroke: '#3f454a', strokeWidth: 1.75, vectorEffect: 'non-scaling-stroke' as const }
+export const TRANSFER_DOT_DIAMETER_RATIO = 0.6
+export interface StationStyleDefinition { id:string; name:string; renderOrdinary:(props:OrdinaryStationRenderProps)=>React.ReactNode; renderTransfer:(props:TransferStationRenderProps)=>React.ReactNode; renderPresentation:(props:PresentationStationRenderProps)=>React.ReactNode }
 
-export function getDefaultTransferMetrics(size: number, count: number, gapRatio: number, paddingRatio: number) {
-  const gap = Math.max(2, size * gapRatio)
-  const horizontalPadding = Math.max(2.5, size * paddingRatio)
-  const verticalPadding = Math.max(2, size * .18)
-  return {
-    dotDiameter: size,
-    gap,
-    horizontalPadding,
-    height: size + verticalPadding * 2,
-    width: horizontalPadding * 2 + count * size + Math.max(0, count - 1) * gap,
-  }
+export function getDefaultTransferMetrics(size:number,count:number,dotGap:number,endPadding:number,minorAxis:number){
+  const dotDiameter=size*TRANSFER_DOT_DIAMETER_RATIO
+  return { dotDiameter, gap:Math.max(0,dotGap), horizontalPadding:Math.max(0,endPadding), height:Math.max(dotDiameter,minorAxis), width:Math.max(0,endPadding)*2+count*dotDiameter+Math.max(0,count-1)*Math.max(0,dotGap) }
 }
-
-export const DEFAULT_STATION_STYLE: StationStyleDefinition = {
-  id: 'default',
-  name: '默认站点',
-  renderOrdinary: ({ station, size }) => <circle cx={station.x} cy={station.y} r={size / 2} fill="white" data-testid={`station-${station.id}`} />,
-  renderTransfer: ({ station, lines, size, rotation, gapRatio, paddingRatio }) => {
-    const metrics = getDefaultTransferMetrics(size, lines.length, gapRatio, paddingRatio)
-    return <g transform={`rotate(${rotation} ${station.x} ${station.y})`} data-testid={`transfer-${station.id}`}>
-      <rect x={station.x - metrics.width / 2} y={station.y - metrics.height / 2} width={metrics.width} height={metrics.height} rx={metrics.height / 2} fill="white" />
-      {lines.map((line, index) => <circle key={line.id} cx={station.x - metrics.width / 2 + metrics.horizontalPadding + size / 2 + index * (size + metrics.gap)} cy={station.y} r={size / 2} fill={line.color} />)}
-    </g>
-  },
-}
-
-const STATION_STYLES: Record<string, StationStyleDefinition> = { [DEFAULT_STATION_STYLE.id]: DEFAULT_STATION_STYLE }
-export function getStationStyle(styleId: string | undefined): StationStyleDefinition { return STATION_STYLES[styleId ?? 'default'] ?? DEFAULT_STATION_STYLE }
+const ordinary=({station,size}:OrdinaryStationRenderProps)=><circle cx={station.x} cy={station.y} r={size/2} fill="white" data-testid={`station-${station.id}`}/>
+const transfer=({station,lines,size,minorAxis,dotGap,endPadding,rotation}:TransferStationRenderProps)=>{const metrics=getDefaultTransferMetrics(size,lines.length,dotGap,endPadding,minorAxis);return <g transform={`rotate(${rotation} ${station.x} ${station.y})`} data-testid={`transfer-${station.id}`}><rect x={station.x-metrics.width/2} y={station.y-metrics.height/2} width={metrics.width} height={metrics.height} rx={metrics.height/2} {...TRANSFER_CONTAINER_STYLE}/>{lines.map((line,index)=><circle key={line.id} cx={dotX(station.x,metrics,index)} cy={station.y} r={metrics.dotDiameter/2} fill={line.color}/>)}</g>}
+const presentation=({station,previousLines,lines,size,minorAxis,dotGap,endPadding,rotation,morphProgress,opacity,scale}:PresentationStationRenderProps)=>{const previousCount=previousLines.length;if(lines.length<2)return <g opacity={opacity} transform={`translate(${station.x} ${station.y}) scale(${scale}) translate(${-station.x} ${-station.y})`}>{ordinary({station,size})}</g>;const fromMetrics=getDefaultTransferMetrics(size,Math.max(2,previousCount),dotGap,endPadding,minorAxis),toMetrics=getDefaultTransferMetrics(size,lines.length,dotGap,endPadding,minorAxis),morph=morphProgress,width=lerp(previousCount<2?size:fromMetrics.width,toMetrics.width,morph),height=lerp(previousCount<2?size:fromMetrics.height,toMetrics.height,morph);return <g opacity={opacity} transform={`rotate(${rotation} ${station.x} ${station.y})`} data-presentation-station={station.id}>{previousCount<2&&<circle cx={station.x} cy={station.y} r={size/2} fill="white" opacity={1-morph}/>}<rect x={station.x-width/2} y={station.y-height/2} width={width} height={height} rx={height/2} {...TRANSFER_CONTAINER_STYLE} opacity={previousCount<2?morph:1}/>{lines.map((line,index)=>{const previousIndex=previousLines.findIndex(item=>item.id===line.id),fromX=previousIndex>=0&&previousCount>=2?dotX(station.x,fromMetrics,previousIndex):station.x,toX=dotX(station.x,toMetrics,index);return <circle key={line.id} cx={lerp(fromX,toX,morph)} cy={station.y} r={toMetrics.dotDiameter/2} fill={line.color} opacity={previousIndex>=0&&previousCount>=2?1:morph}/>})}</g>}
+export const DEFAULT_STATION_STYLE:StationStyleDefinition={id:'default',name:'默认站点',renderOrdinary:ordinary,renderTransfer:transfer,renderPresentation:presentation}
+const STATION_STYLES:Record<string,StationStyleDefinition>={[DEFAULT_STATION_STYLE.id]:DEFAULT_STATION_STYLE}
+export function getStationStyle(styleId:string|undefined):StationStyleDefinition{return STATION_STYLES[styleId??'default']??DEFAULT_STATION_STYLE}
+function dotX(center:number,metrics:ReturnType<typeof getDefaultTransferMetrics>,index:number){return center-metrics.width/2+metrics.horizontalPadding+metrics.dotDiameter/2+index*(metrics.dotDiameter+metrics.gap)}
+const lerp=(a:number,b:number,t:number)=>a+(b-a)*t

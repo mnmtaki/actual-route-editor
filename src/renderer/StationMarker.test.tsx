@@ -19,5 +19,15 @@ describe('station markers', () => {
     const three = renderAt('2025-01-01').getByTestId('transfer-s2')
     expect(three.querySelectorAll('circle')).toHaveLength(3)
   })
+  it('uses global station and transfer settings even when legacy object fields exist',()=>{
+    const project=structuredClone(demoProject),legacy=project.stations.find(item=>item.id==='s2')!
+    Object.assign(legacy,{stationSize:4,transferMinorAxis:8,transferEndPadding:1,transferDotGap:1})
+    Object.assign(project.settings,{stationSize:25,transferMinorAxis:31,transferEndPadding:7,transferDotGap:4})
+    const ordinary=render(<svg><StationMarker project={project} station={legacy} time="2005-01-01" selected={false} onPointerDown={()=>{}} onLabelPointerDown={()=>{}}/></svg>)
+    expect(ordinary.getByTestId('station-s2')).toHaveAttribute('r','12.5');ordinary.unmount()
+    const transfer=render(<svg><StationMarker project={project} station={legacy} time="2025-01-01" selected={false} onPointerDown={()=>{}} onLabelPointerDown={()=>{}}/></svg>).getByTestId('transfer-s2')
+    expect(transfer.querySelector('rect')).toHaveAttribute('height','31')
+    expect(transfer.querySelectorAll('circle')[0]).toHaveAttribute('r','7.5')
+  })
 })
 

@@ -1,0 +1,53 @@
+import { memo, useMemo, type Ref } from 'react'
+import type { ActualRouteProject, Line } from '../data/model'
+import { getSegmentPath } from '../geometry/path'
+import { getTransferMarkerRotation } from '../geometry/tangent'
+import { SegmentArtwork, StructureRunArtwork } from '../renderer/segmentStyles'
+import { compileElevatedRuns } from '../data/structure'
+import { getStationStyle } from '../renderer/stationStyles'
+import { StationLabel } from '../renderer/StationLabel'
+import { MapElementsLayer } from '../renderer/MapElements'
+import { getPresentationState } from './engine'
+import type { PresentationSequence } from './types'
+
+export const PresentationScene = memo(function PresentationScene({ project, sequence, time, width, height, svgRef }: { project: ActualRouteProject; sequence: PresentationSequence; time: number; width: number; height: number; svgRef?: Ref<SVGSVGElement> }) {
+  const state = useMemo(() => getPresentationState(project, sequence, time), [project, sequence, time])
+  const style = getStationStyle(project.settings.stationStyleId)
+  const lineMap = useMemo(() => new Map(project.lines.map(line => [line.id, line])), [project.lines])
+  const segmentArtwork = useMemo(() => project.geometry.segments.map(segment => ({ segment, line: lineMap.get(segment.lineId), path: getSegmentPath(project, segment) })), [project, lineMap])
+  const rotations = useMemo(() => new Map(project.stations.map(station => [station.id, getTransferMarkerRotation(project, station.id, state.historyDate)])), [project, state.historyDate])
+  const elevatedRuns = useMemo(() => compileElevatedRuns(project, new Set(project.geometry.segments.filter(segment => lineMap.get(segment.lineId)?.visible).map(segment => segment.id)), Object.fromEntries(Object.entries(state.segmentStates).map(([id, value]) => [id, { revealProgress: value.revealProgress, revealFrom: value.revealFrom, opacity: value.opacity }]))), [project, lineMap, state.segmentStates])
+  const visibleLineIds = new Set(segmentArtwork.filter(({ segment, line }) => line?.visible && (state.segmentStates[segment.id]?.revealProgress ?? 0) > 0).map(({ segment }) => segment.lineId))
+  const visibleLines = project.lines.filter(line => visibleLineIds.has(line.id))
+  const findLines = (ids: string[]) => ids.map(id => lineMap.get(id)).filter((line): line is Line => Boolean(line))
+
+  return <svg ref={svgRef} className="presentation-scene" xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox={`${state.camera.x} ${state.camera.y} ${state.camera.width} ${state.camera.height}`} preserveAspectRatio="xMidYMid slice" data-presentation-time={time.toFixed(3)} data-beat-id={state.currentBeat?.beatId ?? ''} data-global-reveal-progress={state.globalRevealProgress.toFixed(4)}>
+    <rect x={state.camera.x} y={state.camera.y} width={state.camera.width} height={state.camera.height} fill="#f3f0e9" />
+    {sequence.settings.showBackground && project.background?.visible && <image href={project.background.dataUrl} x={project.background.x} y={project.background.y} width={project.background.width} height={project.background.height} opacity={project.background.opacity} />}
+    <g data-presentation-layer="segments">{segmentArtwork.map(({ segment, line, path }) => {
+      const segmentState = state.segmentStates[segment.id]
+      if (!line?.visible || !segmentState || segmentState.revealProgress <= 0 || segmentState.opacity <= 0) return null
+      return <SegmentArtwork key={segment.id} segment={segment} line={line} path={path} lineWidth={project.settings.lineWidth} revealProgress={segmentState.revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} />
+    })}</g>
+    <g data-presentation-layer="structure-runs">{elevatedRuns.map(run => { const line = lineMap.get(run.lineId); return line ? <StructureRunArtwork key={run.id} run={run} line={line} lineWidth={project.settings.lineWidth} /> : null })}</g>    <g data-presentation-layer="stations">{project.stations.map(station => {
+      const stationState = state.stationStates[station.id]
+      if (!stationState || stationState.opacity <= 0) return null
+      const lines = findLines(stationState.lineIds), previousLines = findLines(stationState.previousLineIds)
+      return <g key={station.id} data-station-id={station.id} data-station-opacity={stationState.opacity.toFixed(4)} data-label-opacity={stationState.labelOpacity.toFixed(4)} data-transfer-progress={stationState.transferProgress.toFixed(4)} data-historical-state={stationState.historicalState}>
+        {style.renderPresentation({ station, lines, previousLines, size: project.settings.stationSize, minorAxis: project.settings.transferMinorAxis, dotGap: project.settings.transferDotGap, endPadding: project.settings.transferEndPadding, rotation: rotations.get(station.id) ?? 0, morphProgress: stationState.transferProgress, opacity: stationState.opacity, scale: stationState.scale })}
+        {sequence.settings.showLabels && project.settings.labelsVisible && !station.labelHidden && <StationLabel station={station} settings={project.settings} showForeign={sequence.settings.showForeignStationNames && project.settings.showForeignStationNames} presentation opacity={stationState.labelOpacity} />}
+      </g>
+    })}</g>
+    <MapElementsLayer project={project} presentation visibleLineIds={new Set(project.geometry.segments.filter(segment => state.segmentStates[segment.id]?.opacity > 0 && state.segmentStates[segment.id]?.revealProgress > 0).map(segment => segment.lineId))} />
+    {sequence.settings.title && <text x={state.camera.x + state.camera.width * .04} y={state.camera.y + state.camera.height * .08} className="presentation-title">{sequence.settings.title}</text>}
+    {(sequence.settings.showOperatingLength || sequence.settings.showStationCount) && <g className="presentation-statistics" data-operating-length-km={state.statistics.operatingLengthKm.toFixed(3)} data-station-count={state.statistics.stationCount}>
+      <rect x={state.camera.x + state.camera.width * .03} y={state.camera.y + state.camera.height * .79} width={state.camera.width * .39} height={state.camera.height * .17} rx={state.camera.height * .016} fill="#fffdf8" stroke="#d8d2c7" strokeWidth={state.camera.height * .002} opacity=".94" />
+      <text x={state.camera.x + state.camera.width * .05} y={state.camera.y + state.camera.height * .835} fill="#5d625f" fontSize={Math.min(state.camera.height * .022, state.camera.width * .015)}>全网</text>
+      {sequence.settings.showOperatingLength && <text x={state.camera.x + state.camera.width * .105} y={state.camera.y + state.camera.height * .835} fill="#202523" fontSize={Math.min(state.camera.height * .027, state.camera.width * .019)} fontWeight="700">运营里程 {state.statistics.operatingLengthKm.toFixed(1)} km</text>}
+      {sequence.settings.showStationCount && <text x={state.camera.x + state.camera.width * .29} y={state.camera.y + state.camera.height * .835} fill="#202523" fontSize={Math.min(state.camera.height * .027, state.camera.width * .019)} fontWeight="700">车站 {state.statistics.stationCount} 座</text>}
+      {state.lineStatistics.map((item, index) => { const line = lineMap.get(item.lineId); return line ? <g key={item.lineId} transform={`translate(${state.camera.x + state.camera.width * (.05 + (index % 2) * .18)} ${state.camera.y + state.camera.height * (.885 + Math.floor(index / 2) * .035)})`}><rect x="0" y={-state.camera.height * .018} width={state.camera.width * .014} height={state.camera.height * .024} rx={state.camera.height * .006} fill={line.color} /><text x={state.camera.width * .021} y="0" fill="#4d5350" fontSize={Math.min(state.camera.height * .019, state.camera.width * .013)}>{line.name} · {item.operatingLengthKm.toFixed(1)} km · {item.stationCount} 站</text></g> : null })}
+    </g>}
+    {sequence.settings.showDate && <g className="presentation-date"><rect x={state.camera.x + state.camera.width * .73} y={state.camera.y + state.camera.height * .865} width={state.camera.width * .235} height={state.camera.height * .095} rx={state.camera.height * .016} fill="#fffdf8" stroke="#d8d2c7" strokeWidth={state.camera.height * .002} opacity=".94" /><text x={state.camera.x + state.camera.width * .8475} y={state.camera.y + state.camera.height * .928} textAnchor="middle" fill="#202523" fontSize={Math.min(state.camera.height * .042, state.camera.width * .032)} fontWeight="700">{state.dateLabel}</text></g>}
+    {sequence.settings.showLegend && <g className="presentation-legend">{visibleLines.map((line, index) => { const lineWidth=project.settings.lineWidth; return <g key={line.id} transform={`translate(${state.camera.x + state.camera.width * .04} ${state.camera.y + state.camera.height * (.84 + index * .035)})`}><line x1="0" x2={state.camera.width * .035} stroke={line.color} strokeWidth={lineWidth * .45} strokeLinecap="round" /><text x={state.camera.width * .045} y={lineWidth * .18} className="presentation-legend-label">{line.name}</text></g> })}</g>}
+  </svg>
+})

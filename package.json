@@ -9,9 +9,20 @@
     "build:vite": "tsc -b && vite build --outDir dist-vite",
     "diagnose:offline": "node scripts/diagnose-offline.mjs dist/index.html",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:pwa": "tsc -b && node scripts/build-pwa.mjs",
+    "android:apk": "node scripts/android-apk.mjs",
+    "android:install": "node scripts/android-install.mjs",
+    "android:open": "cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "8.5.0",
+    "@capacitor/app": "8.1.1",
+    "@capacitor/core": "8.5.0",
+    "@capacitor/filesystem": "8.1.3",
+    "@capacitor/keyboard": "8.0.5",
+    "@capacitor/share": "8.0.1",
+    "@capacitor/status-bar": "8.0.3",
     "@vitejs/plugin-react": "latest",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -19,6 +30,7 @@
     "vite": "latest"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.5.0",
     "@testing-library/jest-dom": "latest",
     "@testing-library/react": "latest",
     "@types/react": "latest",

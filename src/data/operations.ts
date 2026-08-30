@@ -1,5 +1,9 @@
 import type { ActualRouteProject, ISODate, Line, Segment, Station, Waypoint } from './model'
 import { uid } from './model'
+import { assignCreatedObjectsToPhase, getOpeningPhaseDate } from './openingPhases'
+import { findSegmentProgressForPoint } from '../geometry/path'
+import { splitSegmentStructure } from './structure'
+import { labelOffsetFor } from './style'
 
 export interface Point { x: number; y: number }
 
@@ -26,38 +30,44 @@ export function createLine(project: ActualRouteProject, input: NewLineInput): { 
   return { project: next, lineId }
 }
 
-export function appendStationToLine(project: ActualRouteProject, lineId: string, point: Point, fromStationId?: string | null): { project: ActualRouteProject; stationId: string } {
+export function appendStationToLine(project: ActualRouteProject, lineId: string, point: Point, fromStationId?: string | null, openingPhaseId?: string): { project: ActualRouteProject; stationId: string } {
   const next = structuredClone(project)
   const line = requireLine(next, lineId)
   const stationId = uid('station')
-  const openedAt = line.openedAt ?? next.timeline.currentDate ?? null
+  const openedAt = getOpeningPhaseDate(next, openingPhaseId) ?? line.openedAt ?? next.timeline.currentDate ?? null
+  const labelOffset=labelOffsetFor(next.settings.defaultLabelDirection,next.settings.defaultLabelDistance)
   const station: Station = {
     id: stationId,
     name: `新车站 ${next.stations.length + 1}`,
     x: point.x,
     y: point.y,
-    labelOffsetX: 14,
-    labelOffsetY: -14,
+    labelOffsetX: labelOffset.x,
+    labelOffsetY: labelOffset.y,
   }
   next.stations.push(station)
-  addMembership(next, stationId, lineId, openedAt)
+  const membership = addMembership(next, stationId, lineId, openedAt)
   const anchor = fromStationId ?? line.stationSequence.at(-1) ?? null
   line.stationSequence.push(stationId)
-  if (anchor && anchor !== stationId) next.geometry.segments.push(makeSegment(line, anchor, stationId, openedAt))
+  const segment = anchor && anchor !== stationId ? makeSegment(line, anchor, stationId, openedAt) : null
+  if (segment) next.geometry.segments.push(segment)
+  assignCreatedObjectsToPhase(next, openingPhaseId, segment ? [segment.id] : [], membership.created ? [membership.id] : [])
   return { project: next, stationId }
 }
 
-export function connectExistingStation(project: ActualRouteProject, lineId: string, stationId: string, fromStationId?: string | null): ActualRouteProject {
+export function connectExistingStation(project: ActualRouteProject, lineId: string, stationId: string, fromStationId?: string | null, openingPhaseId?: string): ActualRouteProject {
   const next = structuredClone(project)
   const line = requireLine(next, lineId)
   if (!next.stations.some((station) => station.id === stationId)) return project
-  const openedAt = line.openedAt ?? next.timeline.currentDate ?? null
+  const openedAt = getOpeningPhaseDate(next, openingPhaseId) ?? line.openedAt ?? next.timeline.currentDate ?? null
   const anchor = fromStationId ?? line.stationSequence.at(-1) ?? null
-  addMembership(next, stationId, lineId, openedAt)
+  const membership = addMembership(next, stationId, lineId, openedAt)
   if (!line.stationSequence.includes(stationId)) line.stationSequence.push(stationId)
+  let segment: Segment | null = null
   if (anchor && anchor !== stationId && !hasSegment(next, lineId, anchor, stationId)) {
-    next.geometry.segments.push(makeSegment(line, anchor, stationId, openedAt))
+    segment = makeSegment(line, anchor, stationId, openedAt)
+    next.geometry.segments.push(segment)
   }
+  assignCreatedObjectsToPhase(next, openingPhaseId, segment ? [segment.id] : [], membership.created ? [membership.id] : [])
   return next
 }
 
@@ -80,7 +90,8 @@ export function insertStationIntoSegment(project: ActualRouteProject, segmentId:
   const line = requireLine(next, source.lineId)
   const stationId = uid('station')
   const openedAt = source.openedAt ?? line.openedAt ?? next.timeline.currentDate ?? null
-  next.stations.push({ id: stationId, name: `新车站 ${next.stations.length + 1}`, x: point.x, y: point.y, labelOffsetX: 14, labelOffsetY: -14 })
+  const labelOffset=labelOffsetFor(next.settings.defaultLabelDirection,next.settings.defaultLabelDistance)
+  next.stations.push({ id: stationId, name: `新车站 ${next.stations.length + 1}`, x: point.x, y: point.y, labelOffsetX: labelOffset.x, labelOffsetY: labelOffset.y })
   addMembership(next, stationId, line.id, openedAt)
   const insertAfter = line.stationSequence.indexOf(source.fromStationId)
   if (insertAfter >= 0) line.stationSequence.splice(insertAfter + 1, 0, stationId)
@@ -88,8 +99,9 @@ export function insertStationIntoSegment(project: ActualRouteProject, segmentId:
   const splitAt = findWaypointInsertionIndex(next, source, point)
   const before = source.waypoints.slice(0, splitAt)
   const after = source.waypoints.slice(splitAt)
-  const first: Segment = { ...source, id: uid('segment'), toStationId: stationId, waypoints: before }
-  const second: Segment = { ...source, id: uid('segment'), fromStationId: stationId, waypoints: after }
+  const structure = splitSegmentStructure(next, source, findSegmentProgressForPoint(next, source, point), new Set(before.map(item => item.id)), new Set(after.map(item => item.id)))
+  const first: Segment = { ...source, id: uid('segment'), toStationId: stationId, waypoints: before, structureType: structure.beforeType, structureNodes: structure.beforeNodes }
+  const second: Segment = { ...source, id: uid('segment'), fromStationId: stationId, waypoints: after, structureType: structure.afterType, structureNodes: structure.afterNodes }
   next.geometry.segments.splice(index, 1, first, second)
   return { project: next, stationId }
 }
@@ -99,6 +111,7 @@ export function deleteLineAndOrphans(project: ActualRouteProject, lineId: string
   next.lines = next.lines.filter((line) => line.id !== lineId)
   next.stationLineRelations = next.stationLineRelations.filter((relation) => relation.lineId !== lineId)
   next.geometry.segments = next.geometry.segments.filter((segment) => segment.lineId !== lineId)
+  next.openingPhases = next.openingPhases.filter((phase) => phase.lineId !== lineId)
   return pruneOrphanStations(next)
 }
 
@@ -118,6 +131,8 @@ export function pruneOrphanStations(project: ActualRouteProject): ActualRoutePro
   const stationIds = new Set(next.stations.map((station) => station.id))
   next.lines.forEach((line) => { line.stationSequence = line.stationSequence.filter((id) => stationIds.has(id)) })
   next.geometry.segments = next.geometry.segments.filter((segment) => stationIds.has(segment.fromStationId) && stationIds.has(segment.toStationId))
+  const segmentIds = new Set(next.geometry.segments.map(segment => segment.id)), relationIds = new Set(next.stationLineRelations.map(relation => relation.id))
+  next.openingPhases.forEach(phase => { phase.segmentIds = phase.segmentIds.filter(id => segmentIds.has(id)); phase.stationRelationIds = phase.stationRelationIds.filter(id => relationIds.has(id)); phase.overriddenSegmentIds = phase.overriddenSegmentIds?.filter(id => segmentIds.has(id)); phase.overriddenStationRelationIds = phase.overriddenStationRelationIds?.filter(id => relationIds.has(id)) })
   return next
 }
 
@@ -131,14 +146,16 @@ function requireLine(project: ActualRouteProject, lineId: string): Line {
   return line
 }
 
-function addMembership(project: ActualRouteProject, stationId: string, lineId: string, openedAt: ISODate | undefined) {
-  if (!project.stationLineRelations.some((relation) => relation.stationId === stationId && relation.lineId === lineId)) {
-    project.stationLineRelations.push({ id: uid('relation'), stationId, lineId, openedAt: openedAt ?? null, closedAt: null })
-  }
+function addMembership(project: ActualRouteProject, stationId: string, lineId: string, openedAt: ISODate | undefined): { id: string; created: boolean } {
+  const existing = project.stationLineRelations.find((relation) => relation.stationId === stationId && relation.lineId === lineId)
+  if (existing) return { id: existing.id, created: false }
+  const relation = { id: uid('relation'), stationId, lineId, openedAt: openedAt ?? null, closedAt: null }
+  project.stationLineRelations.push(relation)
+  return { id: relation.id, created: true }
 }
 
 function makeSegment(line: Line, fromStationId: string, toStationId: string, openedAt: ISODate | undefined): Segment {
-  return { id: uid('segment'), lineId: line.id, fromStationId, toStationId, mode: 'straight', waypoints: [], openedAt: openedAt ?? null, closedAt: null }
+  return { id: uid('segment'), lineId: line.id, fromStationId, toStationId, mode: 'straight', structureType: 'underground', structureNodes: [], waypoints: [], openedAt: openedAt ?? null, closedAt: null }
 }
 
 function hasSegment(project: ActualRouteProject, lineId: string, a: string, b: string): boolean {

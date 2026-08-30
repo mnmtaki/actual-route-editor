@@ -10,3 +10,25 @@ Thumbs.db
 # Local development process artifacts
 .dev-server.pid
 
+# Generated previews, diagnostics, and evidence
+dist-vite/
+dist-pwa/
+evidence/
+
+android/app/build/
+android/.gradle/
+android/.kotlin/
+release/*.apk
+release/*.aab
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+android/local.properties
+
+# One-off browser QA and evidence generators
+scripts/capture-edge-*-evidence.mjs
+scripts/generate-*-evidence.mjs
+scripts/generate-camera-trace.mjs
+scripts/measure-font-metrics-edge.mjs
+scripts/verify-*-edge.mjs

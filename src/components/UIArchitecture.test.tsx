@@ -1,0 +1,20 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { useState } from 'react'
+import { describe, expect, it, vi } from 'vitest'
+import { demoProject } from '../data/demo'
+import type { ActualRouteProject } from '../data/model'
+import { ContextActions } from './ContextActions'
+import { StyleDrawer } from './StyleDrawer'
+import { Timeline } from './Timeline'
+import { Toolbar } from './Toolbar'
+
+function StyleHarness(){const [project,setProject]=useState<ActualRouteProject>(structuredClone(demoProject));const [open,setOpen]=useState(false);return <><Toolbar canUndo={false} canRedo={false} undo={()=>{}} redo={()=>{}} fitAll={()=>{}} zoomSelection={()=>{}} importProject={()=>{}} importTopology={()=>{}} exportProject={()=>{}} exportSvg={()=>{}} importBackground={()=>{}} onNewLine={()=>{}} onStyle={()=>setOpen(true)} drawing={false} onFinish={()=>{}} onPresentation={()=>{}}/>{open&&<StyleDrawer project={project} onChange={setProject} onClose={()=>setOpen(false)}/>}<output data-testid="line-width">{project.settings.lineWidth}</output><output data-testid="existing-line-width">{project.lines[0].lineWidth ?? 'fallback'}</output></>}
+
+describe('editor information architecture',()=>{
+ it('changes the global style without writing an object field',()=>{render(<StyleHarness/>);fireEvent.click(screen.getByText('样式'));expect(screen.getByRole('dialog',{name:'全局样式'})).toBeTruthy();fireEvent.change(screen.getByRole('spinbutton',{name:'线路宽度'}),{target:{value:'21'}});expect(screen.getByTestId('line-width')).toHaveTextContent('21');expect(screen.getByTestId('existing-line-width')).toHaveTextContent('fallback');fireEvent.click(screen.getByRole('button',{name:'关闭全局样式'}));expect(screen.queryByRole('dialog',{name:'全局样式'})).toBeNull()})
+ it('keeps all global style groups and exact numeric controls in the drawer',()=>{const onChange=vi.fn();render(<StyleDrawer project={structuredClone(demoProject)} onChange={onChange} onClose={()=>{}}/>);expect(screen.getByText('线路')).toBeTruthy();expect(screen.getByText('车站')).toBeTruthy();expect(screen.getByText('站名')).toBeTruthy();fireEvent.change(screen.getByRole('spinbutton',{name:'中文站名字号'}),{target:{value:'18'}});expect(onChange.mock.calls.at(-1)?.[0].settings.stationLabelSize).toBe(18);expect(screen.queryByText('修复 Build 16 样式继承')).toBeNull()})
+ it('uses solid down triangles in every toolbar dropdown',()=>{render(<Toolbar canUndo={false} canRedo={false} undo={()=>{}} redo={()=>{}} fitAll={()=>{}} zoomSelection={()=>{}} importProject={()=>{}} importTopology={()=>{}} exportProject={()=>{}} exportSvg={()=>{}} importBackground={()=>{}} onNewLine={()=>{}} onStyle={()=>{}} drawing={false} onFinish={()=>{}} onPresentation={()=>{}}/>);expect(screen.getAllByText(/▾$/)).toHaveLength(5);expect(screen.queryByText(/⌄$/)).toBeNull()})
+ it('renders a compact Segment action bar with grouped structure and more actions',()=>{render(<ContextActions project={demoProject} selection={{type:'segment',id:'a-1'}} onExtend={()=>{}} onInsertStation={()=>{}} onAddWaypoint={()=>{}} onStraighten={()=>{}} onStructureChange={()=>{}} onSetStructureAtPoint={()=>{}} onDelete={()=>{}}/>);const bar=screen.getByRole('region',{name:'区间快捷操作'});expect(bar).toHaveClass('context-action-bar');expect(screen.getByText('＋站点')).toBeTruthy();expect(screen.getByText('＋路径点')).toBeTruthy();expect(screen.getByText('结构⌄')).toBeTruthy();expect(screen.getByLabelText('更多区间操作')).toBeTruthy()})
+ it('collapses Timeline by default when the project has no meaningful dates',()=>{const project=structuredClone(demoProject);[...project.lines,...project.stations,...project.stationLineRelations,...project.geometry.segments].forEach(item=>{item.openedAt=null;item.closedAt=null});render(<Timeline project={project} onChange={()=>{}}/>);expect(screen.getByText(/无时间数据/)).toBeTruthy();expect(screen.getByText('展开')).toBeTruthy();expect(screen.queryByLabelText('时间轴')).toBeNull()})
+ it('keeps Timeline expanded when dates exist',()=>{render(<Timeline project={structuredClone(demoProject)} onChange={()=>{}}/>);expect(screen.getByLabelText('时间轴')).toBeTruthy()})
+})

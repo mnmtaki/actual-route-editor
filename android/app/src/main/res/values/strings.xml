@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">实际走向绘制器</string>
+    <string name="title_activity_main">实际走向绘制器</string>
+    <string name="package_name">com.actualroute.editor</string>
+    <string name="custom_url_scheme">com.actualroute.editor</string>
+</resources>

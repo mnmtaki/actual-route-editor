@@ -14,6 +14,12 @@ beforeAll(() => {
 const baseProps = { selection: null, drawing: null, onSelect: vi.fn(), onCreatePoint: vi.fn(), onConnectStation: vi.fn(), onExtend: vi.fn(), onSegmentPoint: vi.fn(), onPreview: vi.fn(), onDragCommit: vi.fn(), view: { x: 0, y: 0, width: 920, height: 680 }, setView: vi.fn() }
 
 describe('direct manipulation gestures', () => {
+  it('renders every existing line with the global width and ignores legacy line overrides',()=>{
+    const project=structuredClone(demoProject);project.settings.lineWidth=30;project.lines.forEach((line,index)=>{line.lineWidth=8+index})
+    const {container}=render(<NetworkCanvas {...baseProps} project={project}/>)
+    const widths=[...container.querySelectorAll('.segment-main')].map(path=>path.getAttribute('stroke-width'))
+    expect(widths.length).toBeGreaterThan(1);expect(new Set(widths)).toEqual(new Set(['30']))
+  })
   it('drags a station directly and commits the whole drag once', () => {
     const onPreview = vi.fn(), onDragCommit = vi.fn(), setView = vi.fn()
     const { container } = render(<NetworkCanvas {...baseProps} project={demoProject} onPreview={onPreview} onDragCommit={onDragCommit} setView={setView} />)
@@ -45,6 +51,29 @@ describe('direct manipulation gestures', () => {
     expect(setView).toHaveBeenCalledTimes(1)
     expect(onDragCommit).not.toHaveBeenCalled()
   })
-})
+
+  it('drags a rotated bilingual label by world delta without moving its Station',()=>{
+    const project=structuredClone(demoProject),station=project.stations.find(item=>item.id==='s4')!;station.nameS='Linjiang';station.labelRotation=45
+    const onDragCommit=vi.fn(),{container}=render(<NetworkCanvas {...baseProps} project={project} onDragCommit={onDragCommit}/>)
+    const svg=container.querySelector('svg')!;Object.defineProperty(svg,'clientWidth',{configurable:true,value:920});vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
+    const label=container.querySelector('[data-label-rotation="45"]')!;fireEvent.pointerDown(label,{pointerId:12,clientX:station.x+station.labelOffsetX,clientY:station.y+station.labelOffsetY,bubbles:true});fireEvent.pointerMove(svg,{pointerId:12,clientX:station.x+station.labelOffsetX+30,clientY:station.y+station.labelOffsetY+20,bubbles:true});fireEvent.pointerUp(svg,{pointerId:12,clientX:0,clientY:0,bubbles:true});const moved=onDragCommit.mock.calls[0][1].stations.find((item:{id:string})=>item.id==='s4');expect(moved.x).toBe(station.x);expect(moved.y).toBe(station.y);expect(moved.labelOffsetX).toBeCloseTo(station.labelOffsetX+30);expect(moved.labelOffsetY).toBeCloseTo(station.labelOffsetY+20);expect(moved.labelRotation).toBe(45)
+  })
+  it('drags an independent Structure Node along its Segment with pointer capture', () => {
+    const project=structuredClone(demoProject),segment=project.geometry.segments.find(item=>item.id==='a-1')!
+    segment.structureNodes=[{id:'drag-node',progress:.25,structureAfter:'elevated'}]
+    const onDragCommit=vi.fn(),onPreview=vi.fn()
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} selection={{type:'structureNode',id:'drag-node',segmentId:segment.id}} onDragCommit={onDragCommit} onPreview={onPreview} />)
+    const svg=container.querySelector('svg')!
+    vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
+    const node=container.querySelector('[data-structure-node-id="drag-node"]')!
+    fireEvent.pointerDown(node,{pointerId:9,clientX:270,clientY:440,bubbles:true})
+    fireEvent.pointerMove(svg,{pointerId:9,clientX:360,clientY:370,bubbles:true})
+    fireEvent.pointerUp(svg,{pointerId:9,clientX:360,clientY:370,bubbles:true})
+    expect(SVGElement.prototype.setPointerCapture).toHaveBeenCalledWith(9)
+    expect(onDragCommit).toHaveBeenCalledTimes(1)
+    const moved=onDragCommit.mock.calls[0][1],movedNode=moved.geometry.segments.find((item:{id:string})=>item.id===segment.id).structureNodes[0]
+    expect(movedNode.progress).toBeGreaterThan(.25)
+    expect(moved.geometry.segments.find((item:{id:string})=>item.id===segment.id).waypoints).toEqual(segment.waypoints)
+  })})
 
 

@@ -14,6 +14,15 @@ beforeAll(() => {
 const baseProps = { selection: null, drawing: null, onSelect: vi.fn(), onCreatePoint: vi.fn(), onConnectStation: vi.fn(), onExtend: vi.fn(), onSegmentPoint: vi.fn(), onPreview: vi.fn(), onDragCommit: vi.fn(), view: { x: 0, y: 0, width: 920, height: 680 }, setView: vi.fn() }
 
 describe('direct manipulation gestures', () => {
+  it('shows lightweight selectable handles for the actual corners of a selected rounded Segment',()=>{
+    const project=structuredClone(demoProject),segment=project.geometry.segments.find(item=>item.id==='a-1')!,onSelect=vi.fn()
+    segment.mode='rounded';segment.waypoints=[{id:'corner-a',x:270,y:350,type:'corner',cornerRadius:20},{id:'corner-b',x:330,y:420,type:'corner',cornerRadius:70}]
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} selection={{type:'segment',id:segment.id}} onSelect={onSelect}/>)
+    const handles=[...container.querySelectorAll('[data-corner-handle="true"]')]
+    expect(handles.map(handle=>handle.getAttribute('data-waypoint-id'))).toEqual(['corner-a','corner-b'])
+    fireEvent.pointerDown(handles[0],{pointerId:13,clientX:270,clientY:350,bubbles:true})
+    expect(onSelect).toHaveBeenCalledWith({type:'waypoint',id:'corner-a',segmentId:segment.id})
+  })
   it('renders every existing line with the global width and ignores legacy line overrides',()=>{
     const project=structuredClone(demoProject);project.settings.lineWidth=30;project.lines.forEach((line,index)=>{line.lineWidth=8+index})
     const {container}=render(<NetworkCanvas {...baseProps} project={project}/>)

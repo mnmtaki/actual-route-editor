@@ -1,11 +1,23 @@
-import type { ActualRouteProject, Segment } from '../data/model'
+import type { ActualRouteProject, Segment, Waypoint } from '../data/model'
 
 export interface Point { x: number; y: number }
 export interface PathSpan { start: Point; control1: Point; control2: Point; end: Point; linear: boolean }
+export interface RoundedPoint extends Point { cornerRadius?: number }
+export interface RoundedCornerPlan {
+  pointIndex: number
+  corner: RoundedPoint
+  requestedRadius: number
+  effectiveRadius: number
+  turnAngle: number
+  trimDistance: number
+  handleLength: number
+}
+export interface SegmentRoundedCornerPlan extends RoundedCornerPlan { waypointId: string }
 
 const HANDLE_RATIO = 0.32
 const MAX_CHORD_RATIO = 0.42
 const EPSILON = 0.0001
+export const DEFAULT_CORNER_RADIUS = 42
 
 export function getSegmentPoints(project: ActualRouteProject, segment: Segment): Point[] {
   const from = project.stations.find(station => station.id === segment.fromStationId)
@@ -21,7 +33,7 @@ export function getSegmentPath(project: ActualRouteProject, segment: Segment): s
 export function getSegmentPathSpans(project: ActualRouteProject, segment: Segment): PathSpan[] {
   const points = getSegmentPoints(project, segment)
   if (points.length < 2) return []
-  if (segment.mode === 'rounded') return buildRoundedPolylineSpans(points, segment.cornerRadius ?? 42)
+  if (segment.mode === 'rounded') return buildRoundedPolylineSpans(points, segment.cornerRadius ?? DEFAULT_CORNER_RADIUS)
   if (segment.mode !== 'smooth') return points.slice(0, -1).map((start, index) => ({ start, end: points[index + 1], control1: start, control2: points[index + 1], linear: true }))
   const before = getContinuationPoint(project, segment, segment.fromStationId, points[1]) ?? reflect(points[1], points[0])
   const after = getContinuationPoint(project, segment, segment.toStationId, points.at(-2)!) ?? reflect(points.at(-2)!, points.at(-1)!)
@@ -254,9 +266,8 @@ export function getCircularFilletMetrics(radius: number, turnAngle: number): Cir
   return { radius: safeRadius, turnAngle: safeAngle, trimDistance: safeRadius * Math.tan(safeAngle / 2), handleLength: (4 / 3) * safeRadius * Math.tan(safeAngle / 4) }
 }
 
-export function buildRoundedPolylineSpans(points: Point[], requestedRadius = 42): PathSpan[] {
-  if (points.length < 2) return []
-  const plans = points.map((corner, index) => {
+export function getRoundedPolylineCornerPlans(points: RoundedPoint[], defaultRadius = DEFAULT_CORNER_RADIUS): RoundedCornerPlan[] {
+  const plans = points.map((corner, index): RoundedCornerPlan | null => {
     if (index === 0 || index === points.length - 1) return null
     const previous = points[index - 1], next = points[index + 1]
     const incomingLength = distance(previous, corner), outgoingLength = distance(corner, next)
@@ -265,8 +276,9 @@ export function buildRoundedPolylineSpans(points: Point[], requestedRadius = 42)
     const outgoing = normalize({ x: next.x - corner.x, y: next.y - corner.y })
     const turnCosine = Math.max(-1, Math.min(1, dot(incoming, outgoing)))
     if (Math.abs(1 - Math.abs(turnCosine)) < 1e-7) return null
-    const metrics = getCircularFilletMetrics(requestedRadius, Math.acos(turnCosine))
-    return { corner, incoming, outgoing, ...metrics }
+    const localRadius = Number.isFinite(corner.cornerRadius) ? Math.max(0, corner.cornerRadius!) : Math.max(0, defaultRadius)
+    const metrics = getCircularFilletMetrics(localRadius, Math.acos(turnCosine))
+    return { pointIndex: index, corner, requestedRadius: localRadius, effectiveRadius: metrics.radius, turnAngle: metrics.turnAngle, trimDistance: metrics.trimDistance, handleLength: metrics.handleLength, incoming, outgoing } as RoundedCornerPlan & { incoming: Point; outgoing: Point }
   })
   for (let legIndex = 0; legIndex < points.length - 1; legIndex += 1) {
     const startPlan = plans[legIndex], endPlan = plans[legIndex + 1]
@@ -276,16 +288,40 @@ export function buildRoundedPolylineSpans(points: Point[], requestedRadius = 42)
     const factor = legLength / occupied
     for (const plan of [startPlan, endPlan]) {
       if (!plan) continue
-      plan.radius *= factor
+      plan.effectiveRadius *= factor
       plan.trimDistance *= factor
       plan.handleLength *= factor
     }
   }
+  return plans.filter((plan): plan is RoundedCornerPlan & { incoming: Point; outgoing: Point } => Boolean(plan))
+}
+
+export function getSegmentRoundedCornerPlans(project: ActualRouteProject, segment: Segment): SegmentRoundedCornerPlan[] {
+  if (segment.mode !== 'rounded') return []
+  return getRoundedPolylineCornerPlans(getSegmentPoints(project, segment), segment.cornerRadius ?? DEFAULT_CORNER_RADIUS).flatMap(plan => {
+    const waypoint = segment.waypoints[plan.pointIndex - 1]
+    return waypoint ? [{ ...plan, waypointId: waypoint.id }] : []
+  })
+}
+
+export function getWaypointCornerPlan(project: ActualRouteProject, segment: Segment, waypoint: Pick<Waypoint, 'id'>): SegmentRoundedCornerPlan | undefined {
+  return getSegmentRoundedCornerPlans(project, segment).find(plan => plan.waypointId === waypoint.id)
+}
+
+export function buildRoundedPolylineSpans(points: RoundedPoint[], requestedRadius = DEFAULT_CORNER_RADIUS): PathSpan[] {
+  if (points.length < 2) return []
+  const planList = getRoundedPolylineCornerPlans(points, requestedRadius)
+  const plans = new Map(planList.map(plan => [plan.pointIndex, plan]))
   const spans: PathSpan[] = []
   let cursor = points[0]
   for (let index = 1; index < points.length - 1; index += 1) {
-    const plan = plans[index]
+    const plan = plans.get(index) as (RoundedCornerPlan & { incoming: Point; outgoing: Point }) | undefined
     if (!plan) continue
+    if (plan.effectiveRadius <= EPSILON || plan.trimDistance <= EPSILON) {
+      if (distance(cursor, plan.corner) > EPSILON) spans.push({ start: cursor, end: plan.corner, control1: cursor, control2: plan.corner, linear: true })
+      cursor = plan.corner
+      continue
+    }
     const entry = subtract(plan.corner, { x: plan.incoming.x * plan.trimDistance, y: plan.incoming.y * plan.trimDistance })
     const exit = add(plan.corner, { x: plan.outgoing.x * plan.trimDistance, y: plan.outgoing.y * plan.trimDistance })
     if (distance(cursor, entry) > EPSILON) spans.push({ start: cursor, end: entry, control1: cursor, control2: entry, linear: true })

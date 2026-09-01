@@ -1,1 +1,1 @@
-export const BUILD_VERSION = '2026-09-01-raster-export-29'
+export const BUILD_VERSION = '2026-09-01-square-line-badges-30'

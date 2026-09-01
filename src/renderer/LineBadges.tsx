@@ -10,12 +10,12 @@ export function LineBadgesLayer({ project, presentation = false, visibleLineIds,
 }) {
   return <g data-layer="line-badges">{project.lines.flatMap(line => (line.lineBadges ?? []).filter(badge => badge.visible).map(badge => {
     if (presentation && visibleLineIds && !visibleLineIds.has(line.id)) return null
-    const height = badge.size, width = Math.max(height, height * (.72 + [...line.name].length * .58)), radius = height * .22
+    const size=badge.size,radius=size*.22,textUnits=Math.max(1,[...line.name].reduce((total,character)=>total+(/^[\x00-\x7F]$/.test(character)?.62:1),0)),fontSize=Math.min(size*.48,size*.72/textUnits)
     return <g key={badge.id} className={`map-element line-badge ${selectedId === badge.id ? 'selected' : ''}`} data-line-badge-id={badge.id} data-line-id={line.id} transform={`translate(${badge.x} ${badge.y}) rotate(${badge.rotation})`} onPointerDown={event => onPointerDown?.(event, line, badge)}>
-      <rect x={-width / 2} y={-height / 2} width={width} height={height} rx={radius} fill={line.color} stroke="#ffffff" strokeWidth={Math.max(1.2, height * .055)} />
-      <text textAnchor="middle" dominantBaseline="central" fill="#ffffff" fontFamily="sans-serif" fontSize={height * .48} fontWeight="700">{line.name}</text>
-      {!presentation && <rect data-editor="true" x={-Math.max(width / 2, hitRadius)} y={-Math.max(height / 2, hitRadius)} width={Math.max(width, hitRadius * 2)} height={Math.max(height, hitRadius * 2)} fill="transparent" pointerEvents="all" />}
-      {!presentation && selectedId === badge.id && <rect data-editor="true" className="map-element-selection" x={-width / 2 - 5} y={-height / 2 - 5} width={width + 10} height={height + 10} rx={radius + 4} />}
+      <rect x={-size / 2} y={-size / 2} width={size} height={size} rx={radius} fill={line.color} stroke="#ffffff" strokeWidth={Math.max(1.2, size * .055)} />
+      <text textAnchor="middle" dominantBaseline="central" fill="#ffffff" fontFamily="sans-serif" fontSize={fontSize} fontWeight="700">{line.name}</text>
+      {!presentation && <rect data-editor="true" x={-Math.max(size / 2, hitRadius)} y={-Math.max(size / 2, hitRadius)} width={Math.max(size, hitRadius * 2)} height={Math.max(size, hitRadius * 2)} fill="transparent" pointerEvents="all" />}
+      {!presentation && selectedId === badge.id && <rect data-editor="true" className="map-element-selection" x={-size / 2 - 5} y={-size / 2 - 5} width={size + 10} height={size + 10} rx={radius + 4} />}
     </g>
   }))}</g>
 }

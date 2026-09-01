@@ -3,13 +3,14 @@ import { getActiveLinesAtStation } from '../timeline/active'
 import { getTransferMarkerRotation } from '../geometry/tangent'
 import { getStationStyle } from './stationStyles'
 import { StationLabel } from './StationLabel'
+import { effectiveStationStyle } from '../data/style'
 
 export function StationMarker({ project, station, time, selected, hitRadius = 24, onPointerDown, onLabelPointerDown }: {
   project: ActualRouteProject; station: Station; time: string; selected: boolean; hitRadius?: number
   onPointerDown: (event: React.PointerEvent) => void; onLabelPointerDown: (event: React.PointerEvent) => void
 }) {
   const lines = getActiveLinesAtStation(project, station.id, time)
-  const { stationSize, transferMinorAxis, transferDotGap, transferEndPadding } = project.settings
+  const { stationSize, transferMinorAxis, transferDotGap, transferEndPadding } = effectiveStationStyle(station, project.settings)
   const { stationStyleId } = project.settings
   const style = getStationStyle(stationStyleId)
   const selectionColor = lines[0]?.color ?? '#596161'

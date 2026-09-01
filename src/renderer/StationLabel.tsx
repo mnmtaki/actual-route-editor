@@ -1,9 +1,9 @@
 import type { ProjectSettings, Station } from '../data/model'
-import { effectiveLabelRotation, resolveLabelAnchor } from '../data/style'
+import { effectiveLabelRotation, effectiveStationStyle, resolveLabelAnchor } from '../data/style'
 import { getAarcLabelAlignmentOffset, getAarcLabelBlockMetrics, resolveAarcLabelAnchor } from '../import-export/aarcVisualStyle'
 
 export function StationLabel({ station, settings, showForeign, presentation=false, opacity, onPointerDown }:{ station:Station; settings:ProjectSettings; showForeign:boolean; presentation?:boolean; opacity?:number; onPointerDown?:(event:React.PointerEvent<SVGGElement>)=>void }){
-  const labelSize=settings.stationLabelSize,foreignLabelSize=settings.stationForeignLabelSize,foreignLabelGap=settings.foreignLabelGap,rotation=effectiveLabelRotation(station,settings)
+  const { labelSize, foreignLabelSize, foreignLabelGap }=effectiveStationStyle(station,settings),rotation=effectiveLabelRotation(station,settings)
   const x=station.x+station.labelOffsetX,y=station.y+station.labelOffsetY
   const foreignLines=showForeign&&station.nameS?station.nameS.split(/\r?\n/):[]
   const foreignStart=labelSize+foreignLabelGap

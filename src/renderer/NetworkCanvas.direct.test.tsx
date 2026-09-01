@@ -23,11 +23,11 @@ describe('direct manipulation gestures', () => {
     fireEvent.pointerDown(handles[0],{pointerId:13,clientX:270,clientY:350,bubbles:true})
     expect(onSelect).toHaveBeenCalledWith({type:'waypoint',id:'corner-a',segmentId:segment.id})
   })
-  it('renders every existing line with the global width and ignores legacy line overrides',()=>{
-    const project=structuredClone(demoProject);project.settings.lineWidth=30;project.lines.forEach((line,index)=>{line.lineWidth=8+index})
+  it('uses sparse explicit line width overrides and ignores legacy line fields',()=>{
+    const project=structuredClone(demoProject);project.settings.lineWidth=30;project.lines.forEach((line,index)=>{line.lineWidth=8+index});project.lines[0].styleOverrides={lineWidth:44}
     const {container}=render(<NetworkCanvas {...baseProps} project={project}/>)
     const widths=[...container.querySelectorAll('.segment-main')].map(path=>path.getAttribute('stroke-width'))
-    expect(widths.length).toBeGreaterThan(1);expect(new Set(widths)).toEqual(new Set(['30']))
+    expect(widths).toContain('44');expect(widths).toContain('30');expect(widths).not.toContain('8')
   })
   it('drags a station directly and commits the whole drag once', () => {
     const onPreview = vi.fn(), onDragCommit = vi.fn(), setView = vi.fn()

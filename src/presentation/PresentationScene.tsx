@@ -8,6 +8,7 @@ import { getStationStyle } from '../renderer/stationStyles'
 import { StationLabel } from '../renderer/StationLabel'
 import { MapElementsLayer } from '../renderer/MapElements'
 import { LineBadgesLayer } from '../renderer/LineBadges'
+import { effectiveLineWidth, effectiveStationStyle } from '../data/style'
 import { getPresentationState } from './engine'
 import type { PresentationSequence } from './types'
 
@@ -28,14 +29,14 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
     <g data-presentation-layer="segments">{segmentArtwork.map(({ segment, line, path }) => {
       const segmentState = state.segmentStates[segment.id]
       if (!line?.visible || !segmentState || segmentState.revealProgress <= 0 || segmentState.opacity <= 0) return null
-      return <SegmentArtwork key={segment.id} segment={segment} line={line} path={path} lineWidth={project.settings.lineWidth} revealProgress={segmentState.revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} />
+      return <SegmentArtwork key={segment.id} segment={segment} line={line} path={path} lineWidth={effectiveLineWidth(line, project.settings)} revealProgress={segmentState.revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} />
     })}</g>
-    <g data-presentation-layer="structure-runs">{elevatedRuns.map(run => { const line = lineMap.get(run.lineId); return line ? <StructureRunArtwork key={run.id} run={run} line={line} lineWidth={project.settings.lineWidth} /> : null })}</g>    <g data-presentation-layer="stations">{project.stations.map(station => {
+    <g data-presentation-layer="structure-runs">{elevatedRuns.map(run => { const line = lineMap.get(run.lineId); return line ? <StructureRunArtwork key={run.id} run={run} line={line} lineWidth={effectiveLineWidth(line, project.settings)} /> : null })}</g>    <g data-presentation-layer="stations">{project.stations.map(station => {
       const stationState = state.stationStates[station.id]
       if (!stationState || stationState.opacity <= 0) return null
-      const lines = findLines(stationState.lineIds), previousLines = findLines(stationState.previousLineIds)
+      const lines = findLines(stationState.lineIds), previousLines = findLines(stationState.previousLineIds), stationStyle = effectiveStationStyle(station, project.settings)
       return <g key={station.id} data-station-id={station.id} data-station-opacity={stationState.opacity.toFixed(4)} data-label-opacity={stationState.labelOpacity.toFixed(4)} data-transfer-progress={stationState.transferProgress.toFixed(4)} data-historical-state={stationState.historicalState}>
-        {style.renderPresentation({ station, lines, previousLines, size: project.settings.stationSize, minorAxis: project.settings.transferMinorAxis, dotGap: project.settings.transferDotGap, endPadding: project.settings.transferEndPadding, rotation: rotations.get(station.id) ?? 0, morphProgress: stationState.transferProgress, opacity: stationState.opacity, scale: stationState.scale })}
+        {style.renderPresentation({ station, lines, previousLines, size: stationStyle.stationSize, minorAxis: stationStyle.transferMinorAxis, dotGap: stationStyle.transferDotGap, endPadding: stationStyle.transferEndPadding, rotation: rotations.get(station.id) ?? 0, morphProgress: stationState.transferProgress, opacity: stationState.opacity, scale: stationState.scale })}
         {sequence.settings.showLabels && project.settings.labelsVisible && !station.labelHidden && <StationLabel station={station} settings={project.settings} showForeign={sequence.settings.showForeignStationNames && project.settings.showForeignStationNames} presentation opacity={stationState.labelOpacity} />}
       </g>
     })}</g>
@@ -50,6 +51,6 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
       {state.lineStatistics.map((item, index) => { const line = lineMap.get(item.lineId); return line ? <g key={item.lineId} transform={`translate(${state.camera.x + state.camera.width * (.05 + (index % 2) * .18)} ${state.camera.y + state.camera.height * (.885 + Math.floor(index / 2) * .035)})`}><rect x="0" y={-state.camera.height * .018} width={state.camera.width * .014} height={state.camera.height * .024} rx={state.camera.height * .006} fill={line.color} /><text x={state.camera.width * .021} y="0" fill="#4d5350" fontSize={Math.min(state.camera.height * .019, state.camera.width * .013)}>{line.name} · {item.operatingLengthKm.toFixed(1)} km · {item.stationCount} 站</text></g> : null })}
     </g>}
     {sequence.settings.showDate && <g className="presentation-date"><rect x={state.camera.x + state.camera.width * .73} y={state.camera.y + state.camera.height * .865} width={state.camera.width * .235} height={state.camera.height * .095} rx={state.camera.height * .016} fill="#fffdf8" stroke="#d8d2c7" strokeWidth={state.camera.height * .002} opacity=".94" /><text x={state.camera.x + state.camera.width * .8475} y={state.camera.y + state.camera.height * .928} textAnchor="middle" fill="#202523" fontSize={Math.min(state.camera.height * .042, state.camera.width * .032)} fontWeight="700">{state.dateLabel}</text></g>}
-    {sequence.settings.showLegend && <g className="presentation-legend">{visibleLines.map((line, index) => { const lineWidth=project.settings.lineWidth; return <g key={line.id} transform={`translate(${state.camera.x + state.camera.width * .04} ${state.camera.y + state.camera.height * (.84 + index * .035)})`}><line x1="0" x2={state.camera.width * .035} stroke={line.color} strokeWidth={lineWidth * .45} strokeLinecap="round" /><text x={state.camera.width * .045} y={lineWidth * .18} className="presentation-legend-label">{line.name}</text></g> })}</g>}
+    {sequence.settings.showLegend && <g className="presentation-legend">{visibleLines.map((line, index) => { const lineWidth=effectiveLineWidth(line, project.settings); return <g key={line.id} transform={`translate(${state.camera.x + state.camera.width * .04} ${state.camera.y + state.camera.height * (.84 + index * .035)})`}><line x1="0" x2={state.camera.width * .035} stroke={line.color} strokeWidth={lineWidth * .45} strokeLinecap="round" /><text x={state.camera.width * .045} y={lineWidth * .18} className="presentation-legend-label">{line.name}</text></g> })}</g>}
   </svg>
 })

@@ -1,3 +1,4 @@
+import { effectiveStationStyle } from '../data/style'
 import type { ActualRouteProject } from '../data/model'
 import { sampleSegmentNearStation } from '../geometry/path'
 import { getOrientationAnchorLine, getActiveLinesAtStation } from '../timeline/active'
@@ -19,7 +20,7 @@ export function getStationHandleStyle(project: ActualRouteProject, stationId: st
     direction = { x: -Math.sin(angle), y: Math.cos(angle) }
     if (direction.y > 0) direction = { x: -direction.x, y: -direction.y }
   }
-  const distance = Math.max(18, project.settings.stationSize / 2 + 12)
+  const distance = Math.max(18, effectiveStationStyle(station, project.settings).stationSize / 2 + 12)
   return { x: station.x + direction.x * distance, y: station.y + direction.y * distance, color: line.color }
 }
 

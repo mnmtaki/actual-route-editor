@@ -1,4 +1,4 @@
-import type { LabelDirection, ProjectSettings, Station } from './model'
+import type { LabelDirection, Line, ProjectSettings, Station, StationStyleOverrides } from './model'
 import { DEFAULT_SETTINGS } from './model'
 
 export const LABEL_DIRECTIONS: { value: LabelDirection; label: string }[] = [
@@ -9,6 +9,18 @@ const VECTORS: Record<LabelDirection, [number, number]> = { up:[0,-1], down:[0,1
 export function labelOffsetFor(direction: LabelDirection, distance: number) { const [x,y]=VECTORS[direction]; return { x:x*distance, y:y*distance } }
 export function inferLabelDirection(x:number,y:number,toleranceDegrees=12): LabelDirection | 'custom' { if(!x&&!y)return 'custom'; const angle=Math.atan2(y,x)*180/Math.PI; const candidates: [LabelDirection,number][]=[['right',0],['lower-right',45],['down',90],['lower-left',135],['left',180],['upper-left',-135],['up',-90],['upper-right',-45]]; const found=candidates.find(([,candidate])=>Math.abs((((angle-candidate)+540)%360)-180)<=toleranceDegrees); return found?.[0]??'custom' }
 export function effectiveLabelRotation(station: Station, settings: ProjectSettings){ return Number.isFinite(station.labelRotation) ? station.labelRotation! : settings.defaultStationLabelRotation }
+const positiveOverride=(value:number|undefined,fallback:number)=>Number.isFinite(value)&&value!>0?value!:fallback
+const nonNegativeOverride=(value:number|undefined,fallback:number)=>Number.isFinite(value)&&value!>=0?value!:fallback
+export function effectiveLineWidth(line:Line,settings:ProjectSettings){return positiveOverride(line.styleOverrides?.lineWidth,settings.lineWidth)}
+export function effectiveStationStyle(station:Station,settings:ProjectSettings):Required<StationStyleOverrides>{return{
+  stationSize:positiveOverride(station.styleOverrides?.stationSize,settings.stationSize),
+  transferMinorAxis:positiveOverride(station.styleOverrides?.transferMinorAxis,settings.transferMinorAxis),
+  transferEndPadding:nonNegativeOverride(station.styleOverrides?.transferEndPadding,settings.transferEndPadding),
+  transferDotGap:nonNegativeOverride(station.styleOverrides?.transferDotGap,settings.transferDotGap),
+  labelSize:positiveOverride(station.styleOverrides?.labelSize,settings.stationLabelSize),
+  foreignLabelSize:positiveOverride(station.styleOverrides?.foreignLabelSize,settings.stationForeignLabelSize),
+  foreignLabelGap:nonNegativeOverride(station.styleOverrides?.foreignLabelGap,settings.foreignLabelGap),
+}}
 export function resetVisualSettings(settings: ProjectSettings): ProjectSettings { return { ...settings, lineWidth:DEFAULT_SETTINGS.lineWidth, stationSize:DEFAULT_SETTINGS.stationSize, transferMinorAxis:DEFAULT_SETTINGS.transferMinorAxis, transferEndPadding:DEFAULT_SETTINGS.transferEndPadding, transferDotGap:DEFAULT_SETTINGS.transferDotGap, stationLabelSize:DEFAULT_SETTINGS.stationLabelSize, stationForeignLabelSize:DEFAULT_SETTINGS.stationForeignLabelSize, foreignLabelGap:DEFAULT_SETTINGS.foreignLabelGap, defaultLabelDirection:DEFAULT_SETTINGS.defaultLabelDirection, defaultLabelDistance:DEFAULT_SETTINGS.defaultLabelDistance, defaultStationLabelRotation:DEFAULT_SETTINGS.defaultStationLabelRotation } }
 export type LabelHorizontalAnchor = 'start' | 'middle' | 'end'
 export type LabelVerticalAnchor = 'above' | 'middle' | 'below'

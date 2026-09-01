@@ -1,4 +1,4 @@
-import type { ActualRouteProject, LabelDirection, LineBadge, MapElement, PresentationSettings, ProjectSettings } from '../data/model'
+import type { ActualRouteProject, LabelDirection, LineBadge, LineStyleOverrides, MapElement, PresentationSettings, ProjectSettings, StationStyleOverrides } from '../data/model'
 import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from '../data/model'
 import { normalizeISODate, normalizeRequiredDate } from '../timeline/date'
 
@@ -65,8 +65,8 @@ export function parseProjectJson(text: string): ActualRouteProject {
   const project: ActualRouteProject = {
     version: 1,
     name: typeof parsed.name === 'string' ? parsed.name : '恢复的实际走向工程',
-    stations: parsed.stations.map(station => ({ ...station, ...(typeof station.nameS === 'string' && station.nameS.length ? {nameS:station.nameS} : {}), ...normalizedDateFields(station), labelOffsetX: Number.isFinite(station.labelOffsetX) ? station.labelOffsetX : 14, labelOffsetY: Number.isFinite(station.labelOffsetY) ? station.labelOffsetY : -14, ...(typeof station.labelRotation === 'number' && Number.isFinite(station.labelRotation) ? {labelRotation:station.labelRotation} : {}) })),
-    lines: parsed.lines.map((line, index) => ({ ...line, ...normalizedDateFields(line), stationSequence: Array.isArray(line.stationSequence) ? line.stationSequence : [], ...(Array.isArray(line.lineBadges) ? {lineBadges:line.lineBadges.flatMap(value => normalizeLineBadge(value))} : {}), lineOrder: Number.isFinite(line.lineOrder) ? line.lineOrder : index, visible: line.visible !== false, locked: line.locked === true })),
+    stations: parsed.stations.map(station => { const { styleOverrides: _ignored, ...rest }=station, styleOverrides=normalizeStationStyleOverrides(station.styleOverrides); return ({ ...rest, ...(styleOverrides?{styleOverrides}:{}), ...(typeof station.nameS === 'string' && station.nameS.length ? {nameS:station.nameS} : {}), ...normalizedDateFields(station), labelOffsetX: Number.isFinite(station.labelOffsetX) ? station.labelOffsetX : 14, labelOffsetY: Number.isFinite(station.labelOffsetY) ? station.labelOffsetY : -14, ...(typeof station.labelRotation === 'number' && Number.isFinite(station.labelRotation) ? {labelRotation:station.labelRotation} : {}) })}),
+    lines: parsed.lines.map((line, index) => { const { styleOverrides: _ignored, ...rest }=line, styleOverrides=normalizeLineStyleOverrides(line.styleOverrides); return ({ ...rest, ...(styleOverrides?{styleOverrides}:{}), ...normalizedDateFields(line), stationSequence: Array.isArray(line.stationSequence) ? line.stationSequence : [], ...(Array.isArray(line.lineBadges) ? {lineBadges:line.lineBadges.flatMap(value => normalizeLineBadge(value))} : {}), lineOrder: Number.isFinite(line.lineOrder) ? line.lineOrder : index, visible: line.visible !== false, locked: line.locked === true })}),
     stationLineRelations: Array.isArray(parsed.stationLineRelations) ? parsed.stationLineRelations.map(relation => ({ ...relation, ...normalizedDateFields(relation) })) : [],
     openingPhases: Array.isArray(parsed.openingPhases) ? parsed.openingPhases.map(phase => ({ id: String(phase.id), lineId: String(phase.lineId), name: typeof phase.name === 'string' ? phase.name : undefined, openedAt: normalizeRequiredDate(phase.openedAt, today), segmentIds: Array.isArray(phase.segmentIds) ? phase.segmentIds.map(String) : [], stationRelationIds: Array.isArray(phase.stationRelationIds) ? phase.stationRelationIds.map(String) : [], revealStartStationId: typeof phase.revealStartStationId === 'string' ? phase.revealStartStationId : undefined, revealEndStationId: typeof phase.revealEndStationId === 'string' ? phase.revealEndStationId : undefined, showOverviewAfter: phase.showOverviewAfter === true, overriddenSegmentIds: Array.isArray(phase.overriddenSegmentIds) ? phase.overriddenSegmentIds.map(String) : [], overriddenStationRelationIds: Array.isArray(phase.overriddenStationRelationIds) ? phase.overriddenStationRelationIds.map(String) : [] })) : [],
     geometry: { segments: parsed.geometry.segments.map(segment => ({ ...segment, ...normalizedDateFields(segment), mode: segment.mode === 'smooth' || segment.mode === 'corner' || segment.mode === 'rounded' ? segment.mode : 'straight', ...(typeof segment.cornerRadius === 'number' && Number.isFinite(segment.cornerRadius) && segment.cornerRadius >= 0 ? {cornerRadius:segment.cornerRadius} : {}), structureType: segment.structureType === 'elevated' || segment.structureType === 'ground' ? segment.structureType : 'underground', structureNodes: Array.isArray(segment.structureNodes) ? segment.structureNodes.filter(node => node && typeof node.id === 'string').map(node => ({ id: node.id, structureAfter: node.structureAfter === 'elevated' || node.structureAfter === 'ground' ? node.structureAfter : 'underground', ...(typeof node.waypointId === 'string' ? { waypointId: node.waypointId } : {}), ...(typeof node.progress === 'number' && Number.isFinite(node.progress) ? { progress: Math.max(0, Math.min(1, node.progress)) } : {}) })) : [], waypoints: Array.isArray(segment.waypoints) ? segment.waypoints.map(waypoint => ({ ...waypoint, ...(typeof waypoint.cornerRadius === 'number' && Number.isFinite(waypoint.cornerRadius) && waypoint.cornerRadius >= 0 ? {cornerRadius:waypoint.cornerRadius} : {}) })) : [] })) },
@@ -112,6 +112,19 @@ const approximately = (value: unknown, target: number) => typeof value === 'numb
 const isLabelDirection = (value: unknown): value is LabelDirection => typeof value === 'string' && ['up','down','left','right','upper-left','upper-right','lower-left','lower-right'].includes(value)
 const finiteOr = (value: unknown, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? value : fallback
 const restoredTransferSetting = (value: unknown, withdrawnDefault: number, fallback: number) => typeof value === 'number' && Number.isFinite(value) && Math.abs(value - withdrawnDefault) > 1e-9 ? value : fallback
+function normalizeLineStyleOverrides(value: unknown): LineStyleOverrides|undefined {
+  if(!value||typeof value!=='object')return undefined
+  const raw=value as Record<string,unknown>, result:LineStyleOverrides={}
+  if(typeof raw.lineWidth==='number'&&Number.isFinite(raw.lineWidth)&&raw.lineWidth>0)result.lineWidth=raw.lineWidth
+  return Object.keys(result).length?result:undefined
+}
+function normalizeStationStyleOverrides(value: unknown): StationStyleOverrides|undefined {
+  if(!value||typeof value!=='object')return undefined
+  const raw=value as Record<string,unknown>, result:StationStyleOverrides={}
+  for(const key of ['stationSize','transferMinorAxis','labelSize','foreignLabelSize'] as const)if(typeof raw[key]==='number'&&Number.isFinite(raw[key])&&raw[key]>0)result[key]=raw[key]
+  for(const key of ['transferEndPadding','transferDotGap','foreignLabelGap'] as const)if(typeof raw[key]==='number'&&Number.isFinite(raw[key])&&raw[key]>=0)result[key]=raw[key]
+  return Object.keys(result).length?result:undefined
+}
 function normalizeMapElement(value: unknown): MapElement[] {
   if (!value || typeof value !== 'object') return []
   const item = value as Record<string, unknown>, id = typeof item.id === 'string' ? item.id : ''

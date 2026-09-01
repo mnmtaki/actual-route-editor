@@ -7,11 +7,11 @@ import { PresentationScene } from './PresentationScene'
 
 describe('presentation scene integration', () => {
   it('uses only global visual settings for legacy Build 16 objects',()=>{
-    const project=structuredClone(demoProject);project.settings.lineWidth=30;project.settings.stationSize=25;project.lines.forEach(line=>{line.lineWidth=7});project.stations.forEach(station=>{station.stationSize=4})
+    const project=structuredClone(demoProject);project.settings.lineWidth=30;project.settings.stationSize=25;project.lines.forEach(line=>{line.lineWidth=7});project.stations.forEach(station=>{station.stationSize=4});project.lines[0].styleOverrides={lineWidth:42};project.stations[0].styleOverrides={stationSize:18}
     const sequence=compilePresentation(project),time=sequence.events[0].revealStart+sequence.events[0].revealDuration
     const {container}=render(<PresentationScene project={project} sequence={sequence} time={time} width={1920} height={1080}/>)
-    expect(container.querySelector('.segment-main')).toHaveAttribute('stroke-width','30')
-    expect(container.querySelector('[data-testid^="station-"]')).toHaveAttribute('r','12.5')
+    expect(container.querySelector('.segment-main')).toHaveAttribute('stroke-width','42')
+    expect(container.querySelector('[data-testid="station-s1"]')).toHaveAttribute('r','9')
   })
   it('renders only formal map layers and an evaluated intermediate frame', () => {
     const project=structuredClone(demoProject); project.presentation={...project.presentation,growthSpeedKmPerSecond:1.4,pauseDuration:.65,cameraMode:'fixed'}

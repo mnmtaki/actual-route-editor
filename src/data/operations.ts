@@ -13,6 +13,21 @@ export interface NewLineInput {
   openedAt?: ISODate
 }
 
+export function addLineBadge(project: ActualRouteProject, lineId: string, point: Point): { project: ActualRouteProject; badgeId: string | null } {
+  const next=structuredClone(project),line=next.lines.find(item=>item.id===lineId)
+  if(!line)return {project,badgeId:null}
+  const badgeId=uid('line_badge')
+  line.lineBadges??=[]
+  line.lineBadges.push({id:badgeId,x:point.x,y:point.y,size:42,rotation:0,visible:true})
+  return {project:next,badgeId}
+}
+
+export function deleteLineBadge(project: ActualRouteProject, lineId: string, badgeId: string): ActualRouteProject {
+  const next=structuredClone(project),line=next.lines.find(item=>item.id===lineId)
+  if(line)line.lineBadges=(line.lineBadges??[]).filter(item=>item.id!==badgeId)
+  return next
+}
+
 export function createLine(project: ActualRouteProject, input: NewLineInput): { project: ActualRouteProject; lineId: string } {
   const next = structuredClone(project)
   const lineId = uid('line')
@@ -21,6 +36,7 @@ export function createLine(project: ActualRouteProject, input: NewLineInput): { 
     name: input.name.trim() || `新线路 ${next.lines.length + 1}`,
     color: input.color,
     stationSequence: [],
+    lineBadges: [],
     lineOrder: next.lines.length,
     openedAt: input.openedAt || null,
     closedAt: null,

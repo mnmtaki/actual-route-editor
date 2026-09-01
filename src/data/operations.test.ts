@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { demoProject } from './demo'
-import { appendStationToLine, connectExistingStation, createLine, deleteLineAndOrphans, insertStationIntoSegment } from './operations'
+import { addLineBadge, appendStationToLine, connectExistingStation, createLine, deleteLineAndOrphans, deleteLineBadge, insertStationIntoSegment } from './operations'
 
 describe('line-driven editing operations', () => {
+  it('adds multiple independent badges to one Line and deletes only the requested badge',()=>{let project=structuredClone(demoProject);const first=addLineBadge(project,'line-a',{x:10,y:20}),second=addLineBadge(first.project,'line-a',{x:30,y:40});project=second.project;expect(project.lines.find(line=>line.id==='line-a')?.lineBadges).toHaveLength(2);const next=deleteLineBadge(project,'line-a',first.badgeId!);expect(next.lines.find(line=>line.id==='line-a')?.lineBadges?.map(badge=>badge.id)).toEqual([second.badgeId]);expect(next.lines.some(line=>line.id==='line-a')).toBe(true)})
   it('leaves new Lines and Stations inheriting visual defaults',()=>{const source=structuredClone(demoProject);source.settings.lineWidth=23;source.settings.stationSize=8;source.settings.stationLabelSize=17;const created=createLine(source,{name:'默认样式线',color:'#123456'}),line=created.project.lines.find(item=>item.id===created.lineId)!;expect(line.lineWidth).toBeUndefined();const result=appendStationToLine(created.project,created.lineId,{x:1,y:2}),station=result.project.stations.find(item=>item.id===result.stationId)!;for(const key of ['stationSize','transferMinorAxis','transferEndPadding','transferDotGap','labelSize','foreignLabelSize','foreignLabelGap','labelRotation'])expect(station[key as keyof typeof station]).toBeUndefined()})
   it('uses the default label direction and distance without creating a rotation override',()=>{const source=structuredClone(demoProject);source.settings.defaultLabelDirection='right';source.settings.defaultLabelDistance=10;source.settings.defaultStationLabelRotation=15;const result=appendStationToLine(source,'line-a',{x:900,y:300},'s4'),station=result.project.stations.find(item=>item.id===result.stationId)!;expect(station.labelOffsetX).toBe(10);expect(station.labelOffsetY).toBe(0);expect(station.labelRotation).toBeUndefined()})
   it('makes the first created station a line member immediately', () => {
@@ -35,10 +36,13 @@ describe('line-driven editing operations', () => {
   })
 
   it('removes zero-line stations when deleting a line', () => {
-    const next = deleteLineAndOrphans(demoProject, 'line-a')
+    const project=structuredClone(demoProject);project.lines.find(line=>line.id==='line-a')!.lineBadges=[{id:'badge-a',x:10,y:20,size:42,rotation:0,visible:true}];project.lines.find(line=>line.id==='line-b')!.lineBadges=[{id:'badge-b',x:30,y:40,size:42,rotation:0,visible:true}]
+    const next = deleteLineAndOrphans(project, 'line-a')
     expect(next.stations.some((station) => station.id === 's1')).toBe(false)
     expect(next.stations.some((station) => station.id === 's2')).toBe(true)
     expect(next.stations.every((station) => next.stationLineRelations.some((relation) => relation.stationId === station.id))).toBe(true)
+    expect(next.lines.some(line=>line.lineBadges?.some(badge=>badge.id==='badge-a'))).toBe(false)
+    expect(next.lines.find(line=>line.id==='line-b')?.lineBadges?.map(badge=>badge.id)).toEqual(['badge-b'])
   })
 })
 

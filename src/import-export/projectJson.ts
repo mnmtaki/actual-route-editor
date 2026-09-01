@@ -1,4 +1,4 @@
-import type { ActualRouteProject, LabelDirection, MapElement, PresentationSettings, ProjectSettings } from '../data/model'
+import type { ActualRouteProject, LabelDirection, LineBadge, MapElement, PresentationSettings, ProjectSettings } from '../data/model'
 import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from '../data/model'
 import { normalizeISODate, normalizeRequiredDate } from '../timeline/date'
 
@@ -36,6 +36,8 @@ export function parseProjectJson(text: string): ActualRouteProject {
     worldUnitsPerKm: positiveOr(raw.worldUnitsPerKm, DEFAULT_SETTINGS.worldUnitsPerKm),
   }
   const source = (parsed.presentation ?? {}) as Partial<PresentationSettings>
+  const rawMapElements = Array.isArray(parsed.mapElements) ? parsed.mapElements as unknown[] : []
+  const legacyLineBadges = rawMapElements.flatMap(value => normalizeLegacyLineBadge(value))
   const presentation: PresentationSettings = {
     ...DEFAULT_PRESENTATION_SETTINGS,
     ...source,
@@ -63,12 +65,12 @@ export function parseProjectJson(text: string): ActualRouteProject {
   const project: ActualRouteProject = {
     version: 1,
     name: typeof parsed.name === 'string' ? parsed.name : '恢复的实际走向工程',
-    stations: parsed.stations.map(station => ({ ...station, nameS: typeof station.nameS === 'string' && station.nameS.length ? station.nameS : undefined, ...normalizedDateFields(station), labelOffsetX: Number.isFinite(station.labelOffsetX) ? station.labelOffsetX : 14, labelOffsetY: Number.isFinite(station.labelOffsetY) ? station.labelOffsetY : -14, labelRotation: typeof station.labelRotation === 'number' && Number.isFinite(station.labelRotation) ? station.labelRotation : undefined })),
-    lines: parsed.lines.map((line, index) => ({ ...line, ...normalizedDateFields(line), stationSequence: Array.isArray(line.stationSequence) ? line.stationSequence : [], lineOrder: Number.isFinite(line.lineOrder) ? line.lineOrder : index, visible: line.visible !== false, locked: line.locked === true })),
+    stations: parsed.stations.map(station => ({ ...station, ...(typeof station.nameS === 'string' && station.nameS.length ? {nameS:station.nameS} : {}), ...normalizedDateFields(station), labelOffsetX: Number.isFinite(station.labelOffsetX) ? station.labelOffsetX : 14, labelOffsetY: Number.isFinite(station.labelOffsetY) ? station.labelOffsetY : -14, ...(typeof station.labelRotation === 'number' && Number.isFinite(station.labelRotation) ? {labelRotation:station.labelRotation} : {}) })),
+    lines: parsed.lines.map((line, index) => ({ ...line, ...normalizedDateFields(line), stationSequence: Array.isArray(line.stationSequence) ? line.stationSequence : [], ...(Array.isArray(line.lineBadges) ? {lineBadges:line.lineBadges.flatMap(value => normalizeLineBadge(value))} : {}), lineOrder: Number.isFinite(line.lineOrder) ? line.lineOrder : index, visible: line.visible !== false, locked: line.locked === true })),
     stationLineRelations: Array.isArray(parsed.stationLineRelations) ? parsed.stationLineRelations.map(relation => ({ ...relation, ...normalizedDateFields(relation) })) : [],
     openingPhases: Array.isArray(parsed.openingPhases) ? parsed.openingPhases.map(phase => ({ id: String(phase.id), lineId: String(phase.lineId), name: typeof phase.name === 'string' ? phase.name : undefined, openedAt: normalizeRequiredDate(phase.openedAt, today), segmentIds: Array.isArray(phase.segmentIds) ? phase.segmentIds.map(String) : [], stationRelationIds: Array.isArray(phase.stationRelationIds) ? phase.stationRelationIds.map(String) : [], revealStartStationId: typeof phase.revealStartStationId === 'string' ? phase.revealStartStationId : undefined, revealEndStationId: typeof phase.revealEndStationId === 'string' ? phase.revealEndStationId : undefined, showOverviewAfter: phase.showOverviewAfter === true, overriddenSegmentIds: Array.isArray(phase.overriddenSegmentIds) ? phase.overriddenSegmentIds.map(String) : [], overriddenStationRelationIds: Array.isArray(phase.overriddenStationRelationIds) ? phase.overriddenStationRelationIds.map(String) : [] })) : [],
-    geometry: { segments: parsed.geometry.segments.map(segment => ({ ...segment, ...normalizedDateFields(segment), mode: segment.mode === 'smooth' || segment.mode === 'corner' || segment.mode === 'rounded' ? segment.mode : 'straight', cornerRadius: typeof segment.cornerRadius === 'number' && Number.isFinite(segment.cornerRadius) && segment.cornerRadius >= 0 ? segment.cornerRadius : undefined, structureType: segment.structureType === 'elevated' || segment.structureType === 'ground' ? segment.structureType : 'underground', structureNodes: Array.isArray(segment.structureNodes) ? segment.structureNodes.filter(node => node && typeof node.id === 'string').map(node => ({ id: node.id, structureAfter: node.structureAfter === 'elevated' || node.structureAfter === 'ground' ? node.structureAfter : 'underground', ...(typeof node.waypointId === 'string' ? { waypointId: node.waypointId } : {}), ...(typeof node.progress === 'number' && Number.isFinite(node.progress) ? { progress: Math.max(0, Math.min(1, node.progress)) } : {}) })) : [], waypoints: Array.isArray(segment.waypoints) ? segment.waypoints.map(waypoint => ({ ...waypoint, cornerRadius: typeof waypoint.cornerRadius === 'number' && Number.isFinite(waypoint.cornerRadius) && waypoint.cornerRadius >= 0 ? waypoint.cornerRadius : undefined })) : [] })) },
-    mapElements: Array.isArray(parsed.mapElements) ? parsed.mapElements.flatMap(element => normalizeMapElement(element)) : [],
+    geometry: { segments: parsed.geometry.segments.map(segment => ({ ...segment, ...normalizedDateFields(segment), mode: segment.mode === 'smooth' || segment.mode === 'corner' || segment.mode === 'rounded' ? segment.mode : 'straight', ...(typeof segment.cornerRadius === 'number' && Number.isFinite(segment.cornerRadius) && segment.cornerRadius >= 0 ? {cornerRadius:segment.cornerRadius} : {}), structureType: segment.structureType === 'elevated' || segment.structureType === 'ground' ? segment.structureType : 'underground', structureNodes: Array.isArray(segment.structureNodes) ? segment.structureNodes.filter(node => node && typeof node.id === 'string').map(node => ({ id: node.id, structureAfter: node.structureAfter === 'elevated' || node.structureAfter === 'ground' ? node.structureAfter : 'underground', ...(typeof node.waypointId === 'string' ? { waypointId: node.waypointId } : {}), ...(typeof node.progress === 'number' && Number.isFinite(node.progress) ? { progress: Math.max(0, Math.min(1, node.progress)) } : {}) })) : [], waypoints: Array.isArray(segment.waypoints) ? segment.waypoints.map(waypoint => ({ ...waypoint, ...(typeof waypoint.cornerRadius === 'number' && Number.isFinite(waypoint.cornerRadius) && waypoint.cornerRadius >= 0 ? {cornerRadius:waypoint.cornerRadius} : {}) })) : [] })) },
+    mapElements: rawMapElements.flatMap(element => normalizeMapElement(element)),
     background: parsed.background ?? null,
     timeline: { currentDate: normalizeRequiredDate(parsed.timeline?.currentDate, today), startDate: normalizeRequiredDate(parsed.timeline?.startDate, today), endDate: normalizeRequiredDate(parsed.timeline?.endDate, today), playing: false },
     presentation,
@@ -78,6 +80,12 @@ export function parseProjectJson(text: string): ActualRouteProject {
     if (!phase.revealStartStationId) delete phase.revealStartStationId
     if (!phase.revealEndStationId) delete phase.revealEndStationId
     if (!phase.showOverviewAfter) delete phase.showOverviewAfter
+  }
+  for (const legacy of legacyLineBadges) {
+    const line = project.lines.find(item => item.id === legacy.lineId)
+    if (!line || line.lineBadges?.some(item => item.id === legacy.badge.id)) continue
+    line.lineBadges ??= []
+    line.lineBadges.push(legacy.badge)
   }
   migrateLegacyStationDates(project)
   return project
@@ -109,9 +117,21 @@ function normalizeMapElement(value: unknown): MapElement[] {
   const item = value as Record<string, unknown>, id = typeof item.id === 'string' ? item.id : ''
   const x = finiteOr(item.x, 0), y = finiteOr(item.y, 0), rotation = finiteOr(item.rotation, 0), visible = item.visible !== false
   if (!id) return []
-  if (item.type === 'lineBadge' && typeof item.lineId === 'string') return [{ id, type: 'lineBadge', lineId: item.lineId, x, y, size: positiveOr(item.size, 36), rotation, visible }]
   if (item.type === 'text' && typeof item.text === 'string') return [{ id, type: 'text', x, y, text: item.text, fontSize: positiveOr(item.fontSize, 24), fontWeight: item.fontWeight === 'bold' ? 'bold' : 'normal', textAlign: item.textAlign === 'start' || item.textAlign === 'end' ? item.textAlign : 'middle', rotation, visible }]
   return []
+}
+function normalizeLineBadge(value: unknown): LineBadge[] {
+  if (!value || typeof value !== 'object') return []
+  const item=value as Record<string,unknown>,id=typeof item.id==='string'?item.id:''
+  if(!id)return []
+  return [{id,x:finiteOr(item.x,0),y:finiteOr(item.y,0),size:positiveOr(item.size,36),rotation:finiteOr(item.rotation,0),visible:item.visible!==false}]
+}
+function normalizeLegacyLineBadge(value: unknown): {lineId:string;badge:LineBadge}[] {
+  if (!value || typeof value !== 'object') return []
+  const item=value as Record<string,unknown>
+  if(item.type!=='lineBadge'||typeof item.lineId!=='string')return []
+  const badge=normalizeLineBadge(item)[0]
+  return badge?[{lineId:item.lineId,badge}]:[]
 }
 export const serializeProject = (project: ActualRouteProject) => JSON.stringify(project, null, 2)
 export function downloadText(filename: string, text: string, type: string) { const url = URL.createObjectURL(new Blob([text], { type })); const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click(); URL.revokeObjectURL(url) }

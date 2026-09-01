@@ -67,6 +67,16 @@ describe('direct manipulation gestures', () => {
     const svg=container.querySelector('svg')!;Object.defineProperty(svg,'clientWidth',{configurable:true,value:920});vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
     const label=container.querySelector('[data-label-rotation="45"]')!;fireEvent.pointerDown(label,{pointerId:12,clientX:station.x+station.labelOffsetX,clientY:station.y+station.labelOffsetY,bubbles:true});fireEvent.pointerMove(svg,{pointerId:12,clientX:station.x+station.labelOffsetX+30,clientY:station.y+station.labelOffsetY+20,bubbles:true});fireEvent.pointerUp(svg,{pointerId:12,clientX:0,clientY:0,bubbles:true});const moved=onDragCommit.mock.calls[0][1].stations.find((item:{id:string})=>item.id==='s4');expect(moved.x).toBe(station.x);expect(moved.y).toBe(station.y);expect(moved.labelOffsetX).toBeCloseTo(station.labelOffsetX+30);expect(moved.labelOffsetY).toBeCloseTo(station.labelOffsetY+20);expect(moved.labelRotation).toBe(45)
   })
+  it('selects and freely drags one Line-owned badge without moving its siblings',()=>{
+    const project=structuredClone(demoProject),line=project.lines.find(item=>item.id==='line-a')!,onSelect=vi.fn(),onDragCommit=vi.fn()
+    line.lineBadges=[{id:'badge-a',x:200,y:150,size:42,rotation:0,visible:true},{id:'badge-b',x:350,y:250,size:42,rotation:0,visible:true}]
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} onSelect={onSelect} onDragCommit={onDragCommit}/>)
+    const svg=container.querySelector('svg')!;vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
+    const badge=container.querySelector('[data-line-badge-id="badge-a"]')!
+    fireEvent.pointerDown(badge,{pointerId:14,clientX:200,clientY:150,bubbles:true});fireEvent.pointerMove(svg,{pointerId:14,clientX:275,clientY:185,bubbles:true});fireEvent.pointerUp(svg,{pointerId:14,clientX:275,clientY:185,bubbles:true})
+    expect(onSelect).toHaveBeenCalledWith({type:'lineBadge',id:'badge-a',lineId:'line-a'});expect(onDragCommit).toHaveBeenCalledTimes(1)
+    const nextLine=onDragCommit.mock.calls[0][1].lines.find((item:{id:string})=>item.id==='line-a');expect(nextLine.lineBadges.find((item:{id:string})=>item.id==='badge-a')).toMatchObject({x:275,y:185});expect(nextLine.lineBadges.find((item:{id:string})=>item.id==='badge-b')).toMatchObject({x:350,y:250})
+  })
   it('drags an independent Structure Node along its Segment with pointer capture', () => {
     const project=structuredClone(demoProject),segment=project.geometry.segments.find(item=>item.id==='a-1')!
     segment.structureNodes=[{id:'drag-node',progress:.25,structureAfter:'elevated'}]

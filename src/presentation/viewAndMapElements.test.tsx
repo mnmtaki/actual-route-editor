@@ -6,6 +6,7 @@ import { DEFAULT_PRESENTATION_SETTINGS } from '../data/model'
 import { parseProjectJson, serializeProject } from '../import-export/projectJson'
 import { exportSvg } from '../import-export/svgExport'
 import { MapElementsLayer } from '../renderer/MapElements'
+import { LineBadgesLayer } from '../renderer/LineBadges'
 import { compilePresentation } from './compiler'
 import { getPresentationState } from './engine'
 import { PresentationScene } from './PresentationScene'
@@ -56,29 +57,50 @@ describe('presentation view width and global overviews', () => {
   })
 })
 
-describe('world-space map elements', () => {
-  it('renders lineBadge and multiline text with shared artwork and exports them to SVG', () => {
+describe('world-space line badges and map elements', () => {
+  it('renders a Line-owned badge and multiline text with shared artwork and exports them to SVG', () => {
     const project=structuredClone(demoProject)
-    project.mapElements=[{id:'badge',type:'lineBadge',lineId:'line-a',x:250,y:200,size:40,rotation:12,visible:true},{id:'text',type:'text',x:400,y:220,text:'第一行\n第二行',fontSize:26,fontWeight:'bold',textAlign:'middle',rotation:-5,visible:true}]
-    const {container}=render(createElement('svg',null,createElement(MapElementsLayer,{project})))
-    expect(container.querySelector('[data-map-element-id="badge"] rect')?.getAttribute('fill')).toBe(project.lines.find(line=>line.id==='line-a')!.color)
+    project.lines.find(line=>line.id==='line-a')!.lineBadges=[{id:'badge',x:250,y:200,size:40,rotation:12,visible:true}]
+    project.mapElements=[{id:'text',type:'text',x:400,y:220,text:'第一行\n第二行',fontSize:26,fontWeight:'bold',textAlign:'middle',rotation:-5,visible:true}]
+    const {container}=render(createElement('svg',null,createElement(LineBadgesLayer,{project}),createElement(MapElementsLayer,{project})))
+    expect(container.querySelector('[data-line-badge-id="badge"] rect')?.getAttribute('fill')).toBe(project.lines.find(line=>line.id==='line-a')!.color)
     expect(container.querySelectorAll('[data-map-element-id="text"] tspan')).toHaveLength(2)
     const svg=exportSvg(container.querySelector('svg')!,true)
     expect(svg).toContain('第一行');expect(svg).toContain('第二行');expect(svg).toContain(project.lines.find(line=>line.id==='line-a')!.color)
     expect(svg).not.toContain('data-editor')
   })
 
-  it('round-trips map elements and supplies [] for legacy projects', () => {
-    const project=structuredClone(demoProject);project.mapElements=[{id:'badge',type:'lineBadge',lineId:'line-b',x:1,y:2,size:33,rotation:4,visible:true},{id:'text',type:'text',x:3,y:4,text:'说明',fontSize:18,fontWeight:'normal',textAlign:'end',rotation:0,visible:true}]
-    expect(parseProjectJson(serializeProject(project)).mapElements).toEqual(project.mapElements)
+  it('round-trips Line-owned badges and text map elements', () => {
+    const project=structuredClone(demoProject);project.lines.find(line=>line.id==='line-b')!.lineBadges=[{id:'badge',x:1,y:2,size:33,rotation:4,visible:true}];project.mapElements=[{id:'text',type:'text',x:3,y:4,text:'说明',fontSize:18,fontWeight:'normal',textAlign:'end',rotation:0,visible:true}]
+    const restored=parseProjectJson(serializeProject(project))
+    expect(restored.lines.find(line=>line.id==='line-b')!.lineBadges).toEqual(project.lines.find(line=>line.id==='line-b')!.lineBadges)
+    expect(restored.mapElements).toEqual(project.mapElements)
     const raw=JSON.parse(serializeProject(project));delete raw.mapElements
     expect(parseProjectJson(JSON.stringify(raw)).mapElements).toEqual([])
   })
 
+  it('migrates legacy mapElement lineBadge once without changing its line or coordinates',()=>{
+    const raw=JSON.parse(serializeProject(structuredClone(demoProject)))
+    raw.mapElements=[{id:'legacy-badge',type:'lineBadge',lineId:'line-a',x:123.5,y:456.25,size:42,rotation:7,visible:true},{id:'text',type:'text',x:5,y:6,text:'保留',fontSize:18,fontWeight:'normal',textAlign:'middle',rotation:0,visible:true}]
+    const migrated=parseProjectJson(JSON.stringify(raw)),badge=migrated.lines.find(line=>line.id==='line-a')!.lineBadges!.find(item=>item.id==='legacy-badge')!
+    expect(badge).toMatchObject({x:123.5,y:456.25,size:42,rotation:7,visible:true})
+    expect(migrated.mapElements).toEqual([expect.objectContaining({id:'text',type:'text'})])
+    const saved=JSON.parse(serializeProject(migrated));expect(saved.mapElements).toHaveLength(1);expect(saved.lines.find((line:{id:string})=>line.id==='line-a').lineBadges.filter((item:{id:string})=>item.id==='legacy-badge')).toHaveLength(1)
+  })
+
   it('uses the same map element layer in the presentation scene', () => {
-    const project=phasedProject();project.mapElements=[{id:'badge',type:'lineBadge',lineId:'line-a',x:250,y:200,size:40,rotation:0,visible:true},{id:'text',type:'text',x:300,y:250,text:'说明',fontSize:24,fontWeight:'normal',textAlign:'start',rotation:0,visible:true}]
+    const project=phasedProject();project.lines.find(line=>line.id==='line-a')!.lineBadges=[{id:'badge',x:250,y:200,size:40,rotation:0,visible:true}];project.mapElements=[{id:'text',type:'text',x:300,y:250,text:'说明',fontSize:24,fontWeight:'normal',textAlign:'start',rotation:0,visible:true}]
     const sequence=compilePresentation(project),time=sequence.beats[0].revealEnd
     const {container}=render(<PresentationScene project={project} sequence={sequence} time={time} width={1200} height={800}/>)
-    expect(container.querySelectorAll('[data-layer="map-elements"] [data-map-element-id]')).toHaveLength(2)
+    expect(container.querySelectorAll('[data-layer="line-badges"] [data-line-badge-id]')).toHaveLength(1)
+    expect(container.querySelectorAll('[data-layer="map-elements"] [data-map-element-id]')).toHaveLength(1)
+  })
+
+  it('keeps every badge synchronized with its owning Line name and color',()=>{
+    const project=structuredClone(demoProject),line=project.lines.find(item=>item.id==='line-a')!;line.lineBadges=[{id:'a',x:1,y:2,size:40,rotation:0,visible:true},{id:'b',x:3,y:4,size:40,rotation:0,visible:true}]
+    line.name='四号线';line.color='#123456'
+    const {container}=render(<svg><LineBadgesLayer project={project}/></svg>)
+    expect([...container.querySelectorAll('[data-line-badge-id] text')].map(item=>item.textContent)).toEqual(['四号线','四号线'])
+    expect([...container.querySelectorAll('[data-line-badge-id] rect:first-child')].map(item=>item.getAttribute('fill'))).toEqual(['#123456','#123456'])
   })
 })

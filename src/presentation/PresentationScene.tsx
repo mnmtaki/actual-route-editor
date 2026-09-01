@@ -7,6 +7,7 @@ import { compileElevatedRuns } from '../data/structure'
 import { getStationStyle } from '../renderer/stationStyles'
 import { StationLabel } from '../renderer/StationLabel'
 import { MapElementsLayer } from '../renderer/MapElements'
+import { LineBadgesLayer } from '../renderer/LineBadges'
 import { getPresentationState } from './engine'
 import type { PresentationSequence } from './types'
 
@@ -38,7 +39,8 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
         {sequence.settings.showLabels && project.settings.labelsVisible && !station.labelHidden && <StationLabel station={station} settings={project.settings} showForeign={sequence.settings.showForeignStationNames && project.settings.showForeignStationNames} presentation opacity={stationState.labelOpacity} />}
       </g>
     })}</g>
-    <MapElementsLayer project={project} presentation visibleLineIds={new Set(project.geometry.segments.filter(segment => state.segmentStates[segment.id]?.opacity > 0 && state.segmentStates[segment.id]?.revealProgress > 0).map(segment => segment.lineId))} />
+    <LineBadgesLayer project={project} presentation visibleLineIds={visibleLineIds} />
+    <MapElementsLayer project={project} presentation />
     {sequence.settings.title && <text x={state.camera.x + state.camera.width * .04} y={state.camera.y + state.camera.height * .08} className="presentation-title">{sequence.settings.title}</text>}
     {(sequence.settings.showOperatingLength || sequence.settings.showStationCount) && <g className="presentation-statistics" data-operating-length-km={state.statistics.operatingLengthKm.toFixed(3)} data-station-count={state.statistics.stationCount}>
       <rect x={state.camera.x + state.camera.width * .03} y={state.camera.y + state.camera.height * .79} width={state.camera.width * .39} height={state.camera.height * .17} rx={state.camera.height * .016} fill="#fffdf8" stroke="#d8d2c7" strokeWidth={state.camera.height * .002} opacity=".94" />

@@ -44,6 +44,7 @@ export interface PresentationCompileCache {
   segmentOpeningBeat: Record<string, number>
   segmentClosureBeat: Record<string, number>
   stationBeatIndices: Record<string, number[]>
+  stationLineOpeningBeat: Record<string, number>
   activeLineIdsByDate: Record<string, Record<string, string[]>>
   segmentLengths: Record<string, number>
 }
@@ -62,7 +63,7 @@ export interface PresentationSequence {
   cache: PresentationCompileCache
 }
 export interface SegmentPresentationState { revealProgress: number; revealFrom: 'from' | 'to'; opacity: number; strokeDashoffset: number }
-export interface StationPresentationState { opacity: number; scale: number; labelOpacity: number; previousLineIds: string[]; lineIds: string[]; transferProgress: number; historicalState: 'previous-stable' | 'current-partial' | 'future' }
+export interface StationPresentationState { opacity: number; scale: number; labelOpacity: number; previousLineIds: string[]; lineIds: string[]; visibleRelationIds: string[]; transferProgress: number; historicalState: 'previous-stable' | 'current-partial' | 'future' }
 export interface PresentationState {
   presentationTime: number
   historyDate: string

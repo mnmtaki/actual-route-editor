@@ -2,6 +2,7 @@ import type { ActualRouteProject } from '../data/model'
 import { evaluateCameraTrack } from './camera'
 import { PRESENTATION_ANIMATION, clamp, easing, inverseLineEasing } from './config'
 import { getBeatRevealFronts, getBeatRevealedDistance, getBeatSegmentRevealProgress, getStationArrivalRatio } from './reveal'
+import { stationLineKey } from './compiler'
 import type { PresentationBeat, PresentationSequence, PresentationState, StationPresentationState } from './types'
 
 export function getPresentationState(project: ActualRouteProject, sequence: PresentationSequence, presentationTime: number): PresentationState {
@@ -37,12 +38,11 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
     const labelProgress = opening ? easing.station(clamp((time - openingArrivalTime - PRESENTATION_ANIMATION.labelDelay) / PRESENTATION_ANIMATION.labelFadeDuration)) : 1
     const arrival = transition ? getStationArrivalRatio(transition, station.id) : 0
     const transitionArrivalTime = transition ? transition.revealStart + inverseLineEasing(arrival) * transition.revealDuration : 0
-    const previousLineIds = activeLineIds(sequence, station.id, transition ? dayBefore(transition.historyDate) : historyDate)
     const targetLineIds = activeLineIds(sequence, station.id, transition?.historyDate ?? historyDate)
-    const openingTransition = Boolean(transition?.eventTypes.includes('SEGMENT_OPENING'))
-    const frontHasReachedStation = !transition || !openingTransition || getBeatGlobalRevealProgress(transition, time) + 1e-6 >= arrival
-    const lineIds = frontHasReachedStation ? targetLineIds : previousLineIds
-    const transferProgress = transition && frontHasReachedStation ? easing.transfer(clamp((time - transitionArrivalTime) / PRESENTATION_ANIMATION.transferMorphDuration)) : 1
+    const previousLineIds = transition ? presentationVisibleLineIds(project,sequence,station.id,historyDate,transitionArrivalTime-1e-6) : presentationVisibleLineIds(project,sequence,station.id,historyDate,time)
+    const lineIds = presentationVisibleLineIds(project,sequence,station.id,historyDate,time)
+    const relationSetChanged=previousLineIds.length!==lineIds.length||previousLineIds.some((id,index)=>id!==lineIds[index])
+    const transferProgress = transition && relationSetChanged ? easing.transfer(clamp((time - transitionArrivalTime) / PRESENTATION_ANIMATION.transferMorphDuration)) : 1
     const openingHasStarted = !opening || time >= opening.revealStart, historicallyEligible = targetLineIds.length > 0, isClosed = !historicallyEligible && openingHasStarted
     const closingNow = Boolean(currentBeat?.type.includes('CLOSURE') && currentBeat.stationIds.includes(station.id) && previousLineIds.length > 0 && lineIds.length === 0)
     const closureOpacity = closingNow && currentBeat ? 1 - easing.transfer(clamp((time - currentBeat.revealStart) / Math.max(.000001, currentBeat.revealDuration))) : 0
@@ -50,7 +50,8 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
     const historicalState: StationPresentationState['historicalState'] = opening && time < opening.revealStart ? 'future' : transitionAnimating ? 'current-partial' : historicallyEligible ? 'previous-stable' : 'future'
     const opacity = historicalState === 'future' ? 0 : isClosed ? closureOpacity : markerProgress
     const effectiveLabelOpacity = historicalState === 'future' ? 0 : isClosed ? closureOpacity : labelProgress
-    stationStates[station.id] = { opacity, scale: PRESENTATION_ANIMATION.stationScaleFrom + (1 - PRESENTATION_ANIMATION.stationScaleFrom) * markerProgress, labelOpacity: effectiveLabelOpacity, previousLineIds, lineIds, transferProgress, historicalState }
+    const visibleRelationIds=project.stationLineRelations.filter(relation=>relation.stationId===station.id&&lineIds.includes(relation.lineId)).map(relation=>relation.id)
+    stationStates[station.id] = { opacity, scale: PRESENTATION_ANIMATION.stationScaleFrom + (1 - PRESENTATION_ANIMATION.stationScaleFrom) * markerProgress, labelOpacity: effectiveLabelOpacity, previousLineIds, lineIds, visibleRelationIds, transferProgress, historicalState }
   }
 
   const worldUnitsPerKm = project.settings.worldUnitsPerKm > 0 ? project.settings.worldUnitsPerKm : 100
@@ -69,7 +70,7 @@ export function getBeatGlobalRevealProgress(beat: PresentationBeat, time: number
 function beatSegmentProgress(beat: PresentationBeat, segmentId: string, time: number) { if (time < beat.revealStart) return 0; if (time >= beat.revealEnd) return 1; return getBeatSegmentRevealProgress(beat, segmentId, getBeatGlobalRevealProgress(beat, time)) }
 function beatSegmentDirection(beat: PresentationBeat, segmentId: string, segmentFrom: string): 'from' | 'to' { const directed = beat.branches.flat().find(item => item.segmentId === segmentId); return !directed || directed.fromStationId === segmentFrom ? 'from' : 'to' }
 function activeLineIds(sequence: PresentationSequence, stationId: string, date: string) { return sequence.cache.activeLineIdsByDate[date]?.[stationId] ?? [] }
+function presentationVisibleLineIds(project:ActualRouteProject,sequence:PresentationSequence,stationId:string,date:string,time:number){return activeLineIds(sequence,stationId,date).filter(lineId=>{const beatIndex=sequence.cache.stationLineOpeningBeat[stationLineKey(stationId,lineId)];if(beatIndex===undefined)return true;const beat=sequence.beats[beatIndex],arrival=getStationArrivalRatio(beat,stationId),arrivalTime=beat.revealStart+inverseLineEasing(arrival)*beat.revealDuration;return time+1e-9>=arrivalTime&&Boolean(project.stationLineRelations.find(relation=>relation.stationId===stationId&&relation.lineId===lineId))})}
 function active(openedAt: string | null | undefined, closedAt: string | null | undefined, date: string) { return (!openedAt || openedAt <= date) && (!closedAt || date < closedAt) }
 function historicallyVisible(openedAt: string | null | undefined, closedAt: string | null | undefined, date: string) { return active(openedAt, closedAt, date) }
-function dayBefore(date: string) { const value = new Date(`${date}T00:00:00Z`); value.setUTCDate(value.getUTCDate() - 1); return value.toISOString().slice(0, 10) }
 function formatDateLabel(date: string) { const normalized = /^\d{4}$/.test(date) ? `${date}-01-01` : /^\d{4}-\d{2}$/.test(date) ? `${date}-01` : date; return normalized ? normalized.replaceAll('-', '.') : '' }

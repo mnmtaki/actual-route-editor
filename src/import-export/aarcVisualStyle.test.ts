@@ -20,7 +20,7 @@ describe('AARC visual calibration', () => {
     expect(multipliers).toMatchObject({ lineWidth: 1.5, stationSize: 0.9, stationNameSize: 1.75, selectedWidthKey: '1.5' })
     const calibration = convertAarcVisualStyle([{ width: 1.5 }], config)!
     expect(calibration.settings.lineWidth).toBeCloseTo(22.035, 3)
-    expect(calibration.settings.stationSize).toBeCloseTo(19.998, 3)
+    expect(calibration.settings.stationSize).toBeCloseTo(14, 6)
     expect(calibration.chineseVisualHeight).toBeCloseTo(44.485, 3)
     expect(calibration.foreignVisualHeight).toBeCloseTo(30.25, 2)
     expect(calibration.settings.stationLabelSize * AARC_SVG_CHINESE_VISIBLE_HEIGHT_PER_FONT_SIZE).toBeCloseTo(44.485, 3)
@@ -31,7 +31,7 @@ describe('AARC visual calibration', () => {
     const settings = convertAarcVisualStyle([{ width: 1.5 }], config)!.settings
     expect(settings.transferMinorAxis / settings.lineWidth).toBeCloseTo(DEFAULT_SETTINGS.transferMinorAxis / DEFAULT_SETTINGS.lineWidth)
     expect(settings.transferEndPadding / settings.lineWidth).toBeCloseTo(DEFAULT_SETTINGS.transferEndPadding / DEFAULT_SETTINGS.lineWidth)
-    expect(settings.transferDotGap / settings.lineWidth).toBeCloseTo(DEFAULT_SETTINGS.transferDotGap / DEFAULT_SETTINGS.lineWidth)
+    expect(settings.transferDotGap).toBe(5)
   })
 
   it('returns no calibration when the AARC mapping is unavailable', () => {

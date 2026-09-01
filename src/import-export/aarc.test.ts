@@ -31,8 +31,9 @@ describe('AARC importer with the real 木阳 sample', () => {
   it('imports the AARC global visual calibration without scaling any world geometry', () => {
     const { project } = imported()
     expect(project.settings.lineWidth).toBeCloseTo(22.035, 3)
-    expect(project.settings.stationSize).toBeCloseTo(19.998, 3)
+    expect(project.settings.stationSize).toBeCloseTo(14, 6)
     expect(project.settings.transferMinorAxis).toBeCloseTo(23.871, 3)
+    expect(project.settings.transferDotGap).toBe(5)
     expect(project.settings.stationLabelSize).toBeCloseTo(30.68, 2)
     expect(project.settings.stationForeignLabelSize).toBeCloseTo(20.5, 1)
     const sourcePoints = new Map((rawSample.points as Array<{id:number;pos:number[]}>).map(point => [point.id, point.pos]))

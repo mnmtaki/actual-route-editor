@@ -3,7 +3,7 @@ import { DEFAULT_SETTINGS } from '../data/model'
 
 export const AARC_COORDINATE_UNIT_TO_PX = 2.36
 export const AARC_BASE_LINE_WIDTH = 14.69
-export const AARC_BASE_STATION_DIAMETER = 22.22
+export const AARC_BASE_STATION_DIAMETER = 15.5555555556
 export const AARC_BASE_CHINESE_LABEL_VISUAL_HEIGHT = 25.42
 export const AARC_FOREIGN_TO_CHINESE_VISUAL_RATIO = 0.68
 
@@ -77,7 +77,7 @@ export function convertAarcVisualStyle(lines: AarcVisualLine[], config: unknown)
       stationSize,
       transferMinorAxis: lineWidth * (DEFAULT_SETTINGS.transferMinorAxis / DEFAULT_SETTINGS.lineWidth),
       transferEndPadding: lineWidth * (DEFAULT_SETTINGS.transferEndPadding / DEFAULT_SETTINGS.lineWidth),
-      transferDotGap: lineWidth * (DEFAULT_SETTINGS.transferDotGap / DEFAULT_SETTINGS.lineWidth),
+      transferDotGap: 5,
       stationLabelSize,
       stationForeignLabelSize,
       foreignLabelGap: DEFAULT_SETTINGS.foreignLabelGap * scaleFromEditorBaseline,

@@ -27,7 +27,7 @@ describe('station markers', () => {
     expect(ordinary.getByTestId('station-s2')).toHaveAttribute('r','12.5');ordinary.unmount()
     const transfer=render(<svg><StationMarker project={project} station={legacy} time="2025-01-01" selected={false} onPointerDown={()=>{}} onLabelPointerDown={()=>{}}/></svg>).getByTestId('transfer-s2')
     expect(transfer.querySelector('rect')).toHaveAttribute('height','31')
-    expect(transfer.querySelectorAll('circle')[0]).toHaveAttribute('r','7.5')
+    expect(transfer.querySelectorAll('circle')[0]).toHaveAttribute('r','10')
   })
 })
 

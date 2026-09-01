@@ -98,3 +98,5 @@ body { min-width: 0; overscroll-behavior:none; }
   .style-drawer{border-top-color:#d8d3ca;background:#fffdf9}
   .presentation-settings{background:#fffdf9f7;border-color:#d7d2c8}
 }
+
+.raster-export-dialog{width:min(360px,100%)}.raster-size{margin:14px 0 0;padding:10px 12px;border:1px solid #d9d3c6;border-radius:8px;background:#f7f3eb;color:#4a514d;font:12px/1.5 ui-monospace,Consolas,monospace}.raster-warning{border-color:#d7a48f;background:#fff3ee;color:#934527}

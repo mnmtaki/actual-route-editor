@@ -1,0 +1,10 @@
+import { useMemo, useState } from 'react'
+import { getRasterPlan, rasterFilename, rasterizeSvg, type RasterFormat, type RasterScale } from '../import-export/rasterExport'
+import { saveBlob } from '../platform/fileIO'
+
+export function RasterExportDialog({projectName,svgText,onClose,onNotice}:{projectName:string;svgText:string;onClose:()=>void;onNotice:(message:string)=>void}){
+  const[format,setFormat]=useState<RasterFormat>('png'),[scale,setScale]=useState<RasterScale>(2),[busy,setBusy]=useState(false)
+  const plan=useMemo(()=>{try{return getRasterPlan(svgText,format,scale)}catch{return null}},[svgText,format,scale])
+  const save=async()=>{if(!plan?.safe)return;setBusy(true);try{const{blob}=await rasterizeSvg(svgText,format,scale);await saveBlob(rasterFilename(projectName,format),blob);onNotice(`${format.toUpperCase()} 已保存`);onClose()}catch(error){onNotice(error instanceof Error?error.message:'图片导出失败')}finally{setBusy(false)}}
+  return <div className="line-dialog-backdrop" data-android-back-dismiss onClick={event=>{if(event.target===event.currentTarget)onClose()}}><div className="line-dialog raster-export-dialog"><h2>导出图片</h2><label className="field"><span>格式</span><select aria-label="图片格式" value={format} onChange={event=>setFormat(event.target.value as RasterFormat)}><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="webp">WebP</option></select></label><label className="field"><span>倍率</span><select aria-label="导出倍率" value={scale} onChange={event=>setScale(Number(event.target.value) as RasterScale)}><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select></label>{plan&&<p className={plan.safe?'raster-size':'raster-size raster-warning'}>{format.toUpperCase()} · {scale}×<br/>{plan.width} × {plan.height} px{plan.error&&<><br/>{plan.error}</>}</p>}<div className="line-dialog-actions"><button onClick={onClose}>取消</button><button className="primary" disabled={busy||!plan?.safe} onClick={()=>void save()}>{busy?'正在导出…':'保存图片'}</button></div></div></div>
+}

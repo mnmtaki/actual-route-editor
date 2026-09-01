@@ -9,17 +9,25 @@ npm.cmd install
 npm.cmd run dev
 ```
 
-浏览器打开终端显示的本地地址。生产构建使用 `npm.cmd run build`，自动测试使用 `npm.cmd test`。
+浏览器打开终端显示的本地地址。正式 Web 构建使用 `npm.cmd run build:web`，自动测试使用 `npm.cmd test`。
+
+## 在线版本
+
+项目支持通过 GitHub Pages 作为纯静态网站运行。仓库连接 GitHub 并启用 Pages 的 GitHub Actions 来源后，每次推送 `main` 都会自动测试、构建并部署。在线地址格式为：
+
+`https://<GitHub 用户名>.github.io/<仓库名>/`
+
+当前仓库尚未连接 GitHub remote，因此实际网址将在创建公开仓库并首次部署后确定。本项目仍在持续开发中。
 
 ## 直接双击使用
 
-生产构建会生成一个不依赖服务器、没有外部静态资源的单文件版本：
+正式 Web 构建会生成一个不依赖服务器、没有外部静态资源的单文件版本：
 
 `dist/index.html`
 
 直接双击它即可通过 `file:///` 打开。无需启动终端，也无需运行 localhost。底图与工程文件都通过浏览器本地文件选择器读取；JSON、SVG 导出也完全在浏览器内完成。
 
-如需检查传统 Vite 多文件产物，可运行 `npm.cmd run build:vite`；它使用相对资源路径，但日常本地使用请以自包含的 `dist/index.html` 为准。
+`dist/index.html` 同时也是 GitHub Pages 部署内容。脚本、样式全部内联，部署在仓库子路径时不依赖绝对资源地址。如需检查传统 Vite 多文件产物，可运行 `npm.cmd run build:vite`；它使用相对资源路径，但日常本地使用请以自包含的 `dist/index.html` 为准。
 
 如需诊断本地单文件是否能完成首次挂载，可运行 `npm.cmd run diagnose:offline`。诊断会检查顶部工具栏、左右面板、SVG 画布和时间轴是否真实出现在 DOM 中，并输出启动错误。
 

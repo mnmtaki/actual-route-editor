@@ -3,6 +3,15 @@ import { describe, expect, it, vi } from 'vitest'
 import { demoProject } from '../data/demo'
 import { Inspector } from './Inspector'
 
+describe('Inspector line styles', () => {
+  it('selects a LineStyle on the selected line', () => {
+    const project = structuredClone(demoProject), onChange = vi.fn()
+    render(<Inspector project={project} selection={{ type: 'line', id: 'line-a' }} onChange={onChange} onDelete={() => {}} onPhasePreview={() => {}} onStartPhaseDrawing={() => {}} />)
+    fireEvent.change(screen.getByLabelText('线路样式'), { target: { value: 'elevated' } })
+    expect(onChange.mock.calls.at(-1)?.[0].lines[0].lineStyleId).toBe('elevated')
+  })
+})
+
 describe('Inspector station history editing', () => {
   it('switches a station between phase inheritance and an independent opening date without exposing relation internals', () => {
     const project=structuredClone(demoProject),onChange=vi.fn()

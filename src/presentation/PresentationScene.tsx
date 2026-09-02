@@ -9,6 +9,7 @@ import { StationLabel } from '../renderer/StationLabel'
 import { MapElementsLayer } from '../renderer/MapElements'
 import { LineBadgesLayer } from '../renderer/LineBadges'
 import { effectiveLineWidth, effectiveStationStyle } from '../data/style'
+import { getLineStyle, resolveLineStyle } from '../data/lineStyles'
 import { getStationNameAt } from '../data/stationNameHistory'
 import { getPresentationState } from './engine'
 import type { PresentationSequence } from './types'
@@ -31,9 +32,9 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
     <g data-presentation-layer="segments">{segmentArtwork.map(({ segment, line, path }) => {
       const segmentState = state.segmentStates[segment.id]
       if (!line?.visible || !segmentState || segmentState.revealProgress <= 0 || segmentState.opacity <= 0) return null
-      return <SegmentArtwork key={segment.id} segment={segment} line={line} path={path} lineWidth={effectiveLineWidth(line, project.settings)} revealProgress={segmentState.revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} />
+      return <SegmentArtwork key={segment.id} segment={segment} line={line} path={path} lineWidth={effectiveLineWidth(line, project.settings)} revealProgress={segmentState.revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} style={resolveLineStyle(project, line)} />
     })}</g>
-    <g data-presentation-layer="structure-runs">{elevatedRuns.map(run => { const line = lineMap.get(run.lineId); return line ? <StructureRunArtwork key={run.id} run={run} line={line} lineWidth={effectiveLineWidth(line, project.settings)} /> : null })}</g>    <g data-presentation-layer="stations">{project.stations.map(station => {
+    <g data-presentation-layer="structure-runs">{elevatedRuns.map(run => { const line = lineMap.get(run.lineId); return line ? <StructureRunArtwork key={run.id} run={run} line={line} lineWidth={effectiveLineWidth(line, project.settings)} style={getLineStyle(project, 'elevated')} /> : null })}</g>    <g data-presentation-layer="stations">{project.stations.map(station => {
       const stationState = state.stationStates[station.id]
       if (!stationState || stationState.opacity <= 0) return null
       const lines = findLines(stationState.lineIds), previousLines = findLines(stationState.previousLineIds), stationStyle = effectiveStationStyle(station, project.settings)

@@ -6,11 +6,35 @@ export type LabelDirection = 'up' | 'down' | 'left' | 'right' | 'upper-left' | '
 
 export interface SourceMetadata { format: 'aarc'; pointId?: number; lineId?: number; kind?: 'explicit-control-point' | 'implicit-corner'; nameP?: [number, number]; labelAnchorMode?: 'aarc-block'; stationNameFontWeight?: 'normal' | 'bold' | number }
 export interface LineStyleOverrides { lineWidth?: number }
+export type LineStyleColorMode = 'followLine' | 'custom'
+export type LineStyleWidthMode = 'ratio' | 'absolute'
+export type LineStyleLineCap = 'round' | 'butt' | 'square'
+export type LineStyleLineJoin = 'round' | 'miter' | 'bevel'
+export interface LineStyleLayer {
+  id: string
+  colorMode: LineStyleColorMode
+  color?: string
+  colorMixTarget?: string
+  colorMixAmount?: number
+  width: number
+  widthMode?: LineStyleWidthMode
+  opacity?: number
+  dash?: number[]
+  lineCap?: LineStyleLineCap
+  lineJoin?: LineStyleLineJoin
+}
+export interface LineStyle {
+  id: string
+  name: string
+  hideBaseLine?: boolean
+  layers: LineStyleLayer[]
+  builtin?: boolean
+}
 export interface StationStyleOverrides { stationSize?: number; transferMinorAxis?: number; transferEndPadding?: number; transferDotGap?: number; labelSize?: number; labelFontFamily?: string; labelFontWeight?: number; labelColor?: string; foreignLabelSize?: number; foreignLabelFontFamily?: string; foreignLabelFontWeight?: number; foreignLabelColor?: string; foreignLabelGap?: number }
 export interface StationNameHistoryEntry { id: string; effectiveAt: string | null; name: string; nameS?: string }
 export interface Station { id: string; name: string; nameS?: string; nameHistory?: StationNameHistoryEntry[]; x: number; y: number; openedAt?: ISODate; closedAt?: ISODate; stationSize?: number; transferMinorAxis?: number; transferEndPadding?: number; transferDotGap?: number; labelSize?: number; foreignLabelSize?: number; foreignLabelGap?: number; styleOverrides?: StationStyleOverrides; labelOffsetX: number; labelOffsetY: number; labelHidden?: boolean; labelRotation?: number; orientationAnchorLineId?: string; source?: SourceMetadata }
 export interface LineBadge { id: string; x: number; y: number; size: number; rotation: number; visible: boolean }
-export interface Line { id: string; name: string; color: string; lineWidth?: number; styleOverrides?: LineStyleOverrides; stationSequence: string[]; lineBadges?: LineBadge[]; lineOrder: number; openedAt?: ISODate; closedAt?: ISODate; visible: boolean; locked: boolean; source?: SourceMetadata }
+export interface Line { id: string; name: string; color: string; lineWidth?: number; styleOverrides?: LineStyleOverrides; lineStyleId?: string; stationSequence: string[]; lineBadges?: LineBadge[]; lineOrder: number; openedAt?: ISODate; closedAt?: ISODate; visible: boolean; locked: boolean; source?: SourceMetadata }
 export interface StationLineRelation { id: string; stationId: string; lineId: string; openedAt?: ISODate; closedAt?: ISODate }
 export interface OpeningPhase { id: string; lineId: string; name?: string; openedAt: string; segmentIds: string[]; stationRelationIds: string[]; revealStartStationId?: string; revealEndStationId?: string; showOverviewAfter?: boolean; overriddenSegmentIds?: string[]; overriddenStationRelationIds?: string[] }
 export interface Waypoint { id: string; x: number; y: number; type: WaypointType; cornerRadius?: number; source?: SourceMetadata }
@@ -26,7 +50,7 @@ export type PresentationCameraMode = 'fixed' | 'follow'
 export type PresentationResolution = '1920x1080' | '1080x1920' | '1280x720'
 export interface PresentationSettings { startDate: string; endDate: string; eventDuration: number; growthSpeedKmPerSecond: number; stationOpeningDuration: number; pauseDuration: number; cameraViewWidth: number; overviewAfterEachPhase: boolean; overviewHoldDuration: number; fps: 30 | 60; cameraMode: PresentationCameraMode; resolution: PresentationResolution; showLabels: boolean; showForeignStationNames: boolean; showDate: boolean; showOperatingLength: boolean; showStationCount: boolean; showBackground: boolean; showLegend: boolean; title: string }
 export interface ProjectSettings { lineWidth: number; stationSize: number; stationStyleId: string; transferMinorAxis: number; transferEndPadding: number; transferDotGap: number; stationLabelSize: number; stationLabelFontFamily: string; stationLabelFontWeight: number; stationLabelColor: string; stationForeignLabelSize: number; stationForeignLabelFontFamily: string; stationForeignLabelFontWeight: number; stationForeignLabelColor: string; foreignLabelGap: number; defaultLabelDirection: LabelDirection; defaultLabelDistance: number; defaultStationLabelRotation: number; transferHeightRatio: number; transferGapRatio: number; transferPaddingRatio: number; labelsVisible: boolean; showForeignStationNames: boolean; gridVisible: boolean; exportBackground: boolean; worldUnitsPerKm: number }
-export interface ActualRouteProject { version: 1; name: string; stations: Station[]; lines: Line[]; stationLineRelations: StationLineRelation[]; openingPhases: OpeningPhase[]; geometry: { segments: Segment[] }; mapElements?: MapElement[]; background: BackgroundImage | null; timeline: TimelineSettings; presentation: PresentationSettings; settings: ProjectSettings }
+export interface ActualRouteProject { version: 1; name: string; stations: Station[]; lines: Line[]; stationLineRelations: StationLineRelation[]; openingPhases: OpeningPhase[]; geometry: { segments: Segment[] }; mapElements?: MapElement[]; background: BackgroundImage | null; timeline: TimelineSettings; presentation: PresentationSettings; settings: ProjectSettings; styles?: LineStyle[] }
 export type Selection = { type: 'station'; id: string } | { type: 'line'; id: string } | { type: 'lineBadge'; id: string; lineId: string } | { type: 'segment'; id: string } | { type: 'waypoint'; id: string; segmentId: string } | { type: 'structureNode'; id: string; segmentId: string } | { type: 'mapElement'; id: string } | { type: 'background' } | null
 
 export const DEFAULT_STATION_LABEL_FONT_FAMILY = 'Inter, "Noto Sans SC", "Microsoft YaHei", sans-serif'

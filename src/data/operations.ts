@@ -153,7 +153,7 @@ export function splitLineAtStation(project: ActualRouteProject, input: SplitLine
   if (movedSegments.length !== movedStationIds.length - 1) return { project, newLineId: null, movedSegmentIds: [], movedStationIds: [], error: '拆分区段不是连续的一条线路，操作已取消' }
   const next = structuredClone(project), currentLine = next.lines.find(item => item.id === line.id)!
   const newLineId = uid('line')
-  next.lines.push({ id: newLineId, name: input.name.trim() || `拆分线路 ${next.lines.length + 1}`, color: input.color, stationSequence: movedStationIds, lineBadges: [], lineOrder: next.lines.length, openedAt: input.openedAt, closedAt: null, visible: true, locked: false })
+  next.lines.push({ id: newLineId, name: input.name.trim() || `拆分线路 ${next.lines.length + 1}`, color: input.color, ...(line.lineStyleId ? { lineStyleId: line.lineStyleId } : {}), stationSequence: movedStationIds, lineBadges: [], lineOrder: next.lines.length, openedAt: input.openedAt, closedAt: null, visible: true, locked: false })
   currentLine.stationSequence = retainedStationIds
   const movedSegmentIds: string[] = []
   for (const segment of next.geometry.segments) {

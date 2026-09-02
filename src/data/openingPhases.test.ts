@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { demoProject } from './demo'
 import { appendStationToLine } from './operations'
-import { createOpeningPhase, getOpeningPhasePathCandidates, markSegmentDateOverride, updateOpeningPhase } from './openingPhases'
+import { clearRelationDateOverride, createOpeningPhase, getOpeningPhasePathCandidates, markRelationDateOverride, markSegmentDateOverride, updateOpeningPhase } from './openingPhases'
 
 function project() { return structuredClone(demoProject) }
 
@@ -58,5 +58,19 @@ describe('opening phases', () => {
     const result = createOpeningPhase(base, { lineId: 'line-c', openedAt: '2026-01-01', path }).project
     expect(result.stationLineRelations.find(item => item.stationId === 's2' && item.lineId === 'line-a')?.openedAt).toBe(redDate)
     expect(result.stationLineRelations.find(item => item.stationId === 's7' && item.lineId === 'line-c')?.openedAt).toBe('2026-01-01')
+  })
+
+  it('keeps a deferred station relation out of phase synchronization until it follows the phase again', () => {
+    const base = project(), path = getOpeningPhasePathCandidates(base, 'line-a', 's1', 's4')[0]
+    const created = createOpeningPhase(base, { lineId: 'line-a', openedAt: '2020-01-01', path })
+    const relation = created.project.stationLineRelations.find(item => item.stationId === 's3' && item.lineId === 'line-a')!
+    markRelationDateOverride(created.project, relation.id)
+    relation.openedAt = '2021-06-01'
+    const updated = updateOpeningPhase(created.project, created.phaseId, { openedAt: '2020-12-18' })
+    expect(updated.stationLineRelations.find(item => item.id === relation.id)?.openedAt).toBe('2021-06-01')
+    expect(updated.openingPhases.find(item => item.id === created.phaseId)?.overriddenStationRelationIds).toContain(relation.id)
+    clearRelationDateOverride(updated, relation.id)
+    expect(updated.stationLineRelations.find(item => item.id === relation.id)?.openedAt).toBe('2020-12-18')
+    expect(updated.openingPhases.find(item => item.id === created.phaseId)?.overriddenStationRelationIds).not.toContain(relation.id)
   })
 })

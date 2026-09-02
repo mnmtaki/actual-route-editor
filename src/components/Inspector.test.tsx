@@ -4,14 +4,25 @@ import { demoProject } from '../data/demo'
 import { Inspector } from './Inspector'
 
 describe('Inspector station history editing', () => {
-  it('writes a station date to the selected Station-Line Relation instead of the spatial Station entity', () => {
+  it('switches a station between phase inheritance and an independent opening date without exposing relation internals', () => {
     const project=structuredClone(demoProject),onChange=vi.fn()
-    render(<Inspector project={project} selection={{type:'station',id:'s4'}} onChange={onChange} onDelete={()=>{}} onPhasePreview={()=>{}} onStartPhaseDrawing={()=>{}} />)
-    expect(screen.queryByLabelText('站点开通')).toBeNull()
-    fireEvent.change(screen.getByLabelText('澄川线'),{target:{value:'2026-01-01'}})
-    const next=onChange.mock.calls[0][0]
-    expect(next.stationLineRelations.find((item:{stationId:string;lineId:string})=>item.stationId==='s4'&&item.lineId==='line-a').openedAt).toBe('2026-01-01')
+    project.openingPhases=[{id:'phase-a',lineId:'line-a',openedAt:'2000-01-01',segmentIds:['a-1','a-2','a-3'],stationRelationIds:['r-a-s1','r-a-s2','r-a-s3','r-a-s4'],overriddenSegmentIds:[],overriddenStationRelationIds:[]}]
+    const view=render(<Inspector project={project} selection={{type:'station',id:'s4'}} onChange={onChange} onDelete={()=>{}} onPhasePreview={()=>{}} onStartPhaseDrawing={()=>{}} />)
+    expect(screen.getByText('车站开通')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('澄川线车站开通方式'),{target:{value:'custom'}})
+    let next=onChange.mock.calls.at(-1)![0]
+    expect(next.openingPhases[0].overriddenStationRelationIds).toContain('r-a-s4')
+    view.rerender(<Inspector project={next} selection={{type:'station',id:'s4'}} onChange={onChange} onDelete={()=>{}} onPhasePreview={()=>{}} onStartPhaseDrawing={()=>{}} />)
+    fireEvent.change(screen.getByLabelText('开通日期'),{target:{value:'2021-06-01'}})
+    next=onChange.mock.calls.at(-1)![0]
+    expect(next.stationLineRelations.find((item:{stationId:string;lineId:string})=>item.stationId==='s4'&&item.lineId==='line-a').openedAt).toBe('2021-06-01')
     expect(next.stations.find((item:{id:string})=>item.id==='s4').openedAt).toBe('2000-01-01')
+    view.rerender(<Inspector project={next} selection={{type:'station',id:'s4'}} onChange={onChange} onDelete={()=>{}} onPhasePreview={()=>{}} onStartPhaseDrawing={()=>{}} />)
+    expect(screen.getByText(/暂缓开通/)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('澄川线车站开通方式'),{target:{value:'phase'}})
+    next=onChange.mock.calls.at(-1)![0]
+    expect(next.stationLineRelations.find((item:{id:string})=>item.id==='r-a-s4').openedAt).toBe('2000-01-01')
+    expect(next.openingPhases[0].overriddenStationRelationIds).not.toContain('r-a-s4')
   })
   it('edits station label direction, distance and independent rotation without moving the Station',()=>{
     const project=structuredClone(demoProject),onChange=vi.fn()

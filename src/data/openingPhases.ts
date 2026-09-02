@@ -78,6 +78,16 @@ export function markRelationDateOverride(project: ActualRouteProject, relationId
   for (const phase of project.openingPhases) if (phase.stationRelationIds.includes(relationId) && !phase.overriddenStationRelationIds?.includes(relationId)) phase.overriddenStationRelationIds = [...(phase.overriddenStationRelationIds ?? []), relationId]
 }
 
+/** Restores one station's inherited opening date without creating another source of truth. */
+export function clearRelationDateOverride(project: ActualRouteProject, relationId: string): void {
+  for (const phase of project.openingPhases) {
+    if (!phase.stationRelationIds.includes(relationId)) continue
+    phase.overriddenStationRelationIds = (phase.overriddenStationRelationIds ?? []).filter(id => id !== relationId)
+    const relation = project.stationLineRelations.find(item => item.id === relationId)
+    if (relation) relation.openedAt = phase.openedAt
+  }
+}
+
 export function phaseForSegment(project: ActualRouteProject, segmentId: string) { return project.openingPhases.find(phase => phase.segmentIds.includes(segmentId)) }
 export function phaseForRelation(project: ActualRouteProject, relationId: string) { return project.openingPhases.find(phase => phase.stationRelationIds.includes(relationId)) }
 

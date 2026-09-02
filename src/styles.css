@@ -97,6 +97,7 @@ button.active,button.primary{background:var(--accent);border-color:#cfa12d;color
 .field{color:#707671}.field input,.field select,.field textarea{border-color:#dad6cd;background:#fff;color:#2d312f}.field input:focus,.field select:focus,.field textarea:focus{outline:2px solid #ebcc74;outline-offset:1px}
 .danger{color:#a5483e;border-color:#e7c8c3;background:#fff7f5}
 .relation-list,.opening-phases{border-color:#e4dfd6;background:#faf7f1}
+.station-opening-row{display:grid;gap:8px;padding:10px 0;border-top:1px solid #e7e2d9}.station-opening-row:first-of-type{border-top:0}.station-opening-row strong{color:#39403b;font-size:12px}.deferred-opening-note{margin:0;color:#9a6e25}
 .opening-phases-title strong,.visual-style-panel h4{color:#343936}
 .opening-phase-row{border-top-color:#e7e2d9}.opening-phase-row>div span{color:#7f8581}
 .opening-phase-row input{border-color:#d9d5cc;background:#fff;color:#303532;color-scheme:light}

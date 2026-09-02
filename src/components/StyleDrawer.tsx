@@ -4,10 +4,10 @@ import { CHINESE_FONT_PRESETS, ColorControl, FontFamilyControl, FontWeightContro
 
 const StyleNumber=({label,value,min,max,step,onChange}:{label:string;value:number;min:number;max:number;step:number;onChange:(value:number)=>void})=><label className="style-range"><span>{label}</span><div><input aria-label={`${label}滑块`} type="range" min={min} max={max} step={step} value={Math.max(min,Math.min(max,value))} onChange={event=>onChange(Number(event.target.value))}/><input aria-label={label} className="style-number" type="number" step={step} value={value} onChange={event=>{const next=Number(event.target.value);if(Number.isFinite(next))onChange(next)}}/></div></label>
 
-export function StyleDrawer({project,onChange,onClose}:{project:ActualRouteProject;onChange:(project:ActualRouteProject)=>void;onClose:()=>void}){
+export function StyleDrawer({project,onChange,onClose,embedded=false}:{project:ActualRouteProject;onChange:(project:ActualRouteProject)=>void;onClose:()=>void;embedded?:boolean}){
   const patch=(mutate:(next:ActualRouteProject)=>void)=>{const next=structuredClone(project);mutate(next);onChange(next)}
   const setNumber=(key:keyof ActualRouteProject['settings'],value:number)=>patch(next=>{(next.settings[key] as number)=value})
-  return <><button data-android-back-dismiss className="style-drawer-scrim" aria-label="关闭全局样式面板" onClick={onClose}/><aside className="style-drawer" role="dialog" aria-modal="true" aria-label="全局样式">
+  const panel=<aside className={`style-drawer${embedded?' style-drawer-embedded':''}`} role={embedded?undefined:'dialog'} aria-modal={embedded?undefined:true} aria-label="全局样式">
     <header><div><h2>全局样式</h2><span className="panel-subtitle">修改后立即应用到整张线路图</span></div><button className="icon-button" aria-label="关闭全局样式" onClick={onClose}>×</button></header>
     <div className="style-drawer-body">
       <details open><summary>线路</summary><StyleNumber label="线路宽度" value={project.settings.lineWidth} min={6} max={40} step={.5} onChange={value=>setNumber('lineWidth',value)}/></details>
@@ -16,5 +16,6 @@ export function StyleDrawer({project,onChange,onClose}:{project:ActualRouteProje
       <details open><summary>显示与比例</summary><label className="style-range"><span>距离比例</span><div><input aria-label="每公里地图单位" type="number" min="0.001" step="1" value={project.settings.worldUnitsPerKm} onChange={event=>{const value=Number(event.target.value);if(value>0)setNumber('worldUnitsPerKm',value)}}/><output>单位 / km</output></div></label><label className="toggle-row">显示网格<input type="checkbox" checked={project.settings.gridVisible} onChange={event=>patch(next=>{next.settings.gridVisible=event.target.checked})}/></label><label className="toggle-row">显示全部站名<input type="checkbox" checked={project.settings.labelsVisible} onChange={event=>patch(next=>{next.settings.labelsVisible=event.target.checked})}/></label><label className="toggle-row">显示外文站名<input type="checkbox" checked={project.settings.showForeignStationNames} onChange={event=>patch(next=>{next.settings.showForeignStationNames=event.target.checked})}/></label>{project.background&&<><label className="toggle-row">显示底图<input type="checkbox" checked={project.background.visible} onChange={event=>patch(next=>{next.background!.visible=event.target.checked})}/></label><label className="toggle-row">锁定底图<input type="checkbox" checked={project.background.locked} onChange={event=>patch(next=>{next.background!.locked=event.target.checked})}/></label></>}</details>
       <button className="reset-style" onClick={()=>patch(next=>{next.settings=resetVisualSettings(next.settings)})}>恢复默认样式</button>
     </div>
-  </aside></>
+  </aside>
+  return embedded ? panel : <><button data-android-back-dismiss className="style-drawer-scrim" aria-label="关闭全局样式面板" onClick={onClose}/>{panel}</>
 }

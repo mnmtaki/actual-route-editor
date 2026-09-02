@@ -4,6 +4,7 @@ import { LinePanel } from './LinePanel'
 import { StyleDrawer } from './StyleDrawer'
 import { Inspector } from './Inspector'
 import type { OpeningPhasePath } from '../data/openingPhases'
+import { withoutBackground } from '../data/background'
 
 export type MobileDrawerId = 'lines' | 'history' | 'style' | 'elements' | 'settings' | 'export' | 'inspector'
 
@@ -16,15 +17,16 @@ const entries: Array<{ id: MobileDrawerId; label: string }> = [
   { id: 'export', label: '导出' },
 ]
 
-export function MobileShell({ project, selection, activeLineId, onSelectLine, onChange, onAddLine, onOpenPresentation, onAddText, onImportProject, onImportBackground, onExportProject, onExportSvg, onExportImage, onShareProject, onShareSvg, onFitAll, onZoomSelection, onDeleteSelection, onAddLineBadge, onPhasePreview, onStartPhaseDrawing, canUndo, canRedo, onUndo, onRedo, nativeFiles = false }: {
+export function MobileShell({ project, selection, activeLineId, onSelectLine, onChange, onAddLine, onOpenPresentation, onAddText, onImportProject, onImportBackground, onRemoveBackground, onExportProject, onExportSvg, onExportImage, onShareProject, onShareSvg, onFitAll, onZoomSelection, onDeleteSelection, onAddLineBadge, onPhasePreview, onStartPhaseDrawing, canUndo, canRedo, onUndo, onRedo, nativeFiles = false }: {
   project: ActualRouteProject; selection: Selection; activeLineId: string | null; onSelectLine: (id: string) => void; onChange: (project: ActualRouteProject) => void; onAddLine: () => void
-  onOpenPresentation: () => void; onAddText: () => void; onImportProject: () => void; onImportBackground: () => void; onExportProject: () => void; onExportSvg: () => void; onExportImage: () => void; onShareProject: () => void; onShareSvg: () => void; onFitAll: () => void; onZoomSelection: () => void
+  onOpenPresentation: () => void; onAddText: () => void; onImportProject: () => void; onImportBackground: () => void; onRemoveBackground?: () => boolean; onExportProject: () => void; onExportSvg: () => void; onExportImage: () => void; onShareProject: () => void; onShareSvg: () => void; onFitAll: () => void; onZoomSelection: () => void
   onDeleteSelection: () => void; onAddLineBadge: (lineId: string) => void; onPhasePreview: (path: OpeningPhasePath | null) => void; onStartPhaseDrawing: (phaseId: string, lineId: string, stationId: string | null) => void
   canUndo: boolean; canRedo: boolean; onUndo: () => void; onRedo: () => void; nativeFiles?: boolean
 }) {
   const [active, setActive] = useState<MobileDrawerId | null>(null)
   const close = () => setActive(null)
   const selectLine = (id: string) => { onSelectLine(id); close() }
+  const removeBackground=()=>{if(onRemoveBackground)return onRemoveBackground();if(!project.background)return false;if(!window.confirm('删除当前底图？\n删除后将从当前工程中移除底图，不影响线路和车站。'))return false;onChange(withoutBackground(project));return true}
   const activeLabel = active === 'inspector' ? '属性' : entries.find(entry => entry.id === active)?.label
   useEffect(() => {
     const viewport = window.visualViewport
@@ -46,8 +48,8 @@ export function MobileShell({ project, selection, activeLineId, onSelectLine, on
         {active === 'history' && <section className="mobile-drawer-section mobile-history"><button className="primary" onClick={() => { onOpenPresentation(); close() }}>打开发展史演示</button><div className="mobile-history-list">{[...project.openingPhases].sort((a,b)=>a.openedAt.localeCompare(b.openedAt)||a.id.localeCompare(b.id)).map(phase=>{const line=project.lines.find(item=>item.id===phase.lineId);return <button key={phase.id} onClick={()=>{onSelectLine(phase.lineId);setActive('inspector')}}><time>{phase.openedAt}</time><strong>{phase.name||'未命名阶段'}</strong><span>{line?.name||'未知线路'}</span></button>})}</div>{!project.openingPhases.length&&<p>尚未建立开通阶段；可在线路属性中添加。</p>}</section>}
         {active === 'style' && <StyleDrawer embedded project={project} onChange={onChange} onClose={close}/>}
         {active === 'elements' && <section className="mobile-drawer-section"><p>在地图中心添加文字后，可直接拖动位置。</p><button className="primary" onClick={() => { onAddText(); close() }}>添加自由文本</button></section>}
-        {active === 'settings' && <section className="mobile-drawer-section"><button onClick={() => { onFitAll(); close() }}>适应全部</button><button onClick={() => { onZoomSelection(); close() }}>缩放到选择</button><button onClick={() => { onImportBackground(); close() }}>导入底图</button></section>}
-        {active === 'export' && <section className="mobile-drawer-section"><button onClick={() => { onImportProject(); close() }}>导入工程 / AARC</button><button onClick={() => { onImportBackground(); close() }}>导入底图</button><button onClick={() => { onExportProject(); close() }}>{nativeFiles ? '保存 JSON 到手机' : '导出 JSON'}</button><button onClick={() => { onExportSvg(); close() }}>{nativeFiles ? '保存 SVG 到手机' : '导出 SVG'}</button><button onClick={() => { onExportImage(); close() }}>导出图片…</button><button onClick={() => { onShareProject(); close() }}>分享 JSON</button><button onClick={() => { onShareSvg(); close() }}>分享 SVG</button></section>}
+        {active === 'settings' && <section className="mobile-drawer-section"><button onClick={() => { onFitAll(); close() }}>适应全部</button><button onClick={() => { onZoomSelection(); close() }}>缩放到选择</button><button onClick={() => { onImportBackground(); close() }}>导入底图</button>{project.background&&<button className="danger" onClick={() => { if(removeBackground()) close() }}>删除底图</button>}</section>}
+        {active === 'export' && <section className="mobile-drawer-section"><button onClick={() => { onImportProject(); close() }}>导入工程 / AARC</button><button onClick={() => { onImportBackground(); close() }}>导入底图</button>{project.background&&<button className="danger" onClick={() => { if(removeBackground()) close() }}>删除底图</button>}<button onClick={() => { onExportProject(); close() }}>{nativeFiles ? '保存 JSON 到手机' : '导出 JSON'}</button><button onClick={() => { onExportSvg(); close() }}>{nativeFiles ? '保存 SVG 到手机' : '导出 SVG'}</button><button onClick={() => { onExportImage(); close() }}>导出图片…</button><button onClick={() => { onShareProject(); close() }}>分享 JSON</button><button onClick={() => { onShareSvg(); close() }}>分享 SVG</button></section>}
       </div>
     </aside></>}
   </div>

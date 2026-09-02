@@ -24,7 +24,8 @@ export interface AarcVisualMultipliers {
 export interface AarcVisualCalibration {
   settings: Pick<ProjectSettings,
     'lineWidth' | 'stationSize' | 'transferMinorAxis' | 'transferEndPadding' |
-    'transferDotGap' | 'stationLabelSize' | 'stationForeignLabelSize' | 'foreignLabelGap'>
+    'transferDotGap' | 'stationLabelSize' | 'stationLabelFontFamily' | 'stationLabelFontWeight' | 'stationLabelColor' |
+    'stationForeignLabelSize' | 'stationForeignLabelFontFamily' | 'stationForeignLabelFontWeight' | 'stationForeignLabelColor' | 'foreignLabelGap'>
   multipliers: AarcVisualMultipliers
   chineseVisualHeight: number
   foreignVisualHeight: number
@@ -71,6 +72,7 @@ export function convertAarcVisualStyle(lines: AarcVisualLine[], config: unknown)
   const stationLabelSize = chineseVisualHeight / AARC_SVG_CHINESE_VISIBLE_HEIGHT_PER_FONT_SIZE
   const stationForeignLabelSize = foreignVisualHeight / AARC_SVG_FOREIGN_VISIBLE_HEIGHT_PER_FONT_SIZE
   const scaleFromEditorBaseline = lineWidth / DEFAULT_SETTINGS.lineWidth
+  const stationNameFontWeight = resolveAarcFontWeight(config)
   return {
     settings: {
       lineWidth,
@@ -79,13 +81,27 @@ export function convertAarcVisualStyle(lines: AarcVisualLine[], config: unknown)
       transferEndPadding: lineWidth * (DEFAULT_SETTINGS.transferEndPadding / DEFAULT_SETTINGS.lineWidth),
       transferDotGap: 5,
       stationLabelSize,
+      stationLabelFontFamily: 'sans-serif',
+      stationLabelFontWeight: stationNameFontWeight,
+      stationLabelColor: '#202526',
       stationForeignLabelSize,
+      stationForeignLabelFontFamily: 'sans-serif',
+      stationForeignLabelFontWeight: stationNameFontWeight,
+      stationForeignLabelColor: '#999999',
       foreignLabelGap: DEFAULT_SETTINGS.foreignLabelGap * scaleFromEditorBaseline,
     },
     multipliers,
     chineseVisualHeight,
     foreignVisualHeight,
   }
+}
+
+function resolveAarcFontWeight(config:unknown){
+  const value=config&&typeof config==='object'?(config as {staNameFontWeight?:unknown}).staNameFontWeight:undefined
+  if(value==='bold')return 700
+  if(value==='normal')return 400
+  const numeric=typeof value==='number'?value:Number(value)
+  return Number.isFinite(numeric)&&numeric>=100&&numeric<=900?numeric:400
 }
 
 export type AarcLabelHorizontalAlign = 'start' | 'middle' | 'end'

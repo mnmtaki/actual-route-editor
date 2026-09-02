@@ -16,7 +16,7 @@ describe('StationLabel bilingual label group',()=>{
   it('occupies no secondary line when nameS is hidden or empty',()=>{expect(render(<svg><StationLabel station={station} settings={DEFAULT_SETTINGS} showForeign={false}/></svg>).container.querySelectorAll('.station-label-foreign')).toHaveLength(0);expect(render(<svg><StationLabel station={{...station,nameS:undefined}} settings={DEFAULT_SETTINGS} showForeign/></svg>).container.querySelectorAll('.station-label-foreign')).toHaveLength(0)})
   it('lays out imported AARC labels as one anchored block, including multiline nameS',()=>{
     const aarc={...station,source:{format:'aarc' as const,pointId:57,nameP:[0,16.2] as [number,number],labelAnchorMode:'aarc-block' as const,stationNameFontWeight:'bold' as const},labelOffsetX:0,labelOffsetY:16.2}
-    const {container}=render(<svg><StationLabel station={aarc} settings={{...DEFAULT_SETTINGS,stationLabelSize:30.68,stationForeignLabelSize:23.38,foreignLabelGap:3.08}} showForeign/></svg>)
+    const {container}=render(<svg><StationLabel station={aarc} settings={{...DEFAULT_SETTINGS,stationLabelSize:30.68,stationLabelFontFamily:'sans-serif',stationLabelFontWeight:700,stationForeignLabelSize:23.38,stationForeignLabelFontFamily:'sans-serif',stationForeignLabelFontWeight:700,stationForeignLabelColor:'#999999',foreignLabelGap:3.08}} showForeign/></svg>)
     const group=container.querySelector('.station-label-group')!,block=container.querySelector('.station-label-block')!,texts=[...container.querySelectorAll('text')]
     expect(group).toHaveAttribute('data-label-horizontal-anchor','middle')
     expect(group).toHaveAttribute('data-label-vertical-anchor','top')
@@ -24,7 +24,7 @@ describe('StationLabel bilingual label group',()=>{
     expect(texts.map(text=>text.textContent)).toEqual(['木阳西站','Muyang West','Railway Station'])
     expect(texts.every(text=>text.getAttribute('text-anchor')==='middle')).toBe(true)
     expect(texts.every(text=>text.style.fontFamily==='sans-serif')).toBe(true)
-    expect(texts.every(text=>text.style.fontWeight==='bold')).toBe(true)
+    expect(texts.every(text=>text.style.fontWeight==='700')).toBe(true)
     expect(texts[1]).toHaveAttribute('fill','#999999')
     expect(texts[1]).not.toHaveAttribute('transform')
     expect(Number(texts[2].getAttribute('y'))).toBeGreaterThan(Number(texts[1].getAttribute('y')))

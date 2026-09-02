@@ -10,8 +10,14 @@ export function getRasterPlan(svgText:string,format:RasterFormat,scale:RasterSca
   return{format,...info,scale,width,height,viewBox,safe:!tooLarge,...(tooLarge?{error:'当前尺寸过大，请选择较低倍率。'}:{})}
 }
 export function rasterFilename(projectName:string,format:RasterFormat){return`${projectName}.${FORMAT[format].extension}`}
+export async function waitForDocumentFonts(timeoutMs=1500):Promise<void>{
+  const fonts=typeof document==='undefined'?undefined:document.fonts
+  if(!fonts?.ready)return
+  await new Promise<void>(resolve=>{let finished=false;const done=()=>{if(finished)return;finished=true;clearTimeout(timer);resolve()},timer=setTimeout(done,Math.max(0,timeoutMs));Promise.resolve(fonts.ready).then(done,done)})
+}
 export async function rasterizeSvg(svgText:string,format:RasterFormat,scale:RasterScale,backgroundColor='#ffffff'):Promise<{blob:Blob;plan:RasterPlan}>{
   const plan=getRasterPlan(svgText,format,scale);if(!plan.safe)throw new Error(plan.error)
+  await waitForDocumentFonts()
   const source=new Blob([svgText],{type:'image/svg+xml;charset=utf-8'}),url=URL.createObjectURL(source)
   try{
     const image=new Image(),loaded=new Promise<void>((resolve,reject)=>{image.onload=()=>resolve();image.onerror=()=>reject(new Error('无法读取 SVG 导出场景'))});image.src=url;await loaded

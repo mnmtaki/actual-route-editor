@@ -1,5 +1,6 @@
 import type { ActualRouteProject, LabelDirection, LineBadge, LineStyleOverrides, MapElement, PresentationSettings, ProjectSettings, StationStyleOverrides } from '../data/model'
 import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from '../data/model'
+import { normalizeFontFamily, normalizeFontWeight, normalizeHexColor } from '../data/style'
 import { normalizeISODate, normalizeRequiredDate } from '../timeline/date'
 
 type LegacySettings = Partial<ProjectSettings> & { stationDiameterRatio?: number }
@@ -9,6 +10,7 @@ export function parseProjectJson(text: string): ActualRouteProject {
   if (parsed.version !== 1 || !Array.isArray(parsed.stations) || !Array.isArray(parsed.lines) || !Array.isArray(parsed.geometry?.segments)) throw new Error('不是受支持的实际走向工程 JSON')
   const today = new Date().toISOString().slice(0, 10)
   const raw = (parsed.settings ?? {}) as LegacySettings
+  const typographyFallback = legacyTypographyFallback(parsed.stations)
   const lineWidth = positiveOr(raw.lineWidth, DEFAULT_SETTINGS.lineWidth)
   const stationSize = positiveOr(raw.stationSize, DEFAULT_SETTINGS.stationSize)
   const hasLegacyTransferSettings = [raw.transferHeightRatio,raw.transferGapRatio,raw.transferPaddingRatio].some(value=>typeof value==='number'&&Number.isFinite(value))
@@ -21,7 +23,13 @@ export function parseProjectJson(text: string): ActualRouteProject {
     transferEndPadding: nonNegativeOr(raw.transferEndPadding, isBuild11Default ? DEFAULT_SETTINGS.transferEndPadding : Math.max(2.5, stationSize * nonNegativeOr(raw.transferPaddingRatio, DEFAULT_SETTINGS.transferPaddingRatio))),
     transferDotGap: nonNegativeOr(raw.transferDotGap, isBuild11Default ? DEFAULT_SETTINGS.transferDotGap : Math.max(2, stationSize * nonNegativeOr(raw.transferGapRatio, DEFAULT_SETTINGS.transferGapRatio))),
     stationLabelSize: positiveOr(raw.stationLabelSize, DEFAULT_SETTINGS.stationLabelSize),
+    stationLabelFontFamily: normalizeFontFamily(raw.stationLabelFontFamily) ?? typographyFallback.stationLabelFontFamily,
+    stationLabelFontWeight: normalizeFontWeight(raw.stationLabelFontWeight) ?? typographyFallback.stationLabelFontWeight,
+    stationLabelColor: normalizeHexColor(raw.stationLabelColor) ?? typographyFallback.stationLabelColor,
     stationForeignLabelSize: positiveOr(raw.stationForeignLabelSize, DEFAULT_SETTINGS.stationForeignLabelSize),
+    stationForeignLabelFontFamily: normalizeFontFamily(raw.stationForeignLabelFontFamily) ?? typographyFallback.stationForeignLabelFontFamily,
+    stationForeignLabelFontWeight: normalizeFontWeight(raw.stationForeignLabelFontWeight) ?? typographyFallback.stationForeignLabelFontWeight,
+    stationForeignLabelColor: normalizeHexColor(raw.stationForeignLabelColor) ?? typographyFallback.stationForeignLabelColor,
     foreignLabelGap: nonNegativeOr(raw.foreignLabelGap, DEFAULT_SETTINGS.foreignLabelGap),
     defaultLabelDirection: isLabelDirection(raw.defaultLabelDirection) ? raw.defaultLabelDirection : DEFAULT_SETTINGS.defaultLabelDirection,
     defaultLabelDistance: nonNegativeOr(raw.defaultLabelDistance, DEFAULT_SETTINGS.defaultLabelDistance),
@@ -123,7 +131,16 @@ function normalizeStationStyleOverrides(value: unknown): StationStyleOverrides|u
   const raw=value as Record<string,unknown>, result:StationStyleOverrides={}
   for(const key of ['stationSize','transferMinorAxis','labelSize','foreignLabelSize'] as const)if(typeof raw[key]==='number'&&Number.isFinite(raw[key])&&raw[key]>0)result[key]=raw[key]
   for(const key of ['transferEndPadding','transferDotGap','foreignLabelGap'] as const)if(typeof raw[key]==='number'&&Number.isFinite(raw[key])&&raw[key]>=0)result[key]=raw[key]
+  for(const key of ['labelFontFamily','foreignLabelFontFamily'] as const){const normalized=normalizeFontFamily(raw[key]);if(normalized)result[key]=normalized}
+  for(const key of ['labelFontWeight','foreignLabelFontWeight'] as const){const normalized=normalizeFontWeight(raw[key]);if(normalized!==null)result[key]=normalized}
+  for(const key of ['labelColor','foreignLabelColor'] as const){const normalized=normalizeHexColor(raw[key]);if(normalized)result[key]=normalized}
   return Object.keys(result).length?result:undefined
+}
+function legacyTypographyFallback(stations: ActualRouteProject['stations'] | undefined) {
+  const sourceWeight=stations?.find(station=>station.source?.labelAnchorMode==='aarc-block')?.source?.stationNameFontWeight
+  if(sourceWeight===undefined)return DEFAULT_SETTINGS
+  const weight=sourceWeight==='bold'?700:sourceWeight==='normal'?400:normalizeFontWeight(sourceWeight)??400
+  return {...DEFAULT_SETTINGS,stationLabelFontFamily:'sans-serif',stationLabelFontWeight:weight,stationForeignLabelFontFamily:'sans-serif',stationForeignLabelFontWeight:weight,stationForeignLabelColor:'#999999'}
 }
 function normalizeMapElement(value: unknown): MapElement[] {
   if (!value || typeof value !== 'object') return []

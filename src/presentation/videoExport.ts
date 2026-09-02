@@ -1,3 +1,5 @@
+import { waitForDocumentFonts } from '../import-export/rasterExport'
+
 export interface VideoFormat { label: string; mimeType: string; extension: 'mp4' | 'webm' }
 export function getSupportedVideoFormats(): VideoFormat[] {
   if (typeof MediaRecorder === 'undefined') return []
@@ -10,6 +12,7 @@ export function getSupportedVideoFormats(): VideoFormat[] {
   return candidates.filter((candidate, index) => MediaRecorder.isTypeSupported(candidate.mimeType) && candidates.findIndex(item => item.extension === candidate.extension && MediaRecorder.isTypeSupported(item.mimeType)) === index)
 }
 export async function exportPresentationVideo(options: { width: number; height: number; fps: 30 | 60; duration: number; format: VideoFormat; renderFrame: (time: number) => Promise<SVGSVGElement>; onProgress?: (value: number) => void }) {
+  await waitForDocumentFonts()
   const canvas = document.createElement('canvas'); canvas.width = options.width; canvas.height = options.height
   const context = canvas.getContext('2d', { alpha: false }); if (!context) throw new Error('浏览器无法创建视频画布')
   const manualStream = canvas.captureStream(0); const manualTrack = manualStream.getVideoTracks()[0] as MediaStreamTrack & { requestFrame?: () => void }
@@ -38,7 +41,7 @@ export async function exportPresentationVideo(options: { width: number; height: 
 async function drawSvg(context: CanvasRenderingContext2D, svg: SVGSVGElement, width: number, height: number) {
   const clone = svg.cloneNode(true) as SVGSVGElement
   const style = document.createElementNS('http://www.w3.org/2000/svg', 'style')
-  style.textContent = '.presentation-station-label,.presentation-legend-label{font-family:system-ui,sans-serif;fill:#182020;paint-order:stroke;stroke:#f3f0e9;stroke-width:3px;stroke-linejoin:round}.presentation-station-label{font-size:16px;font-weight:600}.presentation-station-label .station-label-foreign{font-size:.72em;font-weight:500}.presentation-legend-label{font-size:14px;stroke-width:2px}.presentation-title{font:700 28px system-ui,sans-serif;fill:#182020;paint-order:stroke;stroke:#f3f0e9;stroke-width:4px}'
+  style.textContent = '.presentation-station-label,.presentation-legend-label{paint-order:stroke;stroke:#f3f0e9;stroke-width:3px;stroke-linejoin:round}.presentation-legend-label{font-family:system-ui,sans-serif;fill:#182020;font-size:14px;stroke-width:2px}.presentation-title{font:700 28px system-ui,sans-serif;fill:#182020;paint-order:stroke;stroke:#f3f0e9;stroke-width:4px}'
   clone.prepend(style)
   const markup = new XMLSerializer().serializeToString(clone); const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }))
   try { const image = await loadImage(url); context.clearRect(0, 0, width, height); context.drawImage(image, 0, 0, width, height) } finally { URL.revokeObjectURL(url) }

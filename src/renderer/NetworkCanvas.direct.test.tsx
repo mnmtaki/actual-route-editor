@@ -20,6 +20,7 @@ describe('direct manipulation gestures', () => {
     const {container}=render(<NetworkCanvas {...baseProps} project={project} selection={{type:'segment',id:segment.id}} onSelect={onSelect}/>)
     const handles=[...container.querySelectorAll('[data-corner-handle="true"]')]
     expect(handles.map(handle=>handle.getAttribute('data-waypoint-id'))).toEqual(['corner-a','corner-b'])
+    expect(Number(container.querySelector('.waypoint-hit')?.getAttribute('r'))).toBeGreaterThanOrEqual(20)
     fireEvent.pointerDown(handles[0],{pointerId:13,clientX:270,clientY:350,bubbles:true})
     expect(onSelect).toHaveBeenCalledWith({type:'waypoint',id:'corner-a',segmentId:segment.id})
   })
@@ -59,6 +60,25 @@ describe('direct manipulation gestures', () => {
     fireEvent.pointerMove(svg, { pointerId: 8, clientX: 140, clientY: 120, bubbles: true })
     expect(setView).toHaveBeenCalledTimes(1)
     expect(onDragCommit).not.toHaveBeenCalled()
+  })
+
+  it('cancels an object drag and switches safely to pinch when a second pointer arrives', () => {
+    const onPreview = vi.fn(), onDragCommit = vi.fn(), setView = vi.fn()
+    const { container } = render(<NetworkCanvas {...baseProps} project={demoProject} onPreview={onPreview} onDragCommit={onDragCommit} setView={setView} />)
+    const svg = container.querySelector('svg')!
+    Object.defineProperty(svg, 'clientWidth', { configurable: true, value: 920 })
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+    const original = demoProject.stations.find(station => station.id === 's2')!
+    const stationHit = screen.getByTestId('transfer-s2').closest('.station-hit')!
+    fireEvent.pointerDown(stationHit, { pointerId: 21, clientX: original.x, clientY: original.y, bubbles: true })
+    fireEvent.pointerMove(svg, { pointerId: 21, clientX: original.x + 30, clientY: original.y, bubbles: true })
+    fireEvent.pointerDown(svg, { pointerId: 22, clientX: original.x + 70, clientY: original.y + 40, bubbles: true })
+    fireEvent.pointerMove(svg, { pointerId: 22, clientX: original.x + 150, clientY: original.y + 40, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 22, clientX: original.x + 150, clientY: original.y + 40, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 21, clientX: original.x + 30, clientY: original.y, bubbles: true })
+    expect(onDragCommit).not.toHaveBeenCalled()
+    expect(setView).toHaveBeenCalled()
+    expect(onPreview).toHaveBeenLastCalledWith(demoProject)
   })
 
   it('drags a rotated bilingual label by world delta without moving its Station',()=>{

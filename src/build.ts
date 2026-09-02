@@ -1,1 +1,1 @@
-export const BUILD_VERSION = '2026-09-02-mobile-shell-34'
+export const BUILD_VERSION = '2026-09-02-touch-mobile-inspector-35'

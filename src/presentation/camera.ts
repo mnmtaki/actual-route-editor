@@ -1,4 +1,5 @@
 import type { ActualRouteProject } from '../data/model'
+import { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import { getSegmentPoints } from '../geometry/path'
 import { PRESENTATION_ANIMATION, clamp, easing } from './config'
 import { getBeatRevealFronts } from './reveal'
@@ -49,9 +50,10 @@ export function evaluateCameraTrack(track: CameraTrack, beat: PresentationBeat, 
 }
 
 function fitHistoricalNetwork(project: ActualRouteProject, date: string, aspect: number, fallback: CameraView): CameraView {
-  const points = project.geometry.segments
+  const historicalProject = { ...project, geometry: { ...project.geometry, segments: project.geometry.segments.map(segment => ({ ...segment, lineId: resolveSegmentLineAt(segment, date) })) } }
+  const points = historicalProject.geometry.segments
     .filter(segment => (!segment.openedAt || segment.openedAt <= date) && (!segment.closedAt || date < segment.closedAt))
-    .flatMap(segment => getSegmentPoints(project, segment))
+    .flatMap(segment => getSegmentPoints(historicalProject, segment))
   if (!points.length) return fallback
   const xs = points.map(point => point.x), ys = points.map(point => point.y)
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys)

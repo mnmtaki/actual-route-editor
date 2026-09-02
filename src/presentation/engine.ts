@@ -3,6 +3,7 @@ import { evaluateCameraTrack } from './camera'
 import { PRESENTATION_ANIMATION, clamp, easing, inverseLineEasing } from './config'
 import { getBeatRevealFronts, getBeatRevealedDistance, getBeatSegmentRevealProgress, getStationArrivalRatio } from './reveal'
 import { stationLineKey } from './compiler'
+import { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import type { PresentationBeat, PresentationSequence, PresentationState, StationPresentationState } from './types'
 
 export function getPresentationState(project: ActualRouteProject, sequence: PresentationSequence, presentationTime: number): PresentationState {
@@ -18,13 +19,14 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
   const segmentStates: PresentationState['segmentStates'] = {}
   for (const segment of project.geometry.segments) {
     const openingIndex = sequence.cache.segmentOpeningBeat[segment.id], closureIndex = sequence.cache.segmentClosureBeat[segment.id]
+    const historicalLineId = sequence.cache.segmentLineIdsByDate[historyDate]?.[segment.id] ?? resolveSegmentLineAt(segment, historyDate)
     const opening = openingIndex === undefined ? undefined : sequence.beats[openingIndex], closure = closureIndex === undefined ? undefined : sequence.beats[closureIndex]
     let revealProgress = opening ? beatSegmentProgress(opening, segment.id, time) : historicallyVisible(segment.openedAt, segment.closedAt, historyDate) ? 1 : 0
     let opacity = revealProgress > 0 ? 1 : 0
     if (closure && time >= closure.revealStart) opacity *= 1 - easing.transfer(clamp((time - closure.revealStart) / Math.max(.000001, closure.revealDuration)))
     if (closure && time >= closure.revealEnd) { revealProgress = 0; opacity = 0 }
     const revealFrom = opening ? beatSegmentDirection(opening, segment.id, segment.fromStationId) : 'from'
-    segmentStates[segment.id] = { revealProgress, revealFrom, opacity, strokeDashoffset: (revealFrom === 'from' ? 1 : -1) * (1 - revealProgress) }
+    segmentStates[segment.id] = { lineId: historicalLineId, revealProgress, revealFrom, opacity, strokeDashoffset: (revealFrom === 'from' ? 1 : -1) * (1 - revealProgress) }
   }
 
   const stationStates: Record<string, StationPresentationState> = {}
@@ -59,7 +61,7 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
   const stationCount = Object.values(stationStates).filter(state => state.opacity > 0 && state.lineIds.length > 0).length
   const lines = project.lines.filter(line => line.visible).map(line => ({
     lineId: line.id,
-    operatingLengthKm: project.geometry.segments.filter(segment => segment.lineId === line.id).reduce((sum, segment) => { const state = segmentStates[segment.id]; return sum + (sequence.cache.segmentLengths[segment.id] ?? 0) * state.revealProgress * state.opacity / worldUnitsPerKm }, 0),
+    operatingLengthKm: project.geometry.segments.filter(segment => (segmentStates[segment.id]?.lineId ?? segment.lineId) === line.id).reduce((sum, segment) => { const state = segmentStates[segment.id]; return sum + (sequence.cache.segmentLengths[segment.id] ?? 0) * state.revealProgress * state.opacity / worldUnitsPerKm }, 0),
     stationCount: project.stations.filter(station => { const state = stationStates[station.id]; return state?.opacity > 0 && state.lineIds.includes(line.id) }).length,
   })).filter(statistic => statistic.operatingLengthKm > .001 || statistic.stationCount > 0)
   const camera = sequence.settings.cameraMode === 'fixed' || !currentBeat || beatIndex < 0 ? sequence.fixedCamera : evaluateCameraTrack(sequence.cameraTracks[beatIndex], currentBeat, time)

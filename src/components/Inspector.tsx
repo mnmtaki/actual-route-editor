@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { ActualRouteProject, LabelDirection, LineStyleOverrides, Selection, SegmentMode, StationStyleOverrides, StructureType } from '../data/model'
 import { uid } from '../data/model'
 import { clearRelationDateOverride, markRelationDateOverride, markSegmentDateOverride, phaseForRelation, phaseForSegment, type OpeningPhasePath } from '../data/openingPhases'
@@ -7,6 +8,7 @@ import { effectiveLabelRotation, effectiveLineWidth, effectiveStationStyle, infe
 import { DEFAULT_CORNER_RADIUS, getWaypointCornerPlan } from '../geometry/path'
 import { CHINESE_FONT_PRESETS, ColorControl, FontFamilyControl, FontWeightControl, FOREIGN_FONT_PRESETS } from './TypographyControls'
 import { normalizeStationNameHistory, removeStationNameHistoryEntry, setCurrentStationName, updateStationNameHistoryEntry } from '../data/stationNameHistory'
+import { splitLineAtStation, type SplitSide } from '../data/operations'
 
 const round=(value:number)=>Math.round(value*100)/100
 const inferDirectionFromVector=(x:number,y:number,fallback:LabelDirection):LabelDirection=>inferLabelDirection(x,y)==='custom'?fallback:inferLabelDirection(x,y) as LabelDirection
@@ -14,6 +16,32 @@ const inferDirectionFromVector=(x:number,y:number,fallback:LabelDirection):Label
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => <label className="field"><span>{label}</span>{children}</label>
 const OverrideNumber=({label,value,effective,min,max,step,onChange,onReset}:{label:string;value:number|undefined;effective:number;min:number;max:number;step:number;onChange:(value:number)=>void;onReset:()=>void})=><div className="field object-style-field"><span>{label}</span><div className="rotation-control"><input aria-label={label} type="number" inputMode="decimal" min={min} max={max} step={step} value={value??effective} onChange={event=>{const next=Number(event.target.value);if(Number.isFinite(next))onChange(Math.max(min,Math.min(max,next)))}}/>{value!==undefined&&<button type="button" onClick={onReset}>恢复全局</button>}</div></div>
 
+function LineSplitEditor({ project, line, onChange }: { project: ActualRouteProject; line: Extract<ActualRouteProject['lines'][number], { id: string }>; onChange: (next: ActualRouteProject) => void }) {
+  const [open, setOpen] = useState(false)
+  const [date, setDate] = useState(project.timeline.currentDate)
+  const [stationId, setStationId] = useState(line.stationSequence[1] ?? '')
+  const [side, setSide] = useState<SplitSide>('after')
+  const [name, setName] = useState(`拆分线路 ${project.lines.length + 1}`)
+  const [color, setColor] = useState('#6b58c4')
+  if (line.stationSequence.length < 3) return null
+  const index = line.stationSequence.indexOf(stationId)
+  const validStation = index > 0 && index < line.stationSequence.length - 1
+  const moved = side === 'after' ? line.stationSequence.slice(index) : line.stationSequence.slice(0, index + 1)
+  const retained = side === 'after' ? line.stationSequence.slice(0, index + 1) : line.stationSequence.slice(index)
+  const stationName = (id: string) => project.stations.find(station => station.id === id)?.name ?? id
+  return <section className="line-split-editor" data-testid="line-split-editor">
+    {!open ? <button type="button" onClick={() => setOpen(true)}>拆分线路</button> : <>
+      <span className="eyebrow">拆分线路</span>
+      <Field label="拆分日期"><input type="date" value={date} onChange={event => setDate(event.target.value)} /></Field>
+      <Field label="拆分站"><select value={stationId} onChange={event => setStationId(event.target.value)}>{line.stationSequence.slice(1, -1).map(id => <option key={id} value={id}>{stationName(id)}</option>)}</select></Field>
+      <Field label="拆出哪一侧"><select value={side} onChange={event => setSide(event.target.value as SplitSide)}><option value="after">向线路序列后方拆出</option><option value="before">向线路序列前方拆出</option></select></Field>
+      <Field label="新线路名称"><input value={name} onChange={event => setName(event.target.value)} /></Field>
+      <Field label="新线路颜色"><input type="color" value={color} onChange={event => setColor(event.target.value)} /></Field>
+      {validStation && <p className="meta-note">保留：{retained.map(stationName).join(' — ')}<br />拆出：{moved.map(stationName).join(' — ')}</p>}
+      <div className="line-dialog-actions"><button type="button" onClick={() => setOpen(false)}>取消</button><button type="button" className="primary" disabled={!validStation || !date} onClick={() => { const result = splitLineAtStation(project, { lineId: line.id, splitStationId: stationId, side, openedAt: date, name, color }); if (result.error) { window.alert(result.error); return } onChange(result.project); setOpen(false) }}>确认拆分</button></div>
+    </>}
+  </section>
+}
 export function Inspector({ project, selection, onChange, onDelete, onAddLineBadge=()=>undefined, onPhasePreview, onStartPhaseDrawing, embedded=false }: { project: ActualRouteProject; selection: Selection; onChange: (next: ActualRouteProject) => void; onDelete: () => void; onAddLineBadge?: (lineId: string) => void; onPhasePreview: (path: OpeningPhasePath | null) => void; onStartPhaseDrawing: (phaseId: string, lineId: string, stationId: string | null) => void; embedded?: boolean }) {
   const patch = (mutate: (next: ActualRouteProject) => void) => { const next = structuredClone(project); mutate(next); onChange(next) }
   let content: React.ReactNode = <div className="empty-inspector"><span>◎</span><p>选择站点、区间、控制点或线路，查看和修改属性。</p></div>
@@ -47,6 +75,7 @@ export function Inspector({ project, selection, onChange, onDelete, onAddLineBad
       <Field label="开通日期"><input type="date" value={line.openedAt ?? ''} onChange={(e) => patch((n) => { n.lines.find((l) => l.id === line.id)!.openedAt = e.target.value || null })} /></Field>
       <Field label="停运日期"><input type="date" value={line.closedAt ?? ''} onChange={(e) => patch((n) => { n.lines.find((l) => l.id === line.id)!.closedAt = e.target.value || null })} /></Field>
       <button onClick={() => onAddLineBadge(line.id)}>添加线路标号</button>
+      <LineSplitEditor project={project} line={line} onChange={onChange} />
       <OpeningPhaseEditor project={project} line={line} onChange={onChange} onPreview={onPhasePreview} onStartDrawing={onStartPhaseDrawing} />
       <label className="toggle-row">锁定线路<input type="checkbox" checked={line.locked} onChange={(e) => patch((n) => { n.lines.find((l) => l.id === line.id)!.locked = e.target.checked })} /></label>
       {line.stationSequence.length >= 3 && <button onClick={() => patch((n) => { const current = n.lines.find((l) => l.id === line.id)!; const from = current.stationSequence.at(-1)!; const to = current.stationSequence[0]; const exists = n.geometry.segments.some((s) => s.lineId === line.id && ((s.fromStationId === from && s.toStationId === to) || (s.fromStationId === to && s.toStationId === from))); if (!exists) n.geometry.segments.push({ id: uid('segment_loop'), lineId: line.id, fromStationId: from, toStationId: to, mode: 'straight', structureType: 'underground', waypoints: [], openedAt: line.openedAt }) })}>连接首尾形成环线</button>}

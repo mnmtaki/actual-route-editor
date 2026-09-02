@@ -1,1 +1,1 @@
-export const BUILD_VERSION = '2026-09-02-deferred-station-opening-38'
+export const BUILD_VERSION = '2026-09-02-line-splitting-39'

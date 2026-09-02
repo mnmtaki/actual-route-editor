@@ -1,10 +1,10 @@
 import type { ActualRouteProject, PresentationSettings } from '../data/model'
 
-export type HistoryEventType = 'LINE_OPENING' | 'LINE_EXTENSION' | 'STATION_OPENING' | 'STATION_RENAME' | 'INTERCHANGE_CREATED' | 'SEGMENT_OPENING' | 'LINE_CLOSURE' | 'SEGMENT_CLOSURE'
+export type HistoryEventType = 'LINE_OPENING' | 'LINE_EXTENSION' | 'LINE_REASSIGNMENT' | 'STATION_OPENING' | 'STATION_RENAME' | 'INTERCHANGE_CREATED' | 'SEGMENT_OPENING' | 'LINE_CLOSURE' | 'SEGMENT_CLOSURE'
 export interface DirectedSegment { segmentId: string; fromStationId: string; toStationId: string; length: number; startRatio: number; endRatio: number }
 export interface HistoryEvent {
   id: string
-  type: 'LINE_OPENING' | 'LINE_EXTENSION' | 'STATION_OPENING' | 'STATION_RENAME' | 'LINE_CLOSURE' | 'SEGMENT_CLOSURE'
+  type: 'LINE_OPENING' | 'LINE_EXTENSION' | 'LINE_REASSIGNMENT' | 'STATION_OPENING' | 'STATION_RENAME' | 'LINE_CLOSURE' | 'SEGMENT_CLOSURE'
   eventTypes: HistoryEventType[]
   historyDate: string
   lineId: string
@@ -14,6 +14,7 @@ export interface HistoryEvent {
   interchangeStationIds: string[]
   branches: DirectedSegment[][]
   stationNameChange?: { stationId: string; oldName: string; oldNameS?: string; newName: string; newNameS?: string }
+  lineReassignment?: { fromLineId: string; toLineId: string }
 }
 export interface CameraView { x: number; y: number; width: number; height: number }
 export interface CameraTrackSample { progress: number; centerX: number; centerY: number }
@@ -48,6 +49,7 @@ export interface PresentationCompileCache {
   stationLineOpeningBeat: Record<string, number>
   activeLineIdsByDate: Record<string, Record<string, string[]>>
   segmentLengths: Record<string, number>
+  segmentLineIdsByDate: Record<string, Record<string, string>>
 }
 export interface PresentationSequence {
   beats: PresentationBeat[]
@@ -63,7 +65,7 @@ export interface PresentationSequence {
   settings: PresentationSettings
   cache: PresentationCompileCache
 }
-export interface SegmentPresentationState { revealProgress: number; revealFrom: 'from' | 'to'; opacity: number; strokeDashoffset: number }
+export interface SegmentPresentationState { lineId?: string; revealProgress: number; revealFrom: 'from' | 'to'; opacity: number; strokeDashoffset: number }
 export interface StationPresentationState { opacity: number; scale: number; labelOpacity: number; previousLineIds: string[]; lineIds: string[]; visibleRelationIds: string[]; transferProgress: number; historicalState: 'previous-stable' | 'current-partial' | 'future' }
 export interface PresentationState {
   presentationTime: number

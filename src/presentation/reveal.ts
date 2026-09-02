@@ -1,4 +1,5 @@
 import type { ActualRouteProject } from '../data/model'
+import { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import { sampleSegmentAtLengthRatio } from '../geometry/path'
 import type { PresentationBeat, RevealFront } from './types'
 import { clamp } from './config'
@@ -31,16 +32,17 @@ export function getStationArrivalRatio(beat: PresentationBeat, stationId: string
 export function getBeatRevealFronts(project: ActualRouteProject, beat: PresentationBeat | null, globalRevealProgress: number): RevealFront[] {
   if (!beat || !beat.eventTypes.includes('SEGMENT_OPENING')) return []
   const global = clamp(globalRevealProgress)
+  const historicalProject = beat ? { ...project, geometry: { ...project.geometry, segments: project.geometry.segments.map(segment => ({ ...segment, lineId: resolveSegmentLineAt(segment, beat.historyDate) })) } } : project
   return beat.branches.map((branch, branchIndex) => {
     const branchLength = beat.branchLengths[branchIndex] || beat.totalPathLength || 1
     const progress = clamp(global * beat.totalPathLength / branchLength)
     const directed = branch.find(item => progress <= item.endRatio + 1e-9) ?? branch.at(-1)
     if (!directed) return null
     const local = clamp((progress - directed.startRatio) / Math.max(.000001, directed.endRatio - directed.startRatio))
-    const segment = project.geometry.segments.find(item => item.id === directed.segmentId)
+    const segment = historicalProject.geometry.segments.find(item => item.id === directed.segmentId)
     if (!segment) return null
     const forward = segment.fromStationId === directed.fromStationId
-    const sample = sampleSegmentAtLengthRatio(project, segment, forward ? local : 1 - local)
+    const sample = sampleSegmentAtLengthRatio(historicalProject, segment, forward ? local : 1 - local)
     if (!sample) return null
     return { lineId: beat.lineId, segmentId: segment.id, worldX: sample.point.x, worldY: sample.point.y, tangentX: forward ? sample.tangent.x : -sample.tangent.x, tangentY: forward ? sample.tangent.y : -sample.tangent.y, progress: global, branchIndex }
   }).filter((front): front is RevealFront => Boolean(front))

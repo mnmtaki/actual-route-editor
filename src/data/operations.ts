@@ -3,6 +3,7 @@ import { uid } from './model'
 import { assignCreatedObjectsToPhase, getOpeningPhaseDate } from './openingPhases'
 import { findSegmentProgressForPoint } from '../geometry/path'
 import { splitSegmentStructure } from './structure'
+import { appendSegmentLineHistory } from './segmentLineHistory'
 import { labelOffsetFor } from './style'
 
 export interface Point { x: number; y: number }
@@ -122,6 +123,55 @@ export function insertStationIntoSegment(project: ActualRouteProject, segmentId:
   return { project: next, stationId }
 }
 
+export type SplitSide = 'after' | 'before'
+export interface SplitLineInput { lineId: string; splitStationId: string; side: SplitSide; openedAt: string; name: string; color: string }
+export interface SplitLineResult { project: ActualRouteProject; newLineId: string | null; movedSegmentIds: string[]; movedStationIds: string[]; error?: string }
+
+/** Split a simple, non-branching line while preserving physical Segment identity. */
+export function splitLineAtStation(project: ActualRouteProject, input: SplitLineInput): SplitLineResult {
+  const line = project.lines.find(item => item.id === input.lineId)
+  if (!line) return { project, newLineId: null, movedSegmentIds: [], movedStationIds: [], error: '未找到要拆分的线路' }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.openedAt)) return { project, newLineId: null, movedSegmentIds: [], movedStationIds: [], error: '请输入有效的拆分日期' }
+  const splitIndex = line.stationSequence.indexOf(input.splitStationId)
+  if (splitIndex <= 0 || splitIndex >= line.stationSequence.length - 1) return { project, newLineId: null, movedSegmentIds: [], movedStationIds: [], error: '拆分站必须位于线路中间' }
+  const lineSegments = project.geometry.segments.filter(item => item.lineId === line.id)
+  const degree = new Map<string, number>()
+  for (const segment of lineSegments) { degree.set(segment.fromStationId, (degree.get(segment.fromStationId) ?? 0) + 1); degree.set(segment.toStationId, (degree.get(segment.toStationId) ?? 0) + 1) }
+  if (lineSegments.length !== line.stationSequence.length - 1 || [...degree.values()].some(value => value > 2)) return { project, newLineId: null, movedSegmentIds: [], movedStationIds: [], error: '当前线路不是可唯一拆分的连续线路，请先处理分支或环线' }
+  const adjacent = new Map<string, Segment[]>()
+  for (const segment of project.geometry.segments.filter(item => item.lineId === line.id)) {
+    for (const key of [`${segment.fromStationId}|${segment.toStationId}`, `${segment.toStationId}|${segment.fromStationId}`]) adjacent.set(key, [...(adjacent.get(key) ?? []), segment])
+  }
+  for (let index = 0; index < line.stationSequence.length - 1; index += 1) {
+    const a = line.stationSequence[index], b = line.stationSequence[index + 1]
+    if ((adjacent.get(`${a}|${b}`)?.length ?? 0) !== 1) return { project, newLineId: null, movedSegmentIds: [], movedStationIds: [], error: '当前线路不是可唯一拆分的连续线路，请先处理分支或环线' }
+  }
+  const retainedStationIds = input.side === 'after' ? line.stationSequence.slice(0, splitIndex + 1) : line.stationSequence.slice(splitIndex)
+  const movedStationIds = input.side === 'after' ? line.stationSequence.slice(splitIndex) : line.stationSequence.slice(0, splitIndex + 1)
+  const movedSet = new Set(movedStationIds)
+  const movedSegments = project.geometry.segments.filter(segment => segment.lineId === line.id && movedSet.has(segment.fromStationId) && movedSet.has(segment.toStationId))
+  if (movedSegments.length !== movedStationIds.length - 1) return { project, newLineId: null, movedSegmentIds: [], movedStationIds: [], error: '拆分区段不是连续的一条线路，操作已取消' }
+  const next = structuredClone(project), currentLine = next.lines.find(item => item.id === line.id)!
+  const newLineId = uid('line')
+  next.lines.push({ id: newLineId, name: input.name.trim() || `拆分线路 ${next.lines.length + 1}`, color: input.color, stationSequence: movedStationIds, lineBadges: [], lineOrder: next.lines.length, openedAt: input.openedAt, closedAt: null, visible: true, locked: false })
+  currentLine.stationSequence = retainedStationIds
+  const movedSegmentIds: string[] = []
+  for (const segment of next.geometry.segments) {
+    if (segment.lineId !== currentLine.id || !movedSet.has(segment.fromStationId) || !movedSet.has(segment.toStationId)) continue
+    appendSegmentLineHistory(segment, newLineId, input.openedAt, uid('segment-line-history'))
+    movedSegmentIds.push(segment.id)
+  }
+  for (const stationId of movedStationIds) {
+    const existingNew = next.stationLineRelations.find(relation => relation.stationId === stationId && relation.lineId === newLineId)
+    if (!existingNew) next.stationLineRelations.push({ id: uid('relation'), stationId, lineId: newLineId, openedAt: input.openedAt, closedAt: null })
+    if (stationId === input.splitStationId) continue
+    const existingOld = next.stationLineRelations.find(relation => relation.stationId === stationId && relation.lineId === currentLine.id)
+    if (existingOld && (!existingOld.closedAt || existingOld.closedAt > input.openedAt)) existingOld.closedAt = input.openedAt
+  }
+  return { project: next, newLineId, movedSegmentIds, movedStationIds }
+}
+
+export const splitLine = splitLineAtStation
 export function deleteLineAndOrphans(project: ActualRouteProject, lineId: string): ActualRouteProject {
   const next = structuredClone(project)
   next.lines = next.lines.filter((line) => line.id !== lineId)

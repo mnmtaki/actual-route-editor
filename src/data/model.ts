@@ -15,7 +15,8 @@ export interface StationLineRelation { id: string; stationId: string; lineId: st
 export interface OpeningPhase { id: string; lineId: string; name?: string; openedAt: string; segmentIds: string[]; stationRelationIds: string[]; revealStartStationId?: string; revealEndStationId?: string; showOverviewAfter?: boolean; overriddenSegmentIds?: string[]; overriddenStationRelationIds?: string[] }
 export interface Waypoint { id: string; x: number; y: number; type: WaypointType; cornerRadius?: number; source?: SourceMetadata }
 export interface StructureNode { id: string; structureAfter: StructureType; waypointId?: string; progress?: number }
-export interface Segment { id: string; lineId: string; fromStationId: string; toStationId: string; mode: SegmentMode; cornerRadius?: number; structureType: StructureType; structureNodes?: StructureNode[]; waypoints: Waypoint[]; openedAt?: ISODate; closedAt?: ISODate }
+export interface SegmentLineHistoryEntry { id: string; effectiveAt: string | null; lineId: string }
+export interface Segment { id: string; lineId: string; lineHistory?: SegmentLineHistoryEntry[]; fromStationId: string; toStationId: string; mode: SegmentMode; cornerRadius?: number; structureType: StructureType; structureNodes?: StructureNode[]; waypoints: Waypoint[]; openedAt?: ISODate; closedAt?: ISODate }
 export interface BackgroundImage { dataUrl: string; name: string; x: number; y: number; width: number; height: number; opacity: number; visible: boolean; locked: boolean; source?: SourceMetadata }
 export type MapTextAlign = 'start' | 'middle' | 'end'
 export interface TextMapElement { id: string; type: 'text'; x: number; y: number; text: string; fontSize: number; fontWeight: 'normal' | 'bold'; textAlign: MapTextAlign; rotation: number; visible: boolean }

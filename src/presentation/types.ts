@@ -1,10 +1,10 @@
 import type { ActualRouteProject, PresentationSettings } from '../data/model'
 
-export type HistoryEventType = 'LINE_OPENING' | 'LINE_EXTENSION' | 'STATION_OPENING' | 'INTERCHANGE_CREATED' | 'SEGMENT_OPENING' | 'LINE_CLOSURE' | 'SEGMENT_CLOSURE'
+export type HistoryEventType = 'LINE_OPENING' | 'LINE_EXTENSION' | 'STATION_OPENING' | 'STATION_RENAME' | 'INTERCHANGE_CREATED' | 'SEGMENT_OPENING' | 'LINE_CLOSURE' | 'SEGMENT_CLOSURE'
 export interface DirectedSegment { segmentId: string; fromStationId: string; toStationId: string; length: number; startRatio: number; endRatio: number }
 export interface HistoryEvent {
   id: string
-  type: 'LINE_OPENING' | 'LINE_EXTENSION' | 'STATION_OPENING' | 'LINE_CLOSURE' | 'SEGMENT_CLOSURE'
+  type: 'LINE_OPENING' | 'LINE_EXTENSION' | 'STATION_OPENING' | 'STATION_RENAME' | 'LINE_CLOSURE' | 'SEGMENT_CLOSURE'
   eventTypes: HistoryEventType[]
   historyDate: string
   lineId: string
@@ -13,6 +13,7 @@ export interface HistoryEvent {
   stationIds: string[]
   interchangeStationIds: string[]
   branches: DirectedSegment[][]
+  stationNameChange?: { stationId: string; oldName: string; oldNameS?: string; newName: string; newNameS?: string }
 }
 export interface CameraView { x: number; y: number; width: number; height: number }
 export interface CameraTrackSample { progress: number; centerX: number; centerY: number }

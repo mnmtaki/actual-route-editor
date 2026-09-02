@@ -3,6 +3,7 @@ import { getSegmentCurveLength, getSegmentPoints } from '../geometry/path'
 import { PRESENTATION_ANIMATION, clamp } from './config'
 import { compileCameraTrack } from './camera'
 import { getBeatRevealFronts } from './reveal'
+import { getStationNameAt, normalizeStationNameHistory } from '../data/stationNameHistory'
 import type { CameraView, DirectedSegment, HistoryEvent, PresentationBeat, PresentationCompileCache, PresentationSequence } from './types'
 
 const FAR_FUTURE = '9999-12-31'
@@ -47,6 +48,15 @@ export function compileHistoryEvents(project: ActualRouteProject, settings: Pres
   for (const line of project.lines) if (validDate(line.closedAt) && line.closedAt >= start && line.closedAt <= end) {
     const lineSegments = project.geometry.segments.filter(segment => segment.lineId === line.id)
     events.push({ id: `${line.closedAt}-${line.id}-line-close`, type: 'LINE_CLOSURE', eventTypes: ['LINE_CLOSURE'], historyDate: line.closedAt, lineId: line.id, segmentIds: lineSegments.map(segment => segment.id), stationIds: unique(lineSegments.flatMap(segment => [segment.fromStationId, segment.toStationId])), interchangeStationIds: [], branches: [] })
+  }
+  for (const station of project.stations) {
+    const history = normalizeStationNameHistory(station)
+    if (!history) continue
+    for (const entry of history) {
+      if (!validDate(entry.effectiveAt) || entry.effectiveAt < start || entry.effectiveAt > end) continue
+      const oldName = getStationNameAt(station, previousDate(entry.effectiveAt))
+      events.push({ id: `${entry.effectiveAt}-station-rename-${station.id}-${entry.id}`, type: 'STATION_RENAME', eventTypes: ['STATION_RENAME'], historyDate: entry.effectiveAt, lineId: '', segmentIds: [], stationIds: [], interchangeStationIds: [], branches: [], stationNameChange: { stationId: station.id, oldName: oldName.name, ...(oldName.nameS ? { oldNameS: oldName.nameS } : {}), newName: entry.name, ...(entry.nameS ? { newNameS: entry.nameS } : {}) } })
+    }
   }
   return events.sort((a, b) => a.historyDate.localeCompare(b.historyDate) || lineOrder(project, a.lineId) - lineOrder(project, b.lineId) || a.id.localeCompare(b.id))
 }

@@ -71,7 +71,7 @@ body{background:#eeeae2;color:#262a28}
 .app-shell{background:#eeeae2;grid-template-rows:58px minmax(0,1fr)}
 
 .map-element{cursor:move}.map-element-selection{fill:none;stroke:#8c6a16;stroke-width:2;stroke-dasharray:5 4;pointer-events:none;vector-effect:non-scaling-stroke}
-.line-badge text,.free-text text{pointer-events:none;user-select:none}
+.line-badge text,.free-text text,.line-legend text{pointer-events:none;user-select:none}.line-legend{cursor:move}.line-legend.locked{cursor:default}.line-legend-hit{cursor:move}.line-legend-background{pointer-events:none}
 button{border-color:#d7d4cc;background:#fffdfa;color:#303532;box-shadow:0 1px 1px #29251008}
 button:hover:not(:disabled){border-color:#bdb8ad;background:#f8f4eb}
 button.active,button.primary{background:var(--accent);border-color:#cfa12d;color:#272416}

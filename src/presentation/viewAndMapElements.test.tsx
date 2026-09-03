@@ -7,6 +7,7 @@ import { parseProjectJson, serializeProject } from '../import-export/projectJson
 import { exportSvg } from '../import-export/svgExport'
 import { MapElementsLayer } from '../renderer/MapElements'
 import { LineBadgesLayer } from '../renderer/LineBadges'
+import { DEFAULT_LINE_LEGEND } from '../data/lineLegend'
 import { compilePresentation } from './compiler'
 import { getPresentationState } from './engine'
 import { PresentationScene } from './PresentationScene'
@@ -94,6 +95,14 @@ describe('world-space line badges and map elements', () => {
     const {container}=render(<PresentationScene project={project} sequence={sequence} time={time} width={1200} height={800}/>)
     expect(container.querySelectorAll('[data-layer="line-badges"] [data-line-badge-id]')).toHaveLength(1)
     expect(container.querySelectorAll('[data-layer="map-elements"] [data-map-element-id]')).toHaveLength(1)
+  })
+
+  it('renders the built-in line legend from final project data at every presentation time',()=>{
+    const project=phasedProject();project.lineLegend={id:'legend',x:12,y:18,...DEFAULT_LINE_LEGEND}
+    const sequence=compilePresentation(project),early=render(<PresentationScene project={project} sequence={sequence} time={0} width={1200} height={800}/>),late=render(<PresentationScene project={project} sequence={sequence} time={sequence.duration} width={1200} height={800}/>)
+    expect(early.container.querySelector('[data-layer="line-legend"]')).toBeTruthy()
+    expect(late.container.querySelector('[data-layer="line-legend"]')).toBeTruthy()
+    expect(early.container.querySelectorAll('[data-layer="line-legend"] .line-legend-item')).toHaveLength(project.lines.length)
   })
 
   it('keeps every badge synchronized with its owning Line name and color',()=>{

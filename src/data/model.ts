@@ -45,6 +45,30 @@ export interface BackgroundImage { dataUrl: string; name: string; x: number; y: 
 export type MapTextAlign = 'start' | 'middle' | 'end'
 export interface TextMapElement { id: string; type: 'text'; x: number; y: number; text: string; fontSize: number; fontWeight: 'normal' | 'bold'; textAlign: MapTextAlign; rotation: number; visible: boolean }
 export type MapElement = TextMapElement
+export type LineLegendMode = 'auto' | 'custom'
+export interface LineLegend {
+  id: string
+  x: number
+  y: number
+  scale: number
+  visible: boolean
+  locked: boolean
+  title: string
+  foreignTitle: string
+  mode: LineLegendMode
+  lineIds: string[]
+  columns: number
+  showForeignLineName: boolean
+  showTerminals: boolean
+  showForeignTerminals: boolean
+  backgroundEnabled: boolean
+  backgroundColor: string
+  backgroundOpacity: number
+  padding: number
+  columnWidth: number
+  rowGap: number
+  columnGap: number
+}
 export interface TimelineSettings { currentDate: string; startDate: string; endDate: string; playing: boolean }
 export type PresentationCameraMode = 'fixed' | 'follow'
 export type PresentationResolution = '1920x1080' | '1080x1920' | '1280x720'
@@ -59,8 +83,8 @@ export interface RoadStyleLayer { id: string; color: string; width: number; opac
 export interface RoadStyle { id: string; name: string; builtin?: boolean; layers: RoadStyleLayer[] }
 export interface RoadPoint { id: string; x: number; y: number }
 export interface Road { id: string; name?: string; points: RoadPoint[]; styleId: string; zIndex: number; visible: boolean; locked: boolean; createdOrder: number }
-export interface ActualRouteProject { version: 1; name: string; stations: Station[]; lines: Line[]; stationLineRelations: StationLineRelation[]; openingPhases: OpeningPhase[]; geometry: { segments: Segment[] }; mapElements?: MapElement[]; basemapPaths?: BasemapPath[]; roads?: Road[]; roadStyles?: RoadStyle[]; background: BackgroundImage | null; timeline: TimelineSettings; presentation: PresentationSettings; settings: ProjectSettings; styles?: LineStyle[] }
-export type Selection = { type: 'station'; id: string } | { type: 'line'; id: string } | { type: 'lineBadge'; id: string; lineId: string } | { type: 'segment'; id: string } | { type: 'waypoint'; id: string; segmentId: string } | { type: 'structureNode'; id: string; segmentId: string } | { type: 'mapElement'; id: string } | { type: 'basemapPath'; id: string } | { type: 'road'; id: string } | { type: 'roadPoint'; id: string; roadId: string } | { type: 'background' } | null
+export interface ActualRouteProject { version: 1; name: string; stations: Station[]; lines: Line[]; stationLineRelations: StationLineRelation[]; openingPhases: OpeningPhase[]; geometry: { segments: Segment[] }; mapElements?: MapElement[]; lineLegend?: LineLegend; basemapPaths?: BasemapPath[]; roads?: Road[]; roadStyles?: RoadStyle[]; background: BackgroundImage | null; timeline: TimelineSettings; presentation: PresentationSettings; settings: ProjectSettings; styles?: LineStyle[] }
+export type Selection = { type: 'station'; id: string } | { type: 'line'; id: string } | { type: 'lineBadge'; id: string; lineId: string } | { type: 'segment'; id: string } | { type: 'waypoint'; id: string; segmentId: string } | { type: 'structureNode'; id: string; segmentId: string } | { type: 'mapElement'; id: string } | { type: 'lineLegend'; id: string } | { type: 'basemapPath'; id: string } | { type: 'road'; id: string } | { type: 'roadPoint'; id: string; roadId: string } | { type: 'background' } | null
 
 export const DEFAULT_STATION_LABEL_FONT_FAMILY = 'Inter, "Noto Sans SC", "Microsoft YaHei", sans-serif'
 export const DEFAULT_SETTINGS: ProjectSettings = { lineWidth: 18, stationSize: 11, stationStyleId: 'default', transferMinorAxis: 19.5, transferEndPadding: 5.15, transferDotGap: 2.25, stationLabelSize: 14, stationLabelFontFamily: DEFAULT_STATION_LABEL_FONT_FAMILY, stationLabelFontWeight: 650, stationLabelColor: '#202526', stationForeignLabelSize: 10.08, stationForeignLabelFontFamily: DEFAULT_STATION_LABEL_FONT_FAMILY, stationForeignLabelFontWeight: 520, stationForeignLabelColor: '#202526', foreignLabelGap: 2.52, defaultLabelDirection: 'upper-right', defaultLabelDistance: 19.79898987322333, defaultStationLabelRotation: 0, transferHeightRatio: 1.0833333333333333, transferGapRatio: 0.1944, transferPaddingRatio: 0.25, labelsVisible: true, showForeignStationNames: true, gridVisible: true, exportBackground: true, worldUnitsPerKm: 100 }

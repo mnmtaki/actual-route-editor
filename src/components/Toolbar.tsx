@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { BUILD_VERSION } from '../build'
-import type { BasemapPath } from '../data/model'
+import type { BasemapPath, LineLegend } from '../data/model'
 
 type TopMenu = 'map-elements' | 'mobile-files' | 'import' | 'export' | 'more'
 
@@ -12,9 +12,9 @@ function TopDropdown({ id, label, openMenu, setOpenMenu, children, className = '
   </div>
 }
 
-export function Toolbar({ canUndo, canRedo, undo, redo, fitAll, zoomSelection, importProject, importTopology, exportProject, exportSvg, exportImage = () => undefined, shareProject = () => undefined, shareSvg = () => undefined, importBackground, onNewLine, onAddText = () => undefined, onAddRoad = () => undefined, onAddBasemapPath = () => undefined, basemapPaths, onSelectBasemapPath = () => undefined, onStyle, drawing, onFinish, onPresentation, nativeFiles = false }: {
+export function Toolbar({ canUndo, canRedo, undo, redo, fitAll, zoomSelection, importProject, importTopology, exportProject, exportSvg, exportImage = () => undefined, shareProject = () => undefined, shareSvg = () => undefined, importBackground, onNewLine, onAddText = () => undefined, onAddRoad = () => undefined, onAddBasemapPath = () => undefined, onAddLineLegend = () => undefined, onSelectLineLegend = () => undefined, lineLegend, basemapPaths, onSelectBasemapPath = () => undefined, onStyle, drawing, onFinish, onPresentation, nativeFiles = false }: {
   canUndo: boolean; canRedo: boolean; undo: () => void; redo: () => void; fitAll: () => void; zoomSelection: () => void
-  importProject: () => void; importTopology: () => void; exportProject: () => void; exportSvg: () => void; exportImage?: () => void; shareProject?: () => void; shareSvg?: () => void; importBackground: () => void; onNewLine: () => void; onAddText?: () => void; onAddRoad?: () => void; onAddBasemapPath?: (category: 'water' | 'terrain' | 'other') => void; basemapPaths?: BasemapPath[]; onSelectBasemapPath?: (id: string) => void; onStyle: () => void; drawing: boolean; onFinish: () => void; onPresentation: () => void; nativeFiles?: boolean
+  importProject: () => void; importTopology: () => void; exportProject: () => void; exportSvg: () => void; exportImage?: () => void; shareProject?: () => void; shareSvg?: () => void; importBackground: () => void; onNewLine: () => void; onAddText?: () => void; onAddRoad?: () => void; onAddBasemapPath?: (category: 'water' | 'terrain' | 'other') => void; onAddLineLegend?: () => void; onSelectLineLegend?: () => void; lineLegend?: LineLegend; basemapPaths?: BasemapPath[]; onSelectBasemapPath?: (id: string) => void; onStyle: () => void; drawing: boolean; onFinish: () => void; onPresentation: () => void; nativeFiles?: boolean
 }) {
   const [openMenu, setOpenMenu] = useState<TopMenu | null>(null)
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -34,6 +34,8 @@ export function Toolbar({ canUndo, canRedo, undo, redo, fitAll, zoomSelection, i
       <button className="primary" onClick={drawing ? onFinish : onNewLine}>{drawing ? '完成绘制' : '＋ 新建线路'}</button>
       <TopDropdown id="map-elements" label="地图元素" openMenu={openMenu} setOpenMenu={setOpenMenu} className="map-elements-menu">
         <button role="menuitem" onClick={action(onAddText)}>添加自由文本</button>
+        <button role="menuitem" onClick={action(onAddLineLegend)}>添加线路图例</button>
+        {lineLegend && <button role="menuitem" onClick={action(onSelectLineLegend)}>选择线路图例</button>}
         <button role="menuitem" onClick={action(onAddRoad)}>绘制道路</button>
         <button role="menuitem" onClick={action(() => onAddBasemapPath('water'))}>绘制水体路径</button>
         <button role="menuitem" onClick={action(() => onAddBasemapPath('terrain'))}>绘制地形路径</button>

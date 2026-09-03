@@ -64,6 +64,7 @@ import {
 } from "./data/roads";
 import type { Road } from "./data/model";
 import { isLineLocked, isSegmentGeometryLocked, isStationGeometryLocked, lockedStationMessage } from "./data/lineLock";
+import { createLineLegend, getLineLegendWorldBounds } from "./data/lineLegend";
 type Drawing = DrawingMode;
 type Point = { x: number; y: number };
 export default function App() {
@@ -142,10 +143,12 @@ export default function App() {
     const s = ids
       ? history.project.stations.filter((x) => ids.has(x.id))
       : history.project.stations;
-    if (!s.length) return { x: 0, y: 0, width: 1000, height: 700 };
+    const legendBounds = !ids && history.project.lineLegend?.visible ? getLineLegendWorldBounds(history.project, history.project.lineLegend) : null;
+    if (!s.length && !legendBounds) return { x: 0, y: 0, width: 1000, height: 700 };
     const xs = s.map((x) => x.x),
       ys = s.map((x) => x.y),
       p = 100;
+    if (legendBounds) { xs.push(legendBounds.x, legendBounds.x + legendBounds.width); ys.push(legendBounds.y, legendBounds.y + legendBounds.height) }
     return {
       x: Math.min(...xs) - p,
       y: Math.min(...ys) - p,
@@ -433,6 +436,7 @@ export default function App() {
         n.mapElements = (n.mapElements ?? []).filter(
           (item) => item.id !== selection.id,
         );
+      else if (selection.type === "lineLegend") delete n.lineLegend;
       else if (selection.type === "basemapPath")
         n = deleteBasemapPath(n, selection.id);
       else if (selection.type === "road") n = deleteRoad(n, selection.id);
@@ -822,6 +826,17 @@ export default function App() {
     setSelection({ type: "lineBadge", id, lineId });
     setNotice("已添加线路标号，可直接拖动");
   };
+  const addLineLegend = () => {
+    if (history.project.lineLegend) {
+      setSelection({ type: 'lineLegend', id: history.project.lineLegend.id });
+      setNotice('已选中线路图例');
+      return;
+    }
+    const result = createLineLegend(history.project, { x: view.x + view.width * .08, y: view.y + view.height * .08 });
+    history.commit(result.project);
+    if (result.legendId) setSelection({ type: 'lineLegend', id: result.legendId });
+    setNotice('已添加线路图例，可在属性中编辑');
+  };
   return (
     <>
       <MobileShell
@@ -857,6 +872,8 @@ export default function App() {
         onZoomSelection={zoomSelection}
         onDeleteSelection={deleteSelection}
         onAddLineBadge={addLineBadge}
+        onAddLineLegend={addLineLegend}
+        onSelectLineLegend={() => { if (history.project.lineLegend) setSelection({ type: 'lineLegend', id: history.project.lineLegend.id }) }}
         onPhasePreview={setPhasePreview}
         onStartPhaseDrawing={startPhaseDrawing}
         onFinishDrawing={finishDrawing}
@@ -879,6 +896,9 @@ export default function App() {
           onAddText={addMapElement}
           onAddRoad={() => startRoadDrawing()}
           onAddBasemapPath={startBasemapDrawing}
+          onAddLineLegend={addLineLegend}
+          onSelectLineLegend={() => { if (history.project.lineLegend) setSelection({ type: 'lineLegend', id: history.project.lineLegend.id }) }}
+          lineLegend={history.project.lineLegend}
           basemapPaths={history.project.basemapPaths}
           onSelectBasemapPath={(id) =>
             setSelection({ type: "basemapPath", id })

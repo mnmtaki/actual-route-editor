@@ -128,6 +128,8 @@ body { min-width: 0; overscroll-behavior:none; }
   .mobile-drawer .left-panel{display:block!important;height:auto;min-height:100%;overflow:visible;border:0;background:transparent}.mobile-drawer .left-panel .panel-heading{height:62px}.mobile-drawer .network-summary,.mobile-drawer .panel-help{display:none}
   .mobile-drawer .style-drawer{position:static;display:grid;width:auto;height:100%;min-height:100%;padding:0;border:0;border-radius:0;box-shadow:none;background:transparent}.mobile-drawer .style-drawer>header{padding:10px 13px;border-bottom:1px solid #e4ded4}.mobile-drawer .style-drawer-body{padding:10px 13px 24px;overflow:visible}.mobile-drawer .style-drawer h2{font-size:17px}
   .style-drawer-embedded{color:#2c312e}
-  .mobile-files,.creation-group{display:none!important}
+.mobile-files,.creation-group{display:none!important}
   .context-sheet{bottom:calc(10px + env(safe-area-inset-bottom));max-width:calc(100vw - 20px)}
 }
+
+.basemap-path-panel{border-top:1px solid #e4ded4}.basemap-path-add-actions{display:grid;grid-template-columns:1fr;gap:7px}.basemap-path-list{display:grid;gap:6px}.basemap-path-list>button{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:8px;align-items:center;padding:8px 10px;text-align:left;border:1px solid #ddd7ca;border-radius:8px;background:#fffdf9}.basemap-path-list>button.active{border-color:#cfab43;background:#f8edca}.basemap-path-list small{grid-column:2;color:#7b817c;font-size:10px}.basemap-path-swatch{width:14px;height:14px;border-radius:50%;grid-row:1 / span 2}.basemap-path-points-editor{display:grid;gap:8px;margin-top:10px}.basemap-path-points-editor .field-grid{align-items:end}.basemap-point-hit{cursor:grab}.basemap-point-marker{filter:drop-shadow(0 1px 1px #0002)}

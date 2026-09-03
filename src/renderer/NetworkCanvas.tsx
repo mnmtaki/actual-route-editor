@@ -9,6 +9,8 @@ import { SegmentArtwork, StructureRunArtwork } from './segmentStyles'
 import { compileElevatedRuns, getStructureNodePoint } from '../data/structure'
 import { MapElementsLayer } from './MapElements'
 import { LineBadgesLayer } from './LineBadges'
+import { BasemapPathsLayer } from './BasemapPaths'
+import type { DrawingMode } from '../data/basemapPaths'
 import { effectiveLineWidth, effectiveStationStyle } from '../data/style'
 import { getLineStyle, resolveLineStyle } from '../data/lineStyles'
 
@@ -18,10 +20,10 @@ type Gesture =
   | { kind: 'idle' }
   | { kind: 'panningCanvas'; pointerId: number; lastClient: Point }
   | { kind: 'pinchingCanvas'; pointerIds: [number, number]; initialDistance: number; startView: View; startWorld: Point }
-  | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineBadge' | 'draggingMapElement' | 'draggingBackground'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
+  | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineBadge' | 'draggingMapElement' | 'draggingBackground' | 'draggingBasemapPoint' | 'draggingBasemapPath'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
 
 export function NetworkCanvas({ project, selection, drawing, phasePreview, onSelect, onCreatePoint, onConnectStation, onExtend, onSegmentPoint, onPreview, onDragCommit, view, setView }: {
-  project: ActualRouteProject; selection: Selection; drawing: { lineId: string; anchorStationId: string | null; phaseId?: string } | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
+  project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
   onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void
   view: View; setView: React.Dispatch<React.SetStateAction<View>>
@@ -63,10 +65,10 @@ export function NetworkCanvas({ project, selection, drawing, phasePreview, onSel
     }
     gesture.current = { kind: 'pinchingCanvas', pointerIds: [firstId, secondId], initialDistance, startView: view, startWorld: pointerToWorld(center.x, center.y) }
   }
-  const startObjectDrag = (kind: Extract<Gesture, { before: ActualRouteProject }>['kind'], event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string) => {
+  const startObjectDrag = (kind: Extract<Gesture, { before: ActualRouteProject }>['kind'], event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string, ownerPathId?: string) => {
     event.stopPropagation(); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); capture(event)
     if (pointers.current.size >= 2) { beginPinch(); return false }
-    gesture.current = { kind, pointerId: event.pointerId, id, segmentId, ownerLineId, startWorld: pointerToWorld(event.clientX, event.clientY), origin, before: project, latest: project, moved: false }
+    gesture.current = { kind, pointerId: event.pointerId, id, segmentId, ownerLineId, ownerPathId, startWorld: pointerToWorld(event.clientX, event.clientY), origin, before: project, latest: project, moved: false }
     setPreview(project)
     return true
   }
@@ -124,6 +126,12 @@ export function NetworkCanvas({ project, selection, drawing, phasePreview, onSel
     } else if (current.kind === 'draggingMapElement') {
       const element = next.mapElements?.find(item => item.id === current.id)
       if (element) { element.x = current.origin.x + dx; element.y = current.origin.y + dy }
+    } else if (current.kind === 'draggingBasemapPoint') {
+      const point = next.basemapPaths?.find(path => path.id === current.ownerPathId)?.points.find(item => item.id === current.id)
+      if (point) { point.x = current.origin.x + dx; point.y = current.origin.y + dy }
+    } else if (current.kind === 'draggingBasemapPath') {
+      const path = next.basemapPaths?.find(item => item.id === current.ownerPathId)
+      if (path) path.points.forEach(item => { item.x += dx; item.y += dy })
     } else if (next.background) {
       next.background.x = current.origin.x + dx; next.background.y = current.origin.y + dy
     }
@@ -144,6 +152,9 @@ export function NetworkCanvas({ project, selection, drawing, phasePreview, onSel
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>
     <g data-layer="canvas-background"><rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>
     {shown.background?.visible && <image data-layer="background-image" href={shown.background.dataUrl} x={shown.background.x} y={shown.background.y} width={shown.background.width} height={shown.background.height} opacity={shown.background.opacity} onPointerDown={event => { if (drawing) return; if (!shown.background?.locked) { onSelect({ type: 'background' }); startObjectDrag('draggingBackground', event, { x: shown.background!.x, y: shown.background!.y }) } }} />}
+    <BasemapPathsLayer project={shown} selectedId={selection?.type === 'basemapPath' ? selection.id : undefined} hitRadius={stationHitRadius}
+      onPathPointerDown={(event, path) => { if (drawing) return; event.stopPropagation(); onSelect({ type: 'basemapPath', id: path.id }); if (!path.locked && path.points.length) startObjectDrag('draggingBasemapPath', event, path.points[0], undefined, undefined, undefined, path.id) }}
+      onPointPointerDown={(event, path, pointId) => { if (drawing) return; event.stopPropagation(); const point = path.points.find(item => item.id === pointId); if (point && !path.locked && startObjectDrag('draggingBasemapPoint', event, point, pointId, undefined, undefined, path.id)) onSelect({ type: 'basemapPath', id: path.id }) }} />
     <g data-layer="segments">{active.segments.map(segment => { const line = active.lines.find(item => item.id === segment.lineId); if (!line) return null; const path = getSegmentPath(shown, segment); return <g key={segment.id} className={selection?.type === 'segment' && selection.id === segment.id ? 'segment-selected' : ''}><SegmentArtwork segment={segment} line={line} path={path} lineWidth={effectiveLineWidth(line, shown.settings)} renderLegacyStructure={false} style={resolveLineStyle(shown, line)} /><path d={path} className="segment-hit" onPointerDown={event => { if (drawing) return; event.stopPropagation(); onSelect({ type: 'segment', id: segment.id }); onSegmentPoint(segment.id, projectPointToSvgPath(event.currentTarget, pointerToWorld(event.clientX, event.clientY))) }} /></g> })}</g>
     <g data-layer="structure-runs">{elevatedRuns.map(run => { const line = shown.lines.find(item => item.id === run.lineId); return line ? <StructureRunArtwork key={run.id} run={run} line={line} lineWidth={effectiveLineWidth(line, shown.settings)} style={getLineStyle(shown, 'elevated')} /> : null })}</g>    {phasePreview && <g data-layer="opening-phase-preview" pointerEvents="none">{phasePreview.segmentIds.map(id => { const segment = shown.geometry.segments.find(item => item.id === id); const line = segment ? shown.lines.find(item => item.id === segment.lineId) : null; return segment && line ? <path key={id} d={getSegmentPath(shown, segment)} className="opening-phase-preview-segment" stroke={line.color} /> : null })}{phasePreview.stationIds.map(id => { const station = shown.stations.find(item => item.id === id); return station ? <circle key={id} cx={station.x} cy={station.y} r={effectiveStationStyle(station, shown.settings).stationSize * .9} className="opening-phase-preview-station" /> : null })}</g>}    <g data-layer="stations">{active.stations.map(station => <StationMarker key={station.id} project={shown} station={station} time={shown.timeline.currentDate} selected={selection?.type === 'station' && selection.id === station.id} hitRadius={stationHitRadius}
       onPointerDown={event => { event.stopPropagation(); if (drawing) { onConnectStation(station.id); return } if (startObjectDrag('draggingStation', event, { x: station.x, y: station.y }, station.id)) onSelect({ type: 'station', id: station.id }) }}

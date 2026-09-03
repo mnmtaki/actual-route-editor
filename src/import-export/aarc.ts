@@ -1,11 +1,12 @@
-import type { ActualRouteProject, Line, Segment, Station, StationLineRelation, Waypoint } from '../data/model'
+import type { ActualRouteProject, BasemapPath, Line, Segment, Station, StationLineRelation, Waypoint } from '../data/model'
 import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from '../data/model'
 import { normalizeISODate } from '../timeline/date'
 import { reconstructAarcLineGeometry, type AarcGeometryPoint } from './aarcGeometry'
 import { convertAarcVisualStyle } from './aarcVisualStyle'
+import { removeRepeatedTerminalPoint } from '../data/basemapPaths'
 
 interface AarcPoint { id?: unknown; pos?: unknown; sta?: unknown; dir?: unknown; name?: unknown; nameS?: unknown; nameP?: unknown }
-interface AarcLine { id?: unknown; name?: unknown; color?: unknown; pts?: unknown; type?: unknown; isFake?: unknown; width?: unknown; time?: { open?: unknown } }
+interface AarcLine { id?: unknown; name?: unknown; color?: unknown; pts?: unknown; type?: unknown; isFake?: unknown; width?: unknown; zIndex?: unknown; isFilled?: unknown; time?: { open?: unknown } }
 interface AarcPointLink { pts?: unknown }
 interface AarcProject { lines?: unknown; points?: unknown; pointLinks?: unknown; cvsSize?: unknown; config?: unknown }
 
@@ -48,9 +49,27 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
   const canonicalPoint = buildPointLinkAliases(source.pointLinks, pointMap, warnings)
   const rawLines = source.lines as AarcLine[]
   const realLines = rawLines.filter(isRealTransitLine)
-  const ignoredHelperCount = rawLines.length - realLines.length
+  const terrainLines = rawLines.filter(isAarcTerrainPath)
+  const ignoredHelperCount = rawLines.length - realLines.length - terrainLines.length
   if (!realLines.length) throw new Error('AARC 工程中没有可导入的真实运营线路')
 
+  const basemapPaths: BasemapPath[] = terrainLines.flatMap((rawLine, lineIndex) => {
+    const sourceLineId = finiteId(rawLine.id) ?? lineIndex
+    const points = (Array.isArray(rawLine.pts) ? rawLine.pts : []).flatMap((rawId, pointIndex) => {
+      const pointId = finiteId(rawId)
+      if (pointId === null) { warnings.push(`AARC 底图路径 ${sourceLineId} 包含无效 Point id`); return [] }
+      const point = pointMap.get(pointId), position = point ? validPosition(point.pos) : null
+      if (!point) { warnings.push(`AARC 底图路径 ${sourceLineId} 引用了不存在的 Point ${pointId}`); return [] }
+      if (!position) { warnings.push(`AARC 底图路径 ${sourceLineId} 的 Point ${pointId} 缺少有效 pos，已跳过`); return [] }
+      return [{ id: `aarc-basemap-point-${sourceLineId}-${pointId}-${pointIndex}`, x: position[0], y: position[1] }]
+    })
+    if (points.length < 2) { warnings.push(`AARC 底图路径 ${sourceLineId} 少于两个有效路径点，已跳过`); return [] }
+    const repeated = points[0].id === points.at(-1)?.id || (points[0].x === points.at(-1)?.x && points[0].y === points.at(-1)?.y)
+    const closed = rawLine.isFilled === true || repeated
+    const width = Number(rawLine.width)
+    const path = removeRepeatedTerminalPoint({ id: `aarc-basemap-${sourceLineId}`, ...(typeof rawLine.name === 'string' && rawLine.name ? { name: rawLine.name } : {}), category: 'other', points, color: validColor(rawLine.color), width: Number.isFinite(width) && width > 0 ? width : 1, opacity: 1, closed, isFilled: rawLine.isFilled === true && closed, zIndex: Number.isFinite(Number(rawLine.zIndex)) ? Number(rawLine.zIndex) : 0, visible: true, locked: false, source: { format: 'aarc', sourceLineId } })
+    return [path]
+  })
   const stations: Station[] = []
   const lines: Line[] = []
   const relations: StationLineRelation[] = []
@@ -151,7 +170,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
   const project: ActualRouteProject = {
     version: 1,
     name: projectName(fileName),
-    stations, lines, stationLineRelations: relations, openingPhases: [], geometry: { segments }, mapElements: [], background: null,
+    stations, lines, stationLineRelations: relations, openingPhases: [], geometry: { segments }, mapElements: [], basemapPaths, background: null,
     timeline: { currentDate: today, startDate: today, endDate: today, playing: false },
     presentation: { ...DEFAULT_PRESENTATION_SETTINGS, startDate: today, endDate: today },
     settings: { ...DEFAULT_SETTINGS, ...(visualCalibration?.settings ?? {}) },
@@ -178,6 +197,9 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
 
 function isRealTransitLine(line: AarcLine) {
   return Boolean(line && line.isFake !== true && line.type !== 1 && text(line.name) && Array.isArray(line.pts) && line.pts.length >= 2)
+}
+function isAarcTerrainPath(line: AarcLine) {
+  return Boolean(line && line.isFake !== true && line.type === 1 && Array.isArray(line.pts) && line.pts.length >= 2)
 }
 function buildPointLinkAliases(raw: unknown, points: Map<number, AarcPoint>, warnings: string[]) {
   const parent = new Map<number, number>()

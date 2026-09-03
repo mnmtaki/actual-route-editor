@@ -16,7 +16,7 @@ describe('AARC importer with the real 木阳 sample', () => {
     const { project, summary } = imported()
     expect(project.lines.map(line => line.name)).toEqual(['1', '3', '4', '6'])
     expect(summary.realLineCount).toBe(4)
-    expect(summary.ignoredHelperCount).toBe(23)
+    expect(summary.ignoredHelperCount).toBe(22)
     expect(project.lines.every(line => line.source?.format === 'aarc')).toBe(true)
   })
 
@@ -80,6 +80,15 @@ describe('AARC importer with the real 木阳 sample', () => {
     expect(restored.stations.find(station => station.source?.pointId === 57)?.nameS).toBe('Muyang West\nRailway Station')
     expect(restored.stations.find(station => station.source?.pointId === 57)?.source?.nameP).toEqual([0, 16.2])
     expect(restored.settings.lineWidth).toBeCloseTo(original.settings.lineWidth)
+  })
+
+  it('imports type-1 AARC terrain as a closed BasemapPath without rail pollution', () => {
+    const { project } = imported()
+    expect(project.basemapPaths).toHaveLength(1)
+    expect(project.basemapPaths?.[0]).toMatchObject({ source: { format: 'aarc', sourceLineId: 127 }, closed: true, isFilled: true, zIndex: 0, color: '#2B5D52', width: 12 })
+    expect(project.basemapPaths?.[0].points.at(-1)?.id).not.toBe(project.basemapPaths?.[0].points[0].id)
+    expect(project.basemapPaths?.[0].points).toHaveLength(8)
+    expect(project.lines.map(line => line.name)).toEqual(['1', '3', '4', '6'])
   })
 
   it('does not invent dates from the sample non-standard numeric time.open values', () => {

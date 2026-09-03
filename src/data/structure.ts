@@ -1,6 +1,7 @@
 import type { ActualRouteProject, Segment, StructureNode, StructureType } from '../data/model'
 import { uid } from '../data/model'
 import { findSegmentProgressForPoint, getSegmentSubpathSpans, pathSpansToSvgPath, reversePathSpans, sampleSegmentAtLengthRatio, type PathSpan, type Point } from '../geometry/path'
+import { isSegmentGeometryLocked } from './lineLock'
 
 const EPSILON = 1e-5
 export interface StructureInterval { start: number; end: number; structureType: StructureType }
@@ -25,6 +26,7 @@ export function getSegmentStructureIntervals(project: ActualRouteProject, segmen
 export function addStructureNodeAtProgress(project: ActualRouteProject, segmentId: string, progress: number, structureAfter: StructureType): { project: ActualRouteProject; nodeId: string | null } {
   const next = structuredClone(project), segment = next.geometry.segments.find(item => item.id === segmentId)
   if (!segment) return { project, nodeId: null }
+  if (isSegmentGeometryLocked(project, segmentId)) return { project, nodeId: null }
   const node: StructureNode = { id: uid('structure'), progress: clamp(progress), structureAfter }
   segment.structureNodes = [...(segment.structureNodes ?? []), node]
   return { project: next, nodeId: node.id }
@@ -32,6 +34,7 @@ export function addStructureNodeAtProgress(project: ActualRouteProject, segmentI
 export function setWaypointStructureAfter(project: ActualRouteProject, segmentId: string, waypointId: string, structureAfter: StructureType | null): ActualRouteProject {
   const next = structuredClone(project), segment = next.geometry.segments.find(item => item.id === segmentId)
   if (!segment) return project
+  if (isSegmentGeometryLocked(project, segmentId)) return project
   segment.structureNodes = segment.structureNodes ?? []
   const existing = segment.structureNodes.find(node => node.waypointId === waypointId)
   if (!structureAfter) segment.structureNodes = segment.structureNodes.filter(node => node.waypointId !== waypointId)
@@ -40,6 +43,7 @@ export function setWaypointStructureAfter(project: ActualRouteProject, segmentId
   return next
 }
 export function updateStructureNode(project: ActualRouteProject, segmentId: string, nodeId: string, structureAfter: StructureType): ActualRouteProject {
+  if (isSegmentGeometryLocked(project, segmentId)) return project
   const next = structuredClone(project), node = next.geometry.segments.find(item => item.id === segmentId)?.structureNodes?.find(item => item.id === nodeId)
   if (!node) return project
   node.structureAfter = structureAfter; return next
@@ -47,10 +51,12 @@ export function updateStructureNode(project: ActualRouteProject, segmentId: stri
 export function moveIndependentStructureNode(project: ActualRouteProject, segmentId: string, nodeId: string, point: Point): ActualRouteProject {
   const next = structuredClone(project), segment = next.geometry.segments.find(item => item.id === segmentId), node = segment?.structureNodes?.find(item => item.id === nodeId)
   if (!segment || !node || node.waypointId) return project
+  if (isSegmentGeometryLocked(project, segmentId)) return project
   node.progress = findSegmentProgressForPoint(next, segment, point)
   return next
 }
 export function deleteStructureNode(project: ActualRouteProject, segmentId: string, nodeId: string): ActualRouteProject {
+  if (isSegmentGeometryLocked(project, segmentId)) return project
   const next = structuredClone(project), segment = next.geometry.segments.find(item => item.id === segmentId)
   if (!segment) return project
   segment.structureNodes = (segment.structureNodes ?? []).filter(node => node.id !== nodeId); return next

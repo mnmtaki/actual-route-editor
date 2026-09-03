@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { demoProject } from './demo'
-import { addLineBadge, appendStationToLine, connectExistingStation, createLine, deleteLineAndOrphans, deleteLineBadge, insertStationIntoSegment } from './operations'
+import { addLineBadge, addWaypointToSegment, appendStationToLine, connectExistingStation, createLine, deleteLineAndOrphans, deleteLineBadge, insertStationIntoSegment } from './operations'
 
 describe('line-driven editing operations', () => {
   it('adds multiple independent badges to one Line and deletes only the requested badge',()=>{let project=structuredClone(demoProject);const first=addLineBadge(project,'line-a',{x:10,y:20}),second=addLineBadge(first.project,'line-a',{x:30,y:40});project=second.project;expect(project.lines.find(line=>line.id==='line-a')?.lineBadges).toHaveLength(2);const next=deleteLineBadge(project,'line-a',first.badgeId!);expect(next.lines.find(line=>line.id==='line-a')?.lineBadges?.map(badge=>badge.id)).toEqual([second.badgeId]);expect(next.lines.some(line=>line.id==='line-a')).toBe(true)})
@@ -43,6 +43,17 @@ describe('line-driven editing operations', () => {
     expect(next.stations.every((station) => next.stationLineRelations.some((relation) => relation.stationId === station.id))).toBe(true)
     expect(next.lines.some(line=>line.lineBadges?.some(badge=>badge.id==='badge-a'))).toBe(false)
     expect(next.lines.find(line=>line.id==='line-b')?.lineBadges?.map(badge=>badge.id)).toEqual(['badge-b'])
+  })
+
+  it('blocks locked line geometry operations without changing the project', () => {
+    const project = structuredClone(demoProject)
+    project.lines.find(line => line.id === 'line-a')!.locked = true
+    const before = JSON.stringify(project)
+    expect(() => appendStationToLine(project, 'line-a', { x: 900, y: 500 }, 's4')).toThrow('线路已锁定')
+    expect(addWaypointToSegment(project, 'a-1', { x: 280, y: 430 })).toMatchObject({ project, waypointId: null })
+    expect(insertStationIntoSegment(project, 'a-1', { x: 280, y: 430 })).toMatchObject({ project, stationId: null })
+    expect(deleteLineAndOrphans(project, 'line-a')).toEqual(project)
+    expect(JSON.stringify(project)).toBe(before)
   })
 })
 

@@ -122,6 +122,23 @@ describe('direct manipulation gestures', () => {
     const moved=onDragCommit.mock.calls[0][1],movedNode=moved.geometry.segments.find((item:{id:string})=>item.id===segment.id).structureNodes[0]
     expect(movedNode.progress).toBeGreaterThan(.25)
     expect(moved.geometry.segments.find((item:{id:string})=>item.id===segment.id).waypoints).toEqual(segment.waypoints)
+  })
+  it('blocks station and waypoint geometry edits when their line is locked', () => {
+    const project = structuredClone(demoProject)
+    project.lines.find(line => line.id === 'line-a')!.locked = true
+    const onDragCommit = vi.fn(), onPreview = vi.fn(), onSelect = vi.fn()
+    const { container } = render(<NetworkCanvas {...baseProps} project={project} onDragCommit={onDragCommit} onPreview={onPreview} onSelect={onSelect} selection={{type:'segment',id:'a-1'}} />)
+    const svg = container.querySelector('svg')!
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+    const station = container.querySelector('[data-station-id="s1"]')!
+    fireEvent.pointerDown(station, { pointerId: 41, clientX: 180, clientY: 450, bubbles: true })
+    fireEvent.pointerMove(svg, { pointerId: 41, clientX: 240, clientY: 480, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 41, clientX: 240, clientY: 480, bubbles: true })
+    expect(onDragCommit).not.toHaveBeenCalled()
+    const waypoint = container.querySelector('[data-waypoint-id="w1"]')!
+    fireEvent.pointerDown(waypoint, { pointerId: 42, clientX: 300, clientY: 455, bubbles: true })
+    fireEvent.pointerMove(svg, { pointerId: 42, clientX: 360, clientY: 490, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 42, clientX: 360, clientY: 490, bubbles: true })
+    expect(onDragCommit).not.toHaveBeenCalled()
+    expect(onPreview).not.toHaveBeenCalled()
   })})
-
-

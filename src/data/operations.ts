@@ -5,6 +5,7 @@ import { findSegmentProgressForPoint } from '../geometry/path'
 import { splitSegmentStructure } from './structure'
 import { appendSegmentLineHistory } from './segmentLineHistory'
 import { labelOffsetFor } from './style'
+import { isLineLocked, isSegmentGeometryLocked, isStationGeometryLocked } from './lineLock'
 
 export interface Point { x: number; y: number }
 
@@ -50,6 +51,7 @@ export function createLine(project: ActualRouteProject, input: NewLineInput): { 
 export function appendStationToLine(project: ActualRouteProject, lineId: string, point: Point, fromStationId?: string | null, openingPhaseId?: string): { project: ActualRouteProject; stationId: string } {
   const next = structuredClone(project)
   const line = requireLine(next, lineId)
+  if (line.locked) throw new Error('线路已锁定')
   const stationId = uid('station')
   const openedAt = getOpeningPhaseDate(next, openingPhaseId) ?? line.openedAt ?? next.timeline.currentDate ?? null
   const labelOffset=labelOffsetFor(next.settings.defaultLabelDirection,next.settings.defaultLabelDistance)
@@ -74,6 +76,7 @@ export function appendStationToLine(project: ActualRouteProject, lineId: string,
 export function connectExistingStation(project: ActualRouteProject, lineId: string, stationId: string, fromStationId?: string | null, openingPhaseId?: string): ActualRouteProject {
   const next = structuredClone(project)
   const line = requireLine(next, lineId)
+  if (line.locked) return project
   if (!next.stations.some((station) => station.id === stationId)) return project
   const openedAt = getOpeningPhaseDate(next, openingPhaseId) ?? line.openedAt ?? next.timeline.currentDate ?? null
   const anchor = fromStationId ?? line.stationSequence.at(-1) ?? null
@@ -92,6 +95,7 @@ export function addWaypointToSegment(project: ActualRouteProject, segmentId: str
   const next = structuredClone(project)
   const segment = next.geometry.segments.find((item) => item.id === segmentId)
   if (!segment) return { project, waypointId: null }
+  if (isSegmentGeometryLocked(project, segmentId)) return { project, waypointId: null }
   const waypoint: Waypoint = { id: uid('waypoint'), x: point.x, y: point.y, type: 'smooth' }
   const insertAt = findWaypointInsertionIndex(next, segment, point)
   segment.waypoints.splice(insertAt, 0, waypoint)
@@ -103,6 +107,7 @@ export function insertStationIntoSegment(project: ActualRouteProject, segmentId:
   const next = structuredClone(project)
   const index = next.geometry.segments.findIndex((item) => item.id === segmentId)
   if (index < 0) return { project, stationId: null }
+  if (isSegmentGeometryLocked(project, segmentId)) return { project, stationId: null }
   const source = next.geometry.segments[index]
   const line = requireLine(next, source.lineId)
   const stationId = uid('station')
@@ -131,6 +136,7 @@ export interface SplitLineResult { project: ActualRouteProject; newLineId: strin
 export function splitLineAtStation(project: ActualRouteProject, input: SplitLineInput): SplitLineResult {
   const line = project.lines.find(item => item.id === input.lineId)
   if (!line) return { project, newLineId: null, movedSegmentIds: [], movedStationIds: [], error: '未找到要拆分的线路' }
+  if (isLineLocked(project, input.lineId)) return { project, newLineId: null, movedSegmentIds: [], movedStationIds: [], error: '线路已锁定' }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.openedAt)) return { project, newLineId: null, movedSegmentIds: [], movedStationIds: [], error: '请输入有效的拆分日期' }
   const splitIndex = line.stationSequence.indexOf(input.splitStationId)
   if (splitIndex <= 0 || splitIndex >= line.stationSequence.length - 1) return { project, newLineId: null, movedSegmentIds: [], movedStationIds: [], error: '拆分站必须位于线路中间' }
@@ -173,6 +179,7 @@ export function splitLineAtStation(project: ActualRouteProject, input: SplitLine
 
 export const splitLine = splitLineAtStation
 export function deleteLineAndOrphans(project: ActualRouteProject, lineId: string): ActualRouteProject {
+  if (isLineLocked(project, lineId)) return project
   const next = structuredClone(project)
   next.lines = next.lines.filter((line) => line.id !== lineId)
   next.stationLineRelations = next.stationLineRelations.filter((relation) => relation.lineId !== lineId)
@@ -182,6 +189,7 @@ export function deleteLineAndOrphans(project: ActualRouteProject, lineId: string
 }
 
 export function deleteStationConsistently(project: ActualRouteProject, stationId: string): ActualRouteProject {
+  if (isStationGeometryLocked(project, stationId)) return project
   const next = structuredClone(project)
   next.stations = next.stations.filter((station) => station.id !== stationId)
   next.stationLineRelations = next.stationLineRelations.filter((relation) => relation.stationId !== stationId)

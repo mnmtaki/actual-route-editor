@@ -63,6 +63,7 @@ import {
   snapRoadPoint,
 } from "./data/roads";
 import type { Road } from "./data/model";
+import { isLineLocked, isSegmentGeometryLocked, isStationGeometryLocked, lockedStationMessage } from "./data/lineLock";
 type Drawing = DrawingMode;
 type Point = { x: number; y: number };
 export default function App() {
@@ -274,6 +275,10 @@ export default function App() {
       );
       return;
     }
+    if (drawing.kind === "line" && isLineLocked(history.project, drawing.lineId)) {
+      setNotice("线路已锁定");
+      return;
+    }
     const r = appendStationToLine(
       history.project,
       drawing.lineId,
@@ -287,6 +292,10 @@ export default function App() {
   };
   const connect = (id: string) => {
     if (!drawing || drawing.kind !== "line") return;
+    if (isLineLocked(history.project, drawing.lineId)) {
+      setNotice("线路已锁定");
+      return;
+    }
     if (drawing.anchorStationId === id) {
       setDrawing(null);
       setNotice("环线已闭合");
@@ -310,6 +319,10 @@ export default function App() {
   const extend = (stationId: string) => {
     const ids = stationLineIds(history.project, stationId);
     if (ids.length === 1) {
+      if (isLineLocked(history.project, ids[0])) {
+        setNotice("线路已锁定");
+        return;
+      }
       setDrawing({ kind: "line", lineId: ids[0], anchorStationId: stationId });
       setActiveLineId(ids[0]);
       return;
@@ -320,6 +333,10 @@ export default function App() {
     const stationId = choice!;
     setChoice(null);
     if (lineId) {
+      if (isLineLocked(history.project, lineId)) {
+        setNotice("线路已锁定");
+        return;
+      }
       setDrawing({ kind: "line", lineId, anchorStationId: stationId });
       setActiveLineId(lineId);
     } else setDialog({ seed: stationId });
@@ -329,6 +346,10 @@ export default function App() {
     lineId: string,
     stationId: string | null,
   ) => {
+    if (isLineLocked(history.project, lineId)) {
+      setNotice("线路已锁定");
+      return;
+    }
     setDrawing({ kind: "line", lineId, anchorStationId: stationId, phaseId });
     setActiveLineId(lineId);
     setSelection(
@@ -358,6 +379,18 @@ export default function App() {
     if (!selection) return;
     if (selection.type === "background") {
       removeBackground();
+      return;
+    }
+    if (selection.type === "line" && isLineLocked(history.project, selection.id)) {
+      setNotice("线路已锁定");
+      return;
+    }
+    if (selection.type === "station" && isStationGeometryLocked(history.project, selection.id)) {
+      setNotice(lockedStationMessage(history.project, selection.id));
+      return;
+    }
+    if ((selection.type === "segment" || selection.type === "waypoint" || selection.type === "structureNode") && isSegmentGeometryLocked(history.project, selection.type === "segment" ? selection.id : selection.segmentId)) {
+      setNotice("线路已锁定");
       return;
     }
     let n = history.project;
@@ -410,6 +443,10 @@ export default function App() {
   };
   const segmentAction = (kind: "station" | "waypoint" | "straight") => {
     if (selection?.type !== "segment") return;
+    if (isSegmentGeometryLocked(history.project, selection.id)) {
+      setNotice("线路已锁定");
+      return;
+    }
     const p = segmentPoint?.id === selection.id ? segmentPoint.p : null;
     if (kind === "straight") {
       const n = structuredClone(history.project),
@@ -441,6 +478,10 @@ export default function App() {
     value: "underground" | "elevated" | "ground",
   ) => {
     if (selection?.type !== "segment") return;
+    if (isSegmentGeometryLocked(history.project, selection.id)) {
+      setNotice("线路已锁定");
+      return;
+    }
     const point = segmentPoint?.id === selection.id ? segmentPoint.p : null,
       segment = history.project.geometry.segments.find(
         (item) => item.id === selection.id,
@@ -464,6 +505,10 @@ export default function App() {
     value: "underground" | "elevated" | "ground" | null,
   ) => {
     if (selection?.type !== "waypoint") return;
+    if (isSegmentGeometryLocked(history.project, selection.segmentId)) {
+      setNotice("线路已锁定");
+      return;
+    }
     history.commit(
       setWaypointStructureAfter(
         history.project,
@@ -477,6 +522,10 @@ export default function App() {
     value: "underground" | "elevated" | "ground",
   ) => {
     if (selection?.type !== "structureNode") return;
+    if (isSegmentGeometryLocked(history.project, selection.segmentId)) {
+      setNotice("线路已锁定");
+      return;
+    }
     history.commit(
       updateStructureNode(
         history.project,
@@ -910,6 +959,7 @@ export default function App() {
               onSegmentPoint={(id, p) => setSegmentPoint({ id, p })}
               onPreview={history.replace}
               onDragCommit={history.commitFrom}
+              onEditBlocked={setNotice}
               onFinishDrawing={finishDrawing}
               view={view}
               setView={setView}
@@ -923,6 +973,10 @@ export default function App() {
               onStraighten={() => segmentAction("straight")}
               onStructureChange={(value) => {
                 if (selection?.type !== "segment") return;
+                if (isSegmentGeometryLocked(history.project, selection.id)) {
+                  setNotice("线路已锁定");
+                  return;
+                }
                 history.commit((current) => {
                   const next = structuredClone(current);
                   const segment = next.geometry.segments.find(

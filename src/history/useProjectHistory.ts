@@ -5,10 +5,12 @@ interface HistoryState { past: ActualRouteProject[]; present: ActualRouteProject
 
 export function useProjectHistory(initial: ActualRouteProject) {
   const [history, setHistory] = useState<HistoryState>({ past: [], present: initial, future: [] })
-  const commit = useCallback((next: ActualRouteProject | ((current: ActualRouteProject) => ActualRouteProject)) => {
+  const commit = useCallback((next: ActualRouteProject | ((current: ActualRouteProject) => ActualRouteProject), transient = false, before?: ActualRouteProject) => {
     setHistory((state) => {
       const value = typeof next === 'function' ? next(state.present) : next
       if (value === state.present) return state
+      if (transient) return { ...state, present: value }
+      if (before) return { past: [...state.past.slice(-79), before], present: value, future: [] }
       return { past: [...state.past.slice(-79), state.present], present: value, future: [] }
     })
   }, [])

@@ -14,6 +14,15 @@ beforeAll(() => {
 const baseProps = { selection: null, drawing: null, onSelect: vi.fn(), onCreatePoint: vi.fn(), onConnectStation: vi.fn(), onExtend: vi.fn(), onSegmentPoint: vi.fn(), onPreview: vi.fn(), onDragCommit: vi.fn(), view: { x: 0, y: 0, width: 920, height: 680 }, setView: vi.fn() }
 
 describe('direct manipulation gestures', () => {
+  it('adds one node for a single drawing click and finishes on the second click without a duplicate endpoint',()=>{
+    const onCreatePoint=vi.fn(),onFinishDrawing=vi.fn(),svgProps={...baseProps,onCreatePoint,onFinishDrawing,drawing:{kind:'line' as const,lineId:'line-a',anchorStationId:null,phaseId:undefined}}
+    const {container}=render(<NetworkCanvas {...svgProps} project={structuredClone(demoProject)}/>)
+    const svg=container.querySelector('svg')!
+    vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
+    fireEvent.pointerDown(svg,{pointerId:31,clientX:300,clientY:320,bubbles:true});fireEvent.pointerUp(svg,{pointerId:31,clientX:300,clientY:320,bubbles:true})
+    fireEvent.pointerDown(svg,{pointerId:31,clientX:300,clientY:320,bubbles:true});fireEvent.pointerUp(svg,{pointerId:31,clientX:300,clientY:320,bubbles:true})
+    expect(onCreatePoint).toHaveBeenCalledTimes(1);expect(onFinishDrawing).toHaveBeenCalledTimes(1)
+  })
   it('shows lightweight selectable handles for the actual corners of a selected rounded Segment',()=>{
     const project=structuredClone(demoProject),segment=project.geometry.segments.find(item=>item.id==='a-1')!,onSelect=vi.fn()
     segment.mode='rounded';segment.waypoints=[{id:'corner-a',x:270,y:350,type:'corner',cornerRadius:20},{id:'corner-b',x:330,y:420,type:'corner',cornerRadius:70}]

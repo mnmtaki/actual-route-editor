@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ActualRouteProject, Selection } from '../data/model'
 import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPlans } from '../geometry/path'
 import { projectPointToSvgPath, screenPointToWorld } from '../geometry/screenPoint'
@@ -22,15 +22,16 @@ type Gesture =
   | { kind: 'pinchingCanvas'; pointerIds: [number, number]; initialDistance: number; startView: View; startWorld: Point }
   | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineBadge' | 'draggingMapElement' | 'draggingBackground' | 'draggingBasemapPoint' | 'draggingBasemapPath'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
 
-export function NetworkCanvas({ project, selection, drawing, phasePreview, onSelect, onCreatePoint, onConnectStation, onExtend, onSegmentPoint, onPreview, onDragCommit, view, setView }: {
+export function NetworkCanvas({ project, selection, drawing, phasePreview, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, view, setView }: {
   project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
-  onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void
+  onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void; onFinishDrawing?: () => void
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void
   view: View; setView: React.Dispatch<React.SetStateAction<View>>
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const gesture = useRef<Gesture>({ kind: 'idle' })
   const pointers = useRef(new Map<number, Point>())
+  const drawingClick = useRef<{ time: number; x: number; y: number } | null>(null)
   const [preview, setPreview] = useState<ActualRouteProject | null>(null)
   const [canvasWidth, setCanvasWidth] = useState(920)
   const shown = preview ?? project
@@ -48,6 +49,7 @@ export function NetworkCanvas({ project, selection, drawing, phasePreview, onSel
     observer?.observe(element)
     return () => observer?.disconnect()
   }, [])
+  useEffect(() => { if (!drawing) drawingClick.current = null }, [drawing])
 
   const pointerToWorld = (clientX: number, clientY: number): Point => screenPointToWorld(svgRef.current!, clientX, clientY, view)
   const capture = (event: React.PointerEvent) => event.currentTarget.setPointerCapture?.(event.pointerId)
@@ -76,7 +78,13 @@ export function NetworkCanvas({ project, selection, drawing, phasePreview, onSel
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
     if (pointers.current.size >= 2) { capture(event); beginPinch(); return }
     const target = event.target as Element
-    if (drawing) { onCreatePoint(pointerToWorld(event.clientX, event.clientY)); return }
+    if (drawing) {
+      const now = Date.now(), previous = drawingClick.current
+      const isDouble = previous && now - previous.time < 360 && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) < 12
+      if (isDouble) { drawingClick.current = null; onFinishDrawing?.(); return }
+      drawingClick.current = { time: now, x: event.clientX, y: event.clientY }
+      onCreatePoint(pointerToWorld(event.clientX, event.clientY)); return
+    }
     if (target !== event.currentTarget && !target.classList.contains('canvas-bg')) return
     onSelect(null); capture(event)
     gesture.current = { kind: 'panningCanvas', pointerId: event.pointerId, lastClient: { x: event.clientX, y: event.clientY } }
@@ -146,8 +154,9 @@ export function NetworkCanvas({ project, selection, drawing, phasePreview, onSel
     gesture.current = { kind: 'idle' }; setPreview(null)
   }
 
-  return <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''}`} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
+  return <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''}`} tabIndex={0} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
     onPointerDown={handleCanvasPointerDown} onPointerMove={handlePointerMove} onPointerUp={endGesture} onPointerCancel={endGesture} onContextMenu={event=>event.preventDefault()}
+    onDoubleClick={event => { if (drawing) { event.preventDefault(); drawingClick.current = null; onFinishDrawing?.() } }}
     onWheel={event => { event.preventDefault(); const point = pointerToWorld(event.clientX, event.clientY); const factor = event.deltaY > 0 ? 1.12 : .88; setView(value => ({ x: point.x - (point.x - value.x) * factor, y: point.y - (point.y - value.y) * factor, width: value.width * factor, height: value.height * factor })) }}>
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>
     <g data-layer="canvas-background"><rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>

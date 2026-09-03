@@ -1,6 +1,6 @@
 export interface ExportBounds { x:number; y:number; width:number; height:number }
 
-const FORMAL_LAYERS='[data-layer="basemap-paths"],[data-layer="segments"],[data-layer="structure-runs"],[data-layer="stations"],[data-layer="line-badges"],[data-layer="map-elements"]'
+const FORMAL_LAYERS='[data-layer="vector-basemap"],[data-layer="basemap-paths"],[data-layer="roads"],[data-layer="segments"],[data-layer="structure-runs"],[data-layer="stations"],[data-layer="line-badges"],[data-layer="map-elements"]'
 const DEFAULT_PADDING=32
 
 export function exportSvg(svg: SVGSVGElement, includeBackground: boolean): string {

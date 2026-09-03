@@ -8,7 +8,7 @@ import { getStationStyle } from '../renderer/stationStyles'
 import { StationLabel } from '../renderer/StationLabel'
 import { MapElementsLayer } from '../renderer/MapElements'
 import { LineBadgesLayer } from '../renderer/LineBadges'
-import { BasemapPathsLayer } from '../renderer/BasemapPaths'
+import { VectorBasemapLayer } from '../renderer/VectorBasemap'
 import { effectiveLineWidth, effectiveStationStyle } from '../data/style'
 import { getLineStyle, resolveLineStyle } from '../data/lineStyles'
 import { getStationNameAt } from '../data/stationNameHistory'
@@ -30,7 +30,7 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
   return <svg ref={svgRef} className="presentation-scene" xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox={`${state.camera.x} ${state.camera.y} ${state.camera.width} ${state.camera.height}`} preserveAspectRatio="xMidYMid slice" data-presentation-time={time.toFixed(3)} data-beat-id={state.currentBeat?.beatId ?? ''} data-global-reveal-progress={state.globalRevealProgress.toFixed(4)}>
     <rect x={state.camera.x} y={state.camera.y} width={state.camera.width} height={state.camera.height} fill="#f3f0e9" />
     {sequence.settings.showBackground && project.background?.visible && <image href={project.background.dataUrl} x={project.background.x} y={project.background.y} width={project.background.width} height={project.background.height} opacity={project.background.opacity} />}
-    <BasemapPathsLayer project={project} presentation />
+    <VectorBasemapLayer project={project} presentation />
     <g data-presentation-layer="segments">{segmentArtwork.map(({ segment, line, path }) => {
       const segmentState = state.segmentStates[segment.id]
       if (!line?.visible || !segmentState || segmentState.revealProgress <= 0 || segmentState.opacity <= 0) return null

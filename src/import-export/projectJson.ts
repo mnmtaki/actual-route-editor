@@ -6,6 +6,7 @@ import { normalizeStationNameHistory, syncStationNameFromHistory } from '../data
 import { normalizeSegmentLineHistory } from '../data/segmentLineHistory'
 import { normalizeLineStyles } from '../data/lineStyles'
 import { normalizeBasemapPaths } from '../data/basemapPaths'
+import { normalizeRoadStyles, normalizeRoads } from '../data/roads'
 
 type LegacySettings = Partial<ProjectSettings> & { stationDiameterRatio?: number }
 
@@ -51,6 +52,8 @@ export function parseProjectJson(text: string): ActualRouteProject {
   const source = (parsed.presentation ?? {}) as Partial<PresentationSettings>
   const rawMapElements = Array.isArray(parsed.mapElements) ? parsed.mapElements as unknown[] : []
   const normalizedBasemapPaths = normalizeBasemapPaths((parsed as Record<string, unknown>).basemapPaths)
+  const normalizedRoads = normalizeRoads((parsed as Record<string, unknown>).roads)
+  const normalizedRoadStyles = normalizeRoadStyles((parsed as Record<string, unknown>).roadStyles)
   const legacyLineBadges = rawMapElements.flatMap(value => normalizeLegacyLineBadge(value))
   const presentation: PresentationSettings = {
     ...DEFAULT_PRESENTATION_SETTINGS,
@@ -86,6 +89,8 @@ export function parseProjectJson(text: string): ActualRouteProject {
     geometry: { segments: parsed.geometry.segments.map(segment => ({ ...segment, ...normalizedDateFields(segment), ...(normalizeSegmentLineHistory(segment.lineHistory) ? { lineHistory: normalizeSegmentLineHistory(segment.lineHistory) } : {}), mode: segment.mode === 'smooth' || segment.mode === 'corner' || segment.mode === 'rounded' ? segment.mode : 'straight', ...(typeof segment.cornerRadius === 'number' && Number.isFinite(segment.cornerRadius) && segment.cornerRadius >= 0 ? {cornerRadius:segment.cornerRadius} : {}), structureType: segment.structureType === 'elevated' || segment.structureType === 'ground' ? segment.structureType : 'underground', structureNodes: Array.isArray(segment.structureNodes) ? segment.structureNodes.filter(node => node && typeof node.id === 'string').map(node => ({ id: node.id, structureAfter: node.structureAfter === 'elevated' || node.structureAfter === 'ground' ? node.structureAfter : 'underground', ...(typeof node.waypointId === 'string' ? { waypointId: node.waypointId } : {}), ...(typeof node.progress === 'number' && Number.isFinite(node.progress) ? { progress: Math.max(0, Math.min(1, node.progress)) } : {}) })) : [], waypoints: Array.isArray(segment.waypoints) ? segment.waypoints.map(waypoint => ({ ...waypoint, ...(typeof waypoint.cornerRadius === 'number' && Number.isFinite(waypoint.cornerRadius) && waypoint.cornerRadius >= 0 ? {cornerRadius:waypoint.cornerRadius} : {}) })) : [] })) },
     mapElements: rawMapElements.flatMap(element => normalizeMapElement(element)),
     ...(normalizedBasemapPaths ? { basemapPaths: normalizedBasemapPaths } : {}),
+    ...(normalizedRoads ? { roads: normalizedRoads } : {}),
+    ...(normalizedRoadStyles ? { roadStyles: normalizedRoadStyles } : {}),
     background: parsed.background ?? null,
     timeline: { currentDate: normalizeRequiredDate(parsed.timeline?.currentDate, today), startDate: normalizeRequiredDate(parsed.timeline?.startDate, today), endDate: normalizeRequiredDate(parsed.timeline?.endDate, today), playing: false },
     presentation,

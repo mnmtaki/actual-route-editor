@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ActualRouteProject, Selection } from '../data/model'
+import type { ActualRouteProject, Road, Selection } from '../data/model'
 import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPlans } from '../geometry/path'
 import { projectPointToSvgPath, screenPointToWorld } from '../geometry/screenPoint'
 import { getActiveNetworkAtTime } from '../timeline/active'
@@ -9,7 +9,7 @@ import { SegmentArtwork, StructureRunArtwork } from './segmentStyles'
 import { compileElevatedRuns, getStructureNodePoint } from '../data/structure'
 import { MapElementsLayer } from './MapElements'
 import { LineBadgesLayer } from './LineBadges'
-import { BasemapPathsLayer } from './BasemapPaths'
+import { VectorBasemapLayer } from './VectorBasemap'
 import type { DrawingMode } from '../data/basemapPaths'
 import { effectiveLineWidth, effectiveStationStyle } from '../data/style'
 import { getLineStyle, resolveLineStyle } from '../data/lineStyles'
@@ -20,10 +20,10 @@ type Gesture =
   | { kind: 'idle' }
   | { kind: 'panningCanvas'; pointerId: number; lastClient: Point }
   | { kind: 'pinchingCanvas'; pointerIds: [number, number]; initialDistance: number; startView: View; startWorld: Point }
-  | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineBadge' | 'draggingMapElement' | 'draggingBackground' | 'draggingBasemapPoint' | 'draggingBasemapPath'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
+  | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineBadge' | 'draggingMapElement' | 'draggingBackground' | 'draggingBasemapPoint' | 'draggingBasemapPath' | 'draggingRoadPoint'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; ownerRoadId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
 
-export function NetworkCanvas({ project, selection, drawing, phasePreview, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, view, setView }: {
-  project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
+export function NetworkCanvas({ project, selection, drawing, roadDraft, phasePreview, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, view, setView }: {
+  project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; roadDraft?: Road | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
   onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void; onFinishDrawing?: () => void
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void
   view: View; setView: React.Dispatch<React.SetStateAction<View>>
@@ -32,6 +32,7 @@ export function NetworkCanvas({ project, selection, drawing, phasePreview, onSel
   const gesture = useRef<Gesture>({ kind: 'idle' })
   const pointers = useRef(new Map<number, Point>())
   const drawingClick = useRef<{ time: number; x: number; y: number } | null>(null)
+  const pointerDoubleFinish = useRef(false)
   const [preview, setPreview] = useState<ActualRouteProject | null>(null)
   const [canvasWidth, setCanvasWidth] = useState(920)
   const shown = preview ?? project
@@ -67,10 +68,10 @@ export function NetworkCanvas({ project, selection, drawing, phasePreview, onSel
     }
     gesture.current = { kind: 'pinchingCanvas', pointerIds: [firstId, secondId], initialDistance, startView: view, startWorld: pointerToWorld(center.x, center.y) }
   }
-  const startObjectDrag = (kind: Extract<Gesture, { before: ActualRouteProject }>['kind'], event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string, ownerPathId?: string) => {
+  const startObjectDrag = (kind: Extract<Gesture, { before: ActualRouteProject }>['kind'], event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string, ownerPathId?: string, ownerRoadId?: string) => {
     event.stopPropagation(); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); capture(event)
     if (pointers.current.size >= 2) { beginPinch(); return false }
-    gesture.current = { kind, pointerId: event.pointerId, id, segmentId, ownerLineId, ownerPathId, startWorld: pointerToWorld(event.clientX, event.clientY), origin, before: project, latest: project, moved: false }
+    gesture.current = { kind, pointerId: event.pointerId, id, segmentId, ownerLineId, ownerPathId, ownerRoadId, startWorld: pointerToWorld(event.clientX, event.clientY), origin, before: project, latest: project, moved: false }
     setPreview(project)
     return true
   }
@@ -81,7 +82,7 @@ export function NetworkCanvas({ project, selection, drawing, phasePreview, onSel
     if (drawing) {
       const now = Date.now(), previous = drawingClick.current
       const isDouble = previous && now - previous.time < 360 && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) < 12
-      if (isDouble) { drawingClick.current = null; onFinishDrawing?.(); return }
+      if (isDouble) { drawingClick.current = null; pointerDoubleFinish.current = true; onFinishDrawing?.(); return }
       drawingClick.current = { time: now, x: event.clientX, y: event.clientY }
       onCreatePoint(pointerToWorld(event.clientX, event.clientY)); return
     }
@@ -140,6 +141,9 @@ export function NetworkCanvas({ project, selection, drawing, phasePreview, onSel
     } else if (current.kind === 'draggingBasemapPath') {
       const path = next.basemapPaths?.find(item => item.id === current.ownerPathId)
       if (path) path.points.forEach(item => { item.x += dx; item.y += dy })
+    } else if (current.kind === 'draggingRoadPoint') {
+      const point = next.roads?.find(road => road.id === current.ownerRoadId)?.points.find(item => item.id === current.id)
+      if (point) { point.x = current.origin.x + dx; point.y = current.origin.y + dy }
     } else if (next.background) {
       next.background.x = current.origin.x + dx; next.background.y = current.origin.y + dy
     }
@@ -156,12 +160,14 @@ export function NetworkCanvas({ project, selection, drawing, phasePreview, onSel
 
   return <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''}`} tabIndex={0} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
     onPointerDown={handleCanvasPointerDown} onPointerMove={handlePointerMove} onPointerUp={endGesture} onPointerCancel={endGesture} onContextMenu={event=>event.preventDefault()}
-    onDoubleClick={event => { if (drawing) { event.preventDefault(); drawingClick.current = null; onFinishDrawing?.() } }}
+    onDoubleClick={event => { if (drawing) { event.preventDefault(); drawingClick.current = null; if (pointerDoubleFinish.current) { pointerDoubleFinish.current = false; return } onFinishDrawing?.() } }}
     onWheel={event => { event.preventDefault(); const point = pointerToWorld(event.clientX, event.clientY); const factor = event.deltaY > 0 ? 1.12 : .88; setView(value => ({ x: point.x - (point.x - value.x) * factor, y: point.y - (point.y - value.y) * factor, width: value.width * factor, height: value.height * factor })) }}>
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>
     <g data-layer="canvas-background"><rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>
     {shown.background?.visible && <image data-layer="background-image" href={shown.background.dataUrl} x={shown.background.x} y={shown.background.y} width={shown.background.width} height={shown.background.height} opacity={shown.background.opacity} onPointerDown={event => { if (drawing) return; if (!shown.background?.locked) { onSelect({ type: 'background' }); startObjectDrag('draggingBackground', event, { x: shown.background!.x, y: shown.background!.y }) } }} />}
-    <BasemapPathsLayer project={shown} selectedId={selection?.type === 'basemapPath' ? selection.id : undefined} hitRadius={stationHitRadius}
+    <VectorBasemapLayer project={shown} draft={roadDraft} selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined} hitRadius={stationHitRadius}
+      onRoadPointerDown={(event, road) => { if (drawing) return; event.stopPropagation(); if (road.locked) return; onSelect({ type: 'road', id: road.id }) }}
+      onRoadPointPointerDown={(event, road, pointId) => { if (drawing || road.locked) return; event.stopPropagation(); const point=road.points.find(item=>item.id===pointId); if(point && startObjectDrag('draggingRoadPoint', event, point, point.id, undefined, undefined, undefined, road.id)) onSelect({type:'roadPoint',id:pointId,roadId:road.id}) }}
       onPathPointerDown={(event, path) => { if (drawing) return; event.stopPropagation(); onSelect({ type: 'basemapPath', id: path.id }); if (!path.locked && path.points.length) startObjectDrag('draggingBasemapPath', event, path.points[0], undefined, undefined, undefined, path.id) }}
       onPointPointerDown={(event, path, pointId) => { if (drawing) return; event.stopPropagation(); const point = path.points.find(item => item.id === pointId); if (point && !path.locked && startObjectDrag('draggingBasemapPoint', event, point, pointId, undefined, undefined, path.id)) onSelect({ type: 'basemapPath', id: path.id }) }} />
     <g data-layer="segments">{active.segments.map(segment => { const line = active.lines.find(item => item.id === segment.lineId); if (!line) return null; const path = getSegmentPath(shown, segment); return <g key={segment.id} className={selection?.type === 'segment' && selection.id === segment.id ? 'segment-selected' : ''}><SegmentArtwork segment={segment} line={line} path={path} lineWidth={effectiveLineWidth(line, shown.settings)} renderLegacyStructure={false} style={resolveLineStyle(shown, line)} /><path d={path} className="segment-hit" onPointerDown={event => { if (drawing) return; event.stopPropagation(); onSelect({ type: 'segment', id: segment.id }); onSegmentPoint(segment.id, projectPointToSvgPath(event.currentTarget, pointerToWorld(event.clientX, event.clientY))) }} /></g> })}</g>

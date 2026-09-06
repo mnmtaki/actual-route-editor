@@ -10,6 +10,7 @@ export function createEmptyProject(): ActualRouteProject {
   return {
     version: 1,
     name: '未命名实际走向工程',
+    projectName: '未命名工程',
     stations: [],
     lines: [],
     stationLineRelations: [],

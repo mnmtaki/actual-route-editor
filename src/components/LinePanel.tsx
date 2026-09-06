@@ -1,5 +1,6 @@
 import type { ActualRouteProject, Selection } from '../data/model'
 import { getSegmentCurveLength } from '../geometry/path'
+import { worldUnitsToKilometers } from '../data/distance'
 
 function EyeIcon({ hidden = false }: { hidden?: boolean }) {
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="line-state-icon"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />{!hidden && <circle cx="12" cy="12" r="2.5" fill="currentColor" />}{hidden && <path d="m4 4 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />}</svg>
@@ -11,8 +12,7 @@ function LockIcon({ locked = false }: { locked?: boolean }) {
 
 export function LinePanel({project,selection,activeLineId,onSelect,onChange,onAddLine}:{project:ActualRouteProject;selection:Selection;activeLineId:string|null;onSelect:(id:string)=>void;onChange:(project:ActualRouteProject)=>void;onAddLine:()=>void}){
   const patch=(mutate:(next:ActualRouteProject)=>void)=>{const next=structuredClone(project);mutate(next);onChange(next)}
-  const scale=project.settings.worldUnitsPerKm>0?project.settings.worldUnitsPerKm:100
-  const lineStats=project.lines.map(line=>({line,length:project.geometry.segments.filter(segment=>segment.lineId===line.id).reduce((sum,segment)=>sum+getSegmentCurveLength(project,segment),0)/scale,stations:new Set(line.stationSequence).size}))
+  const lineStats=project.lines.map(line=>({line,length:worldUnitsToKilometers(project.geometry.segments.filter(segment=>segment.lineId===line.id).reduce((sum,segment)=>sum+getSegmentCurveLength(project,segment),0),project),stations:new Set(line.stationSequence).size}))
   const totalLength=lineStats.reduce((sum,item)=>sum+item.length,0)
   const totalStations=new Set(project.stationLineRelations.map(relation=>relation.stationId)).size
   return <aside className="left-panel panel" aria-label="线路结构">

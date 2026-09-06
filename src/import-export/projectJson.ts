@@ -8,6 +8,7 @@ import { normalizeLineStyles } from '../data/lineStyles'
 import { normalizeBasemapPaths } from '../data/basemapPaths'
 import { normalizeRoadStyles, normalizeRoads } from '../data/roads'
 import { normalizeLineLegend } from '../data/lineLegend'
+import { normalizeDistanceScale } from '../data/distance'
 
 type LegacySettings = Partial<ProjectSettings> & { stationDiameterRatio?: number }
 
@@ -17,6 +18,7 @@ export function parseProjectJson(text: string): ActualRouteProject {
   const normalizedStyles = normalizeLineStyles((parsed as Record<string, unknown>).styles)
   const today = new Date().toISOString().slice(0, 10)
   const raw = (parsed.settings ?? {}) as LegacySettings
+  const distanceScale = normalizeDistanceScale((parsed as Record<string, unknown>).distanceScale)
   const typographyFallback = legacyTypographyFallback(parsed.stations)
   const lineWidth = positiveOr(raw.lineWidth, DEFAULT_SETTINGS.lineWidth)
   const stationSize = positiveOr(raw.stationSize, DEFAULT_SETTINGS.stationSize)
@@ -50,6 +52,7 @@ export function parseProjectJson(text: string): ActualRouteProject {
     exportBackground: raw.exportBackground !== false,
     worldUnitsPerKm: positiveOr(raw.worldUnitsPerKm, DEFAULT_SETTINGS.worldUnitsPerKm),
   }
+  if (distanceScale) settings.worldUnitsPerKm = 1000 / distanceScale.metersPerWorldUnit
   const source = (parsed.presentation ?? {}) as Partial<PresentationSettings>
   const rawMapElements = Array.isArray(parsed.mapElements) ? parsed.mapElements as unknown[] : []
   const normalizedBasemapPaths = normalizeBasemapPaths((parsed as Record<string, unknown>).basemapPaths)
@@ -84,6 +87,8 @@ export function parseProjectJson(text: string): ActualRouteProject {
   const project: ActualRouteProject = {
     version: 1,
     name: typeof parsed.name === 'string' ? parsed.name : '恢复的实际走向工程',
+    ...(typeof parsed.projectName === 'string' && parsed.projectName.trim() ? { projectName: parsed.projectName.trim() } : {}),
+    ...(distanceScale ? { distanceScale } : {}),
     stations: parsed.stations.map(station => { const { styleOverrides: _ignored, ...rest }=station, styleOverrides=normalizeStationStyleOverrides(station.styleOverrides), nameHistory=normalizeStationNameHistory(station); const normalized=({ ...rest, ...(styleOverrides?{styleOverrides}:{}), ...(nameHistory?{nameHistory}:{}), ...(typeof station.nameS === 'string' && station.nameS.length ? {nameS:station.nameS} : {}), ...normalizedDateFields(station), labelOffsetX: Number.isFinite(station.labelOffsetX) ? station.labelOffsetX : 14, labelOffsetY: Number.isFinite(station.labelOffsetY) ? station.labelOffsetY : -14, ...(typeof station.labelRotation === 'number' && Number.isFinite(station.labelRotation) ? {labelRotation:station.labelRotation} : {}) }); if(nameHistory)syncStationNameFromHistory(normalized); return normalized }),
     lines: parsed.lines.map((line, index) => { const { styleOverrides: _ignored, ...rest }=line, styleOverrides=normalizeLineStyleOverrides(line.styleOverrides); return ({ ...rest, ...(styleOverrides?{styleOverrides}:{}), ...(typeof line.lineStyleId === 'string' && line.lineStyleId ? { lineStyleId: line.lineStyleId } : {}), ...normalizedDateFields(line), stationSequence: Array.isArray(line.stationSequence) ? line.stationSequence : [], ...(Array.isArray(line.lineBadges) ? {lineBadges:line.lineBadges.flatMap(value => normalizeLineBadge(value))} : {}), lineOrder: Number.isFinite(line.lineOrder) ? line.lineOrder : index, visible: line.visible !== false, locked: line.locked === true })}),
     stationLineRelations: Array.isArray(parsed.stationLineRelations) ? parsed.stationLineRelations.map(relation => ({ ...relation, ...normalizedDateFields(relation) })) : [],

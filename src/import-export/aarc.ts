@@ -169,7 +169,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC å
   const today = new Date().toISOString().slice(0, 10)
   const project: ActualRouteProject = {
     version: 1,
-    name: projectName(fileName),
+    name: projectName(fileName), projectName: projectName(fileName),
     stations, lines, stationLineRelations: relations, openingPhases: [], geometry: { segments }, mapElements: [], basemapPaths, background: null,
     timeline: { currentDate: today, startDate: today, endDate: today, playing: false },
     presentation: { ...DEFAULT_PRESENTATION_SETTINGS, startDate: today, endDate: today },

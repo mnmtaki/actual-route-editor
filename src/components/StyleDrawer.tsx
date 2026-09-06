@@ -17,7 +17,7 @@ export function StyleDrawer({project,onChange,onClose,onRemoveBackground,onPrevi
   const commitEdit=()=>{if(!editStart.current)return;const before=editStart.current;const next=latestProject.current;editStart.current=null;if(JSON.stringify(before)===JSON.stringify(next))return;if(onCommitChange)onCommitChange(before,next);else onChange(next,false,before)}
   const patch=(mutate:(next:ActualRouteProject)=>void)=>{const next=structuredClone(project);mutate(next);onChange(next)}
   const removeBackground=()=>{if(onRemoveBackground)return onRemoveBackground();if(!project.background)return false;if(!window.confirm('删除当前底图？\n删除后将从当前工程中移除底图，不影响线路和车站。'))return false;onChange(withoutBackground(project));return true}
-  const setNumber=(key:keyof ActualRouteProject['settings'],value:number)=>patch(next=>{(next.settings[key] as number)=value})
+  const setNumber=(key:keyof ActualRouteProject['settings'],value:number)=>patch(next=>{(next.settings[key] as number)=value;if(key==='worldUnitsPerKm'&&value>0)next.distanceScale={metersPerWorldUnit:1000/value}})
   const panel=<aside className={`style-drawer${embedded?' style-drawer-embedded':''}`} role={embedded?undefined:'dialog'} aria-label="全局样式">
      <header><div><h2>全局样式</h2><span className="panel-subtitle">修改后立即应用到整张线路图</span></div><button data-android-back-dismiss className="icon-button" aria-label="关闭全局样式" onClick={onClose}>×</button></header>
     <div className="style-drawer-body">

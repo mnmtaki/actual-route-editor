@@ -4,6 +4,7 @@ import { PRESENTATION_ANIMATION, clamp, easing, inverseLineEasing } from './conf
 import { getBeatRevealFronts, getBeatRevealedDistance, getBeatSegmentRevealProgress, getStationArrivalRatio } from './reveal'
 import { stationLineKey } from './compiler'
 import { resolveSegmentLineAt } from '../data/segmentLineHistory'
+import { worldUnitsToKilometers } from '../data/distance'
 import type { PresentationBeat, PresentationSequence, PresentationState, StationPresentationState } from './types'
 
 export function getPresentationState(project: ActualRouteProject, sequence: PresentationSequence, presentationTime: number): PresentationState {
@@ -56,12 +57,11 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
     stationStates[station.id] = { opacity, scale: PRESENTATION_ANIMATION.stationScaleFrom + (1 - PRESENTATION_ANIMATION.stationScaleFrom) * markerProgress, labelOpacity: effectiveLabelOpacity, previousLineIds, lineIds, visibleRelationIds, transferProgress, historicalState }
   }
 
-  const worldUnitsPerKm = project.settings.worldUnitsPerKm > 0 ? project.settings.worldUnitsPerKm : 100
-  const operatingLengthKm = project.geometry.segments.reduce((sum, segment) => { const state = segmentStates[segment.id]; return sum + (sequence.cache.segmentLengths[segment.id] ?? 0) * state.revealProgress * state.opacity / worldUnitsPerKm }, 0)
+  const operatingLengthKm = project.geometry.segments.reduce((sum, segment) => { const state = segmentStates[segment.id]; return sum + worldUnitsToKilometers((sequence.cache.segmentLengths[segment.id] ?? 0) * state.revealProgress * state.opacity, project) }, 0)
   const stationCount = Object.values(stationStates).filter(state => state.opacity > 0 && state.lineIds.length > 0).length
   const lines = project.lines.filter(line => line.visible).map(line => ({
     lineId: line.id,
-    operatingLengthKm: project.geometry.segments.filter(segment => (segmentStates[segment.id]?.lineId ?? segment.lineId) === line.id).reduce((sum, segment) => { const state = segmentStates[segment.id]; return sum + (sequence.cache.segmentLengths[segment.id] ?? 0) * state.revealProgress * state.opacity / worldUnitsPerKm }, 0),
+    operatingLengthKm: project.geometry.segments.filter(segment => (segmentStates[segment.id]?.lineId ?? segment.lineId) === line.id).reduce((sum, segment) => { const state = segmentStates[segment.id]; return sum + worldUnitsToKilometers((sequence.cache.segmentLengths[segment.id] ?? 0) * state.revealProgress * state.opacity, project) }, 0),
     stationCount: project.stations.filter(station => { const state = stationStates[station.id]; return state?.opacity > 0 && state.lineIds.includes(line.id) }).length,
   })).filter(statistic => statistic.operatingLengthKm > .001 || statistic.stationCount > 0)
   const camera = sequence.settings.cameraMode === 'fixed' || !currentBeat || beatIndex < 0 ? sequence.fixedCamera : evaluateCameraTrack(sequence.cameraTracks[beatIndex], currentBeat, time)

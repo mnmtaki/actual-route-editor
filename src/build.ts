@@ -1,1 +1,1 @@
-export const BUILD_VERSION = '2026-09-04-line-legend-46'
+export const BUILD_VERSION = '2026-09-06-project-metadata-scale-47'

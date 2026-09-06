@@ -3,6 +3,7 @@ import { Toolbar } from "./components/Toolbar";
 import { RasterExportDialog } from "./components/RasterExportDialog";
 import { LinePanel } from "./components/LinePanel";
 import { StyleDrawer } from "./components/StyleDrawer";
+import { ProjectSettingsPanel } from "./components/ProjectSettingsPanel";
 import { Inspector } from "./components/Inspector";
 import { ContextActions } from "./components/ContextActions";
 import { MobileShell } from "./components/MobileShell";
@@ -65,6 +66,8 @@ import {
 import type { Road } from "./data/model";
 import { isLineLocked, isSegmentGeometryLocked, isStationGeometryLocked, lockedStationMessage } from "./data/lineLock";
 import { createLineLegend, getLineLegendWorldBounds } from "./data/lineLegend";
+import { calibrationMetersPerWorldUnit } from "./data/distance";
+import { getProjectName, projectFilename as makeProjectFilename } from "./data/projectMetadata";
 type Drawing = DrawingMode;
 type Point = { x: number; y: number };
 export default function App() {
@@ -73,6 +76,7 @@ export default function App() {
   const [presentationOpen, setPresentationOpen] = useState(false);
   const [rasterSvg, setRasterSvg] = useState<string | null>(null);
   const [styleOpen, setStyleOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [selection, setSelection] = useState<Selection>(null),
     [activeLineId, setActiveLineId] = useState<string | null>(
       initial.lines[0]?.id ?? null,
@@ -87,7 +91,9 @@ export default function App() {
     [segmentPoint, setSegmentPoint] = useState<{ id: string; p: Point } | null>(
       null,
     ),
-    [phasePreview, setPhasePreview] = useState<OpeningPhasePath | null>(null);
+    [phasePreview, setPhasePreview] = useState<OpeningPhasePath | null>(null),
+    [calibration, setCalibration] = useState<{ points: Point[] } | null>(null),
+    [calibrationDialog, setCalibrationDialog] = useState<{ a: Point; b: Point; value: string; unit: 'm' | 'km' } | null>(null);
   const projectInput = useRef<HTMLInputElement>(null),
     topologyInput = useRef<HTMLInputElement>(null),
     backgroundInput = useRef<HTMLInputElement>(null),
@@ -124,6 +130,13 @@ export default function App() {
   }, [history.project, history.replace]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && (calibration || calibrationDialog)) {
+        event.preventDefault();
+        setCalibration(null);
+        setCalibrationDialog(null);
+        setNotice("已取消距离标定");
+        return;
+      }
       if (!drawing) return;
       const target = event.target as HTMLElement | null;
       if (target?.matches('input,textarea,select,[contenteditable="true"]'))
@@ -138,7 +151,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [drawing]);
+  }, [drawing, calibration, calibrationDialog]);
   const bounds = (ids?: Set<string>) => {
     const s = ids
       ? history.project.stations.filter((x) => ids.has(x.id))
@@ -377,6 +390,36 @@ export default function App() {
     if (selection?.type === "background") setSelection(null);
     setNotice("已删除底图");
     return true;
+  };
+  const startCalibration = () => {
+    setCalibration({ points: [] });
+    setCalibrationDialog(null);
+    setSettingsOpen(false);
+    setNotice("请在地图上点击两个已知距离的点");
+  };
+  const handleCalibrationPoint = (point: Point) => {
+    if (!calibration || calibrationDialog) return;
+    if (calibration.points.length === 0) {
+      setCalibration({ points: [point] });
+      setNotice("已记录第一个标定点，请点击第二个点");
+      return;
+    }
+    const a = calibration.points[0];
+    setCalibration({ points: [a, point] });
+    setCalibrationDialog({ a, b: point, value: "", unit: "m" });
+  };
+  const commitCalibration = () => {
+    if (!calibrationDialog) return;
+    const { a, b, value, unit } = calibrationDialog;
+    const metersPerWorldUnit = calibrationMetersPerWorldUnit(a, b, Number(value), unit);
+    if (!metersPerWorldUnit) {
+      setNotice("请输入大于 0 的实际距离");
+      return;
+    }
+    history.commit(current => ({ ...structuredClone(current), distanceScale: { metersPerWorldUnit }, settings: { ...current.settings, worldUnitsPerKm: 1000 / metersPerWorldUnit } }));
+    setCalibration(null);
+    setCalibrationDialog(null);
+    setNotice(`距离比例已更新：1 坐标单位 = ${metersPerWorldUnit.toFixed(3)} 米`);
   };
   const deleteSelection = () => {
     if (!selection) return;
@@ -753,7 +796,7 @@ export default function App() {
       setNotice(e instanceof Error ? e.message : "底图导入失败");
     }
   };
-  const projectFilename = `${history.project.name}.actual-route.json`,
+  const projectFilename = makeProjectFilename(history.project, ".actual-route.json"),
     projectText = () => serializeProject(history.project);
   const svgFile = () => {
     const canvas = document.getElementById(
@@ -770,7 +813,7 @@ export default function App() {
   const saveSvgFile = () => {
     const text = svgFile();
     if (text)
-      return saveText(`${history.project.name}.svg`, text, "image/svg+xml")
+      return saveText(makeProjectFilename(history.project, ".svg"), text, "image/svg+xml")
         .then(() => setNotice("SVG 已保存"))
         .catch((e) => setNotice(e instanceof Error ? e.message : "保存失败"));
   };
@@ -782,7 +825,7 @@ export default function App() {
     const text = svgFile();
     if (text)
       return shareText(
-        `${history.project.name}.svg`,
+        makeProjectFilename(history.project, ".svg"),
         text,
         "image/svg+xml",
       ).catch((e) => setNotice(e instanceof Error ? e.message : "分享失败"));
@@ -878,6 +921,7 @@ export default function App() {
         onStartPhaseDrawing={startPhaseDrawing}
         onFinishDrawing={finishDrawing}
         onExitDrawing={exitDrawingTool}
+        onStartCalibration={startCalibration}
         canUndo={history.canUndo}
         canRedo={history.canRedo}
         onUndo={history.undo}
@@ -904,6 +948,7 @@ export default function App() {
             setSelection({ type: "basemapPath", id })
           }
           onStyle={() => setStyleOpen(true)}
+          onSettings={() => setSettingsOpen(true)}
           onPresentation={() => setPresentationOpen(true)}
           drawing={!!drawing}
           onFinish={finishDrawing}
@@ -952,7 +997,7 @@ export default function App() {
           />
           <section className="canvas-wrap">
             <div className="canvas-status">
-              <span>{history.project.name}</span>
+              <span>{getProjectName(history.project)}</span>
               <span>{Math.round((920 / view.width) * 100)}%</span>
               <span>{notice}</span>
             </div>
@@ -972,6 +1017,8 @@ export default function App() {
               drawing={drawing}
               roadDraft={roadDraft}
               phasePreview={phasePreview}
+              calibration={calibration}
+              onCalibrationPoint={handleCalibrationPoint}
               onSelect={setSelection}
               onCreatePoint={createAt}
               onConnectStation={connect}
@@ -1031,6 +1078,7 @@ export default function App() {
             onClose={() => setStyleOpen(false)}
           />
         )}
+        {settingsOpen && <aside className="project-settings-overlay" role="dialog" aria-label="工程设置"><header><div><h2>工程设置</h2><span className="panel-subtitle">工程名称与距离比例</span></div><button data-android-back-dismiss className="icon-button" aria-label="关闭工程设置" onClick={() => setSettingsOpen(false)}>×</button></header><ProjectSettingsPanel project={history.project} onChange={history.commit} onStartCalibration={startCalibration}/></aside>}
         {dialog && (
           <div
             data-android-back-dismiss
@@ -1086,9 +1134,10 @@ export default function App() {
             </button>
           </div>
         )}
+        {calibrationDialog && <div className="line-dialog-backdrop" data-android-back-dismiss onClick={event => { if (event.target === event.currentTarget) { setCalibrationDialog(null); setCalibration(null) } }}><div className="line-dialog calibration-dialog"><h2>输入实际距离</h2><p>两个标定点之间的真实距离</p><label className="field"><span>距离</span><input autoFocus type="number" inputMode="decimal" min="0.000001" step="0.1" value={calibrationDialog.value} onChange={event => setCalibrationDialog({ ...calibrationDialog, value: event.currentTarget.value })}/></label><label className="field"><span>单位</span><select value={calibrationDialog.unit} onChange={event => setCalibrationDialog({ ...calibrationDialog, unit: event.currentTarget.value as 'm' | 'km' })}><option value="m">米</option><option value="km">千米</option></select></label><div className="line-dialog-actions"><button onClick={() => { setCalibrationDialog(null); setCalibration(null) }}>取消</button><button className="primary" onClick={commitCalibration}>应用比例</button></div></div></div>}
         {rasterSvg && (
           <RasterExportDialog
-            projectName={history.project.name}
+            projectName={getProjectName(history.project)}
             svgText={rasterSvg}
             onClose={() => setRasterSvg(null)}
             onNotice={setNotice}

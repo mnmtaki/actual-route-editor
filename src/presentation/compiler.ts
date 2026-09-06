@@ -5,6 +5,7 @@ import { compileCameraTrack } from './camera'
 import { getBeatRevealFronts } from './reveal'
 import { getStationNameAt, normalizeStationNameHistory } from '../data/stationNameHistory'
 import { resolveSegmentLineAt, normalizeSegmentLineHistory } from '../data/segmentLineHistory'
+import { resolveMetersPerWorldUnit } from '../data/distance'
 export { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import type { CameraView, DirectedSegment, HistoryEvent, PresentationBeat, PresentationCompileCache, PresentationSequence } from './types'
 
@@ -97,7 +98,7 @@ export function compileHistoryEvents(project: ActualRouteProject, settings: Pres
 
 export function compilePresentationBeats(project: ActualRouteProject, events: HistoryEvent[], settings: PresentationSettings): PresentationBeat[] {
   let cursor = 0
-  const speed = Math.max(.01, settings.growthSpeedKmPerSecond) * Math.max(.001, project.settings.worldUnitsPerKm)
+  const speed = Math.max(.01, settings.growthSpeedKmPerSecond) * 1000 / resolveMetersPerWorldUnit(project)
   return events.map((event, index) => {
     const branchLengths = event.branches.map(branch => branch.reduce((sum, item) => sum + item.length, 0))
     const totalPathLength = Math.max(0, ...branchLengths)

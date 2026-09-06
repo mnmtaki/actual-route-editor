@@ -1,4 +1,5 @@
 export type RasterFormat='png'|'jpeg'|'webp'
+import { sanitizeFilenameStem } from '../data/projectMetadata'
 export type RasterScale=1|2|4
 export interface RasterPlan { format:RasterFormat; mimeType:string; extension:string; scale:RasterScale; width:number; height:number; viewBox:{x:number;y:number;width:number;height:number}; safe:boolean; error?:string }
 export const MAX_RASTER_SIDE=16384
@@ -9,7 +10,7 @@ export function getRasterPlan(svgText:string,format:RasterFormat,scale:RasterSca
   const viewBox=parseSvgViewBox(svgText),info=FORMAT[format],width=Math.ceil(viewBox.width*scale),height=Math.ceil(viewBox.height*scale),tooLarge=width>MAX_RASTER_SIDE||height>MAX_RASTER_SIDE||width*height>MAX_RASTER_PIXELS
   return{format,...info,scale,width,height,viewBox,safe:!tooLarge,...(tooLarge?{error:'当前尺寸过大，请选择较低倍率。'}:{})}
 }
-export function rasterFilename(projectName:string,format:RasterFormat){return`${projectName}.${FORMAT[format].extension}`}
+export function rasterFilename(projectName:string,format:RasterFormat){return`${sanitizeFilenameStem(projectName)}.${FORMAT[format].extension}`}
 export async function waitForDocumentFonts(timeoutMs=1500):Promise<void>{
   const fonts=typeof document==='undefined'?undefined:document.fonts
   if(!fonts?.ready)return

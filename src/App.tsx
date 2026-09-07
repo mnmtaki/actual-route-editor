@@ -40,6 +40,7 @@ import {
   deleteStructureNode,
   setWaypointStructureAfter,
   updateStructureNode,
+  type WaypointStructureChange,
 } from "./data/structure";
 import { findSegmentProgressForPoint } from "./geometry/path";
 import {
@@ -522,7 +523,7 @@ export default function App() {
     }
   };
   const setStructureAtPoint = (
-    value: "underground" | "elevated" | "ground",
+    value: "underground" | "elevated",
   ) => {
     if (selection?.type !== "segment") return;
     if (isSegmentGeometryLocked(history.project, selection.id)) {
@@ -549,7 +550,7 @@ export default function App() {
       });
   };
   const setWaypointStructure = (
-    value: "underground" | "elevated" | "ground" | null,
+    value: WaypointStructureChange,
   ) => {
     if (selection?.type !== "waypoint") return;
     if (isSegmentGeometryLocked(history.project, selection.segmentId)) {
@@ -566,7 +567,7 @@ export default function App() {
     );
   };
   const setSelectedStructureNode = (
-    value: "underground" | "elevated" | "ground",
+    value: "underground" | "elevated",
   ) => {
     if (selection?.type !== "structureNode") return;
     if (isSegmentGeometryLocked(history.project, selection.segmentId)) {

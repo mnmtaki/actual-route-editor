@@ -8,6 +8,7 @@ export interface StructureInterval { start: number; end: number; structureType: 
 export interface StructureVisibility { revealProgress: number; revealFrom: 'from' | 'to'; opacity: number }
 export type StructureRunBoundary = 'continuous' | 'structure-transition' | 'line-terminal'
 export interface StructureRun { id: string; lineId: string; structureType: 'elevated'; segmentIds: string[]; points: Point[]; spans: PathSpan[]; path: string; opacity: number; startBoundary: StructureRunBoundary; endBoundary: StructureRunBoundary; startTangent: Point; endTangent: Point }
+export type WaypointStructureChange = StructureType | 'none'
 
 export function resolveStructureNodeProgress(project: ActualRouteProject, segment: Segment, node: StructureNode): number {
   if (node.waypointId) {
@@ -31,15 +32,26 @@ export function addStructureNodeAtProgress(project: ActualRouteProject, segmentI
   segment.structureNodes = [...(segment.structureNodes ?? []), node]
   return { project: next, nodeId: node.id }
 }
-export function setWaypointStructureAfter(project: ActualRouteProject, segmentId: string, waypointId: string, structureAfter: StructureType | null): ActualRouteProject {
+export function setWaypointStructureAfter(project: ActualRouteProject, segmentId: string, waypointId: string, change: WaypointStructureChange | null): ActualRouteProject {
   const next = structuredClone(project), segment = next.geometry.segments.find(item => item.id === segmentId)
   if (!segment) return project
   if (isSegmentGeometryLocked(project, segmentId)) return project
+  if (!segment.waypoints.some(waypoint => waypoint.id === waypointId)) return project
   segment.structureNodes = segment.structureNodes ?? []
-  const existing = segment.structureNodes.find(node => node.waypointId === waypointId)
-  if (!structureAfter) segment.structureNodes = segment.structureNodes.filter(node => node.waypointId !== waypointId)
-  else if (existing) existing.structureAfter = structureAfter
-  else segment.structureNodes.push({ id: uid('structure'), waypointId, structureAfter })
+  const existingIndex = segment.structureNodes.findIndex(node => node.waypointId === waypointId)
+  const structureAfter = change === 'none' || change === null ? null : change
+  if (structureAfter === null) {
+    segment.structureNodes = segment.structureNodes.filter(node => node.waypointId !== waypointId)
+  } else if (existingIndex >= 0) {
+    const existing = segment.structureNodes[existingIndex]
+    existing.structureAfter = structureAfter
+    delete existing.progress
+    // A waypoint owns one structure instruction. Collapse legacy duplicates so
+    // the selector and interval resolver cannot disagree after a re-render.
+    segment.structureNodes = segment.structureNodes.filter((node, index) => index === existingIndex || node.waypointId !== waypointId)
+  } else {
+    segment.structureNodes.push({ id: uid('structure'), waypointId, structureAfter })
+  }
   return next
 }
 export function updateStructureNode(project: ActualRouteProject, segmentId: string, nodeId: string, structureAfter: StructureType): ActualRouteProject {
@@ -63,6 +75,7 @@ export function deleteStructureNode(project: ActualRouteProject, segmentId: stri
 }
 export function getStructureNodePoint(project: ActualRouteProject, segment: Segment, node: StructureNode) { return sampleSegmentAtLengthRatio(project, segment, resolveStructureNodeProgress(project, segment, node))?.point ?? null }
 export function getWaypointStructureAfter(segment: Segment, waypointId: string) { return segment.structureNodes?.find(node => node.waypointId === waypointId)?.structureAfter ?? null }
+export function getWaypointStructureChange(segment: Segment, waypointId: string): WaypointStructureChange { return getWaypointStructureAfter(segment, waypointId) ?? 'none' }
 
 export function splitSegmentStructure(project: ActualRouteProject, segment: Segment, splitProgress: number, beforeWaypointIds: Set<string>, afterWaypointIds: Set<string>): { beforeType: StructureType; beforeNodes: StructureNode[]; afterType: StructureType; afterNodes: StructureNode[] } {
   const split = Math.max(EPSILON, Math.min(1 - EPSILON, splitProgress))

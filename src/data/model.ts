@@ -1,7 +1,8 @@
 export type ISODate = string | null
 export type WaypointType = 'smooth' | 'corner'
 export type SegmentMode = 'straight' | 'smooth' | 'corner' | 'rounded'
-export type StructureType = 'underground' | 'elevated' | 'ground'
+/** The two supported structure states. Missing waypoint nodes mean "inherit". */
+export type StructureType = 'underground' | 'elevated'
 export type LabelDirection = 'up' | 'down' | 'left' | 'right' | 'upper-left' | 'upper-right' | 'lower-left' | 'lower-right'
 
 export interface SourceMetadata { format: 'aarc'; pointId?: number; lineId?: number; kind?: 'explicit-control-point' | 'implicit-corner'; nameP?: [number, number]; labelAnchorMode?: 'aarc-block'; stationNameFontWeight?: 'normal' | 'bold' | number }

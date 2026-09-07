@@ -79,6 +79,8 @@ describe('derived station spacing', () => {
     project.distanceScale = { metersPerWorldUnit: 20 }
     expect(getLineStationSpacings(project, 'L1')[0].distanceWorld).toBe(afterStation.distanceWorld)
     expect(getLineStationSpacings(project, 'L1')[0].distanceMeters).toBe(afterStation.distanceWorld * 20)
+    project.lines[0].lineStyleId = 'multilayer-style'
+    expect(getLineStationSpacings(project, 'L1')[0].distanceWorld).toBe(afterStation.distanceWorld)
     segment.structureType = 'elevated'; segment.structureNodes = [{ id: 'node', progress: .5, structureAfter: 'elevated' }]
     project.lines[0].locked = true
     project.lines[0].visible = false

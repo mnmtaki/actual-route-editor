@@ -188,6 +188,16 @@ export function deleteLineAndOrphans(project: ActualRouteProject, lineId: string
   return pruneOrphanStations(next)
 }
 
+/** Delete every unlocked selected line as one domain operation. */
+export function batchDeleteLines(project: ActualRouteProject, lineIds: string[]): ActualRouteProject {
+  const requested = new Set(lineIds)
+  let next = project
+  for (const line of project.lines) {
+    if (requested.has(line.id) && !line.locked) next = deleteLineAndOrphans(next, line.id)
+  }
+  return next
+}
+
 export function deleteStationConsistently(project: ActualRouteProject, stationId: string): ActualRouteProject {
   if (isStationGeometryLocked(project, stationId)) return project
   const next = structuredClone(project)

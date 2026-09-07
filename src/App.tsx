@@ -23,6 +23,7 @@ import { loadInitialProject, saveProjectToStorage } from "./data/storage";
 import {
   addWaypointToSegment,
   appendStationToLine,
+  batchDeleteLines,
   connectExistingStation,
   createLine,
   deleteLineAndOrphans,
@@ -30,6 +31,8 @@ import {
   insertStationIntoSegment,
   stationLineIds,
 } from "./data/operations";
+import { selectLineInList, selectLinesByMarquee } from "./data/lineSelection";
+import { LineMultiInspector } from "./components/LineMultiInspector";
 import { PresentationPreview } from "./presentation/PresentationPreview";
 import {
   createOpeningPhase,
@@ -82,6 +85,8 @@ export default function App() {
     [activeLineId, setActiveLineId] = useState<string | null>(
       initial.lines[0]?.id ?? null,
     ),
+    [selectedLineIds, setSelectedLineIds] = useState<string[]>([]),
+    [selectionAnchorLineId, setSelectionAnchorLineId] = useState<string | null>(null),
     [view, setView] = useState({ x: 40, y: 40, width: 920, height: 680 }),
     [notice, setNotice] = useState("直接点选和拖动对象；拖空白平移"),
     [drawing, setDrawing] = useState<Drawing | null>(null),
@@ -109,11 +114,99 @@ export default function App() {
     return () => clearTimeout(t);
   }, [history.project]);
   useEffect(() => {
-    const close = () => setSelection(null);
+    const close = () => {
+      setSelection(null);
+      setSelectedLineIds([]);
+      setSelectionAnchorLineId(null);
+      setActiveLineId(null);
+    };
     window.addEventListener("actual-route-close-context", close);
     return () =>
       window.removeEventListener("actual-route-close-context", close);
   }, []);
+  useEffect(() => {
+    if (selection?.type === "line") {
+      if (!selectedLineIds.includes(selection.id)) {
+        setSelectedLineIds([selection.id]);
+        setSelectionAnchorLineId(selection.id);
+      }
+      if (activeLineId !== selection.id) setActiveLineId(selection.id);
+    } else if (selectedLineIds.length) {
+      setSelectedLineIds([]);
+      setSelectionAnchorLineId(null);
+    }
+  }, [selection?.type, selection && "id" in selection ? selection.id : undefined]);
+  const applyLineSelection = (state: { selectedLineIds: string[]; activeLineId: string | null; selectionAnchorLineId: string | null }) => {
+    setSelectedLineIds(state.selectedLineIds);
+    setActiveLineId(state.activeLineId);
+    setSelectionAnchorLineId(state.selectionAnchorLineId);
+    setSelection(state.activeLineId ? { type: "line", id: state.activeLineId } : null);
+  };
+  const handleLineSelect = (lineId: string, modifiers: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } = {}) => {
+    applyLineSelection(selectLineInList({
+      lineIds: history.project.lines.map(line => line.id),
+      lineId,
+      selectedLineIds,
+      activeLineId,
+      selectionAnchorLineId,
+      ...modifiers,
+    }));
+  };
+  const handleLineMarquee = (hitLineIds: string[], additive: boolean) => {
+    applyLineSelection(selectLinesByMarquee(
+      history.project.lines.map(line => line.id),
+      hitLineIds,
+      selectedLineIds,
+      activeLineId,
+      additive,
+    ));
+  };
+  const clearLineSelection = () => {
+    setSelectedLineIds([]);
+    setSelectionAnchorLineId(null);
+    setActiveLineId(null);
+    setSelection(null);
+  };
+  const resetLineSelectionForProject = (project: ActualRouteProject) => {
+    setSelectedLineIds([]);
+    setSelectionAnchorLineId(null);
+    setActiveLineId(project.lines[0]?.id ?? null);
+    setSelection(null);
+  };
+  const handleCanvasSelect = (next: Selection) => {
+    if (next?.type === "line") applyLineSelection({ selectedLineIds: [next.id], activeLineId: next.id, selectionAnchorLineId: next.id });
+    else {
+      setSelectedLineIds([]);
+      setSelectionAnchorLineId(null);
+      setSelection(next);
+    }
+  };
+  const batchSetLineValue = (field: "visible" | "locked", value: boolean) => {
+    if (selectedLineIds.length < 2) return;
+    history.commit(current => {
+      const next = structuredClone(current);
+      const selected = new Set(selectedLineIds);
+      next.lines.forEach(line => { if (selected.has(line.id)) line[field] = value; });
+      return next;
+    });
+  };
+  const batchDeleteSelectedLines = () => {
+    if (selectedLineIds.length < 2) return;
+    const lockedIds = new Set(history.project.lines.filter(line => selectedLineIds.includes(line.id) && line.locked).map(line => line.id));
+    const next = batchDeleteLines(history.project, selectedLineIds);
+    if (next === history.project) {
+      setNotice("所选线路均已锁定，无法删除");
+      return;
+    }
+    history.commit(next);
+    const remaining = selectedLineIds.filter(id => next.lines.some(line => line.id === id));
+    const nextActive = activeLineId && remaining.includes(activeLineId) ? activeLineId : (remaining[0] ?? null);
+    setSelectedLineIds(remaining);
+    setSelectionAnchorLineId(nextActive);
+    setActiveLineId(nextActive);
+    setSelection(nextActive ? { type: "line", id: nextActive } : null);
+    if (lockedIds.size) setNotice(String(lockedIds.size) + " 条锁定线路已保留");
+  };
   useEffect(() => {
     if (!history.project.timeline.playing) return;
     const t = setInterval(() => {
@@ -424,6 +517,10 @@ export default function App() {
   };
   const deleteSelection = () => {
     if (!selection) return;
+    if (selection.type === "line" && selectedLineIds.length > 1) {
+      batchDeleteSelectedLines();
+      return;
+    }
     if (selection.type === "background") {
       removeBackground();
       return;
@@ -487,8 +584,30 @@ export default function App() {
       else if (selection.type === "roadPoint") n = deleteRoadPoint(n, selection.roadId, selection.id);
     }
     history.commit(n);
-    setSelection(null);
+    if (selection.type === "line") clearLineSelection();
+    else setSelection(null);
   };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.matches('input,textarea,select,[contenteditable="true"]')) return;
+      if (event.key === "Escape" && selectedLineIds.length) {
+        event.preventDefault();
+        clearLineSelection();
+        return;
+      }
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      if (selectedLineIds.length > 1) {
+        event.preventDefault();
+        batchDeleteSelectedLines();
+      } else if (selectedLineIds.length === 1 && selection?.type === "line") {
+        event.preventDefault();
+        deleteSelection();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedLineIds, selection, activeLineId, history.project]);
   const segmentAction = (kind: "station" | "waypoint" | "straight") => {
     if (selection?.type !== "segment") return;
     if (isSegmentGeometryLocked(history.project, selection.id)) {
@@ -604,8 +723,7 @@ export default function App() {
           const result = convertAarcToActualRouteProject(raw, f.name),
             n = result.project;
           history.commit(n);
-          setActiveLineId(n.lines[0]?.id ?? null);
-          setSelection(null);
+          resetLineSelectionForProject(n);
           const xs = n.stations.map((s) => s.x),
             ys = n.stations.map((s) => s.y),
             pad = 100;
@@ -640,8 +758,7 @@ export default function App() {
         } else {
           const n = parseProjectJson(t);
           history.commit(n);
-          setActiveLineId(n.lines[0]?.id ?? null);
-          setSelection(null);
+          resetLineSelectionForProject(n);
           setNotice("工程 JSON 已恢复");
         }
       } catch (e) {
@@ -656,8 +773,7 @@ export default function App() {
           const result = convertAarcToActualRouteProject(raw, f.name),
             n = result.project;
           history.commit(n);
-          setActiveLineId(n.lines[0]?.id ?? null);
-          setSelection(null);
+          resetLineSelectionForProject(n);
           const xs = n.stations.map((s) => s.x),
             ys = n.stations.map((s) => s.y),
             pad = 100;
@@ -692,7 +808,7 @@ export default function App() {
         } else {
           const n = importTopologyJson(t);
           history.commit(n);
-          setSelection(null);
+          resetLineSelectionForProject(n);
           setNotice("旧拓扑已转换；坐标已重新初始化");
         }
       } catch (e) {
@@ -740,8 +856,7 @@ export default function App() {
         const result = convertAarcToActualRouteProject(raw, file.name),
           n = result.project;
         history.commit(n);
-        setActiveLineId(n.lines[0]?.id ?? null);
-        setSelection(null);
+        resetLineSelectionForProject(n);
         setView(bounds());
         setNotice(
           "已导入 AARC 工程； " +
@@ -755,13 +870,12 @@ export default function App() {
       } else if (kind === "project") {
         const n = parseProjectJson(t);
         history.commit(n);
-        setActiveLineId(n.lines[0]?.id ?? null);
-        setSelection(null);
+        resetLineSelectionForProject(n);
         setNotice("工程 JSON 已恢复");
       } else {
         const n = importTopologyJson(t);
         history.commit(n);
-        setSelection(null);
+        resetLineSelectionForProject(n);
         setNotice("旧拓扑已转换；坐标已重新初始化");
       }
     } catch (e) {
@@ -891,10 +1005,7 @@ export default function App() {
         roadStyleId={roadStyleId}
         onRoadStyleChange={setRoadStyleId}
         activeLineId={activeLineId}
-        onSelectLine={(id) => {
-          setActiveLineId(id);
-          setSelection({ type: "line", id });
-        }}
+        onSelectLine={(id) => handleLineSelect(id)}
         onSelectRoad={(id) => setSelection({ type: "road", id })}
         onSelectBasemapPath={(id) => setSelection({ type: "basemapPath", id })}
         onChange={history.commit}
@@ -996,10 +1107,10 @@ export default function App() {
             project={history.project}
             selection={selection}
             activeLineId={activeLineId}
-            onSelect={(id) => {
-              setActiveLineId(id);
-              setSelection({ type: "line", id });
-            }}
+            selectedLineIds={selectedLineIds}
+            onSelect={handleLineSelect}
+            onSelectionChange={handleLineMarquee}
+            onClearSelection={clearLineSelection}
             onChange={history.commit}
             onAddLine={startLine}
           />
@@ -1027,7 +1138,7 @@ export default function App() {
               phasePreview={phasePreview}
               calibration={calibration}
               onCalibrationPoint={handleCalibrationPoint}
-              onSelect={setSelection}
+              onSelect={handleCanvasSelect}
               onCreatePoint={createAt}
               onConnectStation={connect}
               onExtend={extend}
@@ -1067,7 +1178,14 @@ export default function App() {
               onDelete={deleteSelection}
             />
           </section>
-          <Inspector
+          {selectedLineIds.length > 1 ? <LineMultiInspector
+            project={history.project}
+            selectedLineIds={selectedLineIds}
+            onChange={history.commit}
+            onDelete={batchDeleteSelectedLines}
+            onSetVisible={value => batchSetLineValue("visible", value)}
+            onSetLocked={value => batchSetLineValue("locked", value)}
+          /> : <Inspector
             project={history.project}
             selection={selection}
             onChange={history.commit}
@@ -1075,7 +1193,7 @@ export default function App() {
             onAddLineBadge={addLineBadge}
             onPhasePreview={setPhasePreview}
             onStartPhaseDrawing={startPhaseDrawing}
-          />
+          />}
         </main>
         {styleOpen && (
           <StyleDrawer

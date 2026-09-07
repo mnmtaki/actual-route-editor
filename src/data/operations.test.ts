@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { demoProject } from './demo'
-import { addLineBadge, addWaypointToSegment, appendStationToLine, connectExistingStation, createLine, deleteLineAndOrphans, deleteLineBadge, insertStationIntoSegment } from './operations'
+import { addLineBadge, addWaypointToSegment, appendStationToLine, batchDeleteLines, connectExistingStation, createLine, deleteLineAndOrphans, deleteLineBadge, insertStationIntoSegment } from './operations'
 
 describe('line-driven editing operations', () => {
   it('adds multiple independent badges to one Line and deletes only the requested badge',()=>{let project=structuredClone(demoProject);const first=addLineBadge(project,'line-a',{x:10,y:20}),second=addLineBadge(first.project,'line-a',{x:30,y:40});project=second.project;expect(project.lines.find(line=>line.id==='line-a')?.lineBadges).toHaveLength(2);const next=deleteLineBadge(project,'line-a',first.badgeId!);expect(next.lines.find(line=>line.id==='line-a')?.lineBadges?.map(badge=>badge.id)).toEqual([second.badgeId]);expect(next.lines.some(line=>line.id==='line-a')).toBe(true)})
@@ -43,6 +43,14 @@ describe('line-driven editing operations', () => {
     expect(next.stations.every((station) => next.stationLineRelations.some((relation) => relation.stationId === station.id))).toBe(true)
     expect(next.lines.some(line=>line.lineBadges?.some(badge=>badge.id==='badge-a'))).toBe(false)
     expect(next.lines.find(line=>line.id==='line-b')?.lineBadges?.map(badge=>badge.id)).toEqual(['badge-b'])
+  })
+  it('deletes a selected group through the line deletion operation and keeps locked lines', () => {
+    const project = structuredClone(demoProject)
+    project.lines.find(line => line.id === 'line-b')!.locked = true
+    const next = batchDeleteLines(project, ['line-a', 'line-b'])
+    expect(next.lines.map(line => line.id)).toEqual(['line-b', 'line-c'])
+    expect(next.lines.find(line => line.id === 'line-b')?.locked).toBe(true)
+    expect(next.stations.some(station => station.id === 's1')).toBe(false)
   })
 
   it('blocks locked line geometry operations without changing the project', () => {

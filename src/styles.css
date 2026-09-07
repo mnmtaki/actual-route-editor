@@ -155,3 +155,20 @@ button.active,button.primary{background:var(--accent);border-color:#cfa12d;color
 .batch-inspector-section p{margin:0;color:var(--ui-muted);font-size:12px}
 .batch-action-row{display:flex;gap:8px;flex-wrap:wrap}
 .batch-action-row button,.line-batch-inspector .danger{min-height:36px}
+
+/* Mobile parity: touch-friendly line selection and object actions. */
+@media(max-width:699px){
+  .mobile-line-list-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 13px;border-bottom:1px solid #ebe7df;color:#666d68;font-size:12px}
+  .mobile-line-list-head p{margin:0;color:#777e79;font-size:11px}
+  .mobile-line-list-head button{min-height:38px;padding:7px 12px;border:1px solid #d9c89c;border-radius:7px;background:#fff8e5;color:#5f4a16}
+  .mobile-line-batch-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px 13px;border-top:1px solid #ebe7df;background:#faf8f3}
+  .mobile-line-batch-actions button{min-height:44px;text-align:center}
+  .mobile-line-batch-actions .danger{grid-column:1/-1}
+  .mobile-drawer .context-sheet{position:static;display:grid;gap:8px;max-width:none;margin:0;padding:12px 13px;border:0;border-bottom:1px solid #ebe7df;border-radius:0;box-shadow:none;background:#faf8f3}
+  .mobile-drawer .context-action-bar{display:grid;grid-template-columns:1fr 1fr;align-items:center}
+  .mobile-drawer .context-action-bar>strong{grid-column:1/-1}
+  .mobile-drawer .context-action-bar .context-menu{grid-column:1/-1}
+  .mobile-drawer .context-buttons{display:grid;gap:8px}
+  .mobile-drawer .context-buttons button,.mobile-drawer .context-action-bar button{min-height:44px}
+  .mobile-drawer .line-list{padding:8px 10px}
+}

@@ -8,7 +8,7 @@ import { Inspector } from "./components/Inspector";
 import { ContextActions } from "./components/ContextActions";
 import { MobileShell } from "./components/MobileShell";
 import { NetworkCanvas } from "./renderer/NetworkCanvas";
-import type { ActualRouteProject, Selection } from "./data/model";
+import type { ActualRouteProject, Selection, StructureType } from "./data/model";
 import { uid } from "./data/model";
 import { useProjectHistory } from "./history/useProjectHistory";
 import {
@@ -668,6 +668,19 @@ export default function App() {
         segmentId: segment.id,
       });
   };
+  const setSelectedSegmentStructure = (value: StructureType) => {
+    if (selection?.type !== "segment") return;
+    if (isSegmentGeometryLocked(history.project, selection.id)) {
+      setNotice("线路已锁定");
+      return;
+    }
+    history.commit(current => {
+      const next = structuredClone(current);
+      const segment = next.geometry.segments.find(item => item.id === selection.id);
+      if (segment) segment.structureType = value;
+      return next;
+    });
+  };
   const setWaypointStructure = (
     value: WaypointStructureChange,
   ) => {
@@ -1005,7 +1018,14 @@ export default function App() {
         roadStyleId={roadStyleId}
         onRoadStyleChange={setRoadStyleId}
         activeLineId={activeLineId}
+        selectedLineIds={selectedLineIds}
         onSelectLine={(id) => handleLineSelect(id)}
+        onStartLineMultiSelect={(id) => handleLineSelect(id)}
+        onToggleLineSelection={(id) => handleLineSelect(id, { ctrlKey: true })}
+        onClearLineSelection={clearLineSelection}
+        onBatchSetLinesVisible={value => batchSetLineValue("visible", value)}
+        onBatchSetLinesLocked={value => batchSetLineValue("locked", value)}
+        onBatchDeleteLines={batchDeleteSelectedLines}
         onSelectRoad={(id) => setSelection({ type: "road", id })}
         onSelectBasemapPath={(id) => setSelection({ type: "basemapPath", id })}
         onChange={history.commit}
@@ -1031,6 +1051,14 @@ export default function App() {
         onSelectLineLegend={() => { if (history.project.lineLegend) setSelection({ type: 'lineLegend', id: history.project.lineLegend.id }) }}
         onPhasePreview={setPhasePreview}
         onStartPhaseDrawing={startPhaseDrawing}
+        onExtend={extend}
+        onInsertStation={() => segmentAction("station")}
+        onAddWaypoint={() => segmentAction("waypoint")}
+        onStraighten={() => segmentAction("straight")}
+        onStructureChange={setSelectedSegmentStructure}
+        onSetStructureAtPoint={setStructureAtPoint}
+        onWaypointStructureChange={setWaypointStructure}
+        onStructureNodeChange={setSelectedStructureNode}
         onFinishDrawing={finishDrawing}
         onExitDrawing={exitDrawingTool}
         onStartCalibration={startCalibration}
@@ -1157,21 +1185,7 @@ export default function App() {
               onInsertStation={() => segmentAction("station")}
               onAddWaypoint={() => segmentAction("waypoint")}
               onStraighten={() => segmentAction("straight")}
-              onStructureChange={(value) => {
-                if (selection?.type !== "segment") return;
-                if (isSegmentGeometryLocked(history.project, selection.id)) {
-                  setNotice("线路已锁定");
-                  return;
-                }
-                history.commit((current) => {
-                  const next = structuredClone(current);
-                  const segment = next.geometry.segments.find(
-                    (item) => item.id === selection.id,
-                  );
-                  if (segment) segment.structureType = value;
-                  return next;
-                });
-              }}
+              onStructureChange={setSelectedSegmentStructure}
               onSetStructureAtPoint={setStructureAtPoint}
               onWaypointStructureChange={setWaypointStructure}
               onStructureNodeChange={setSelectedStructureNode}

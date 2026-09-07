@@ -14,6 +14,7 @@ function LockIcon({ locked = false }: { locked?: boolean }) {
 
 type LineSelectionModifiers = { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }
 
+
 type MarqueeState = {
   pointerId: number
   rowId: string | null
@@ -35,6 +36,8 @@ export function LinePanel({
   onClearSelection,
   onChange,
   onAddLine,
+  mobileMode = false,
+  onMobileLongPress,
 }: {
   project: ActualRouteProject
   selection: Selection
@@ -45,6 +48,8 @@ export function LinePanel({
   onClearSelection?: () => void
   onChange: (project: ActualRouteProject) => void
   onAddLine: () => void
+  mobileMode?: boolean
+  onMobileLongPress?: (lineId: string) => void
 }) {
   const patch = (mutate: (next: ActualRouteProject) => void) => { const next = structuredClone(project); mutate(next); onChange(next) }
   const lineStats = project.lines.map(line => ({ line, length: worldUnitsToKilometers(project.geometry.segments.filter(segment => segment.lineId === line.id).reduce((sum, segment) => sum + getSegmentCurveLength(project, segment), 0), project), stations: new Set(line.stationSequence).size }))
@@ -55,7 +60,43 @@ export function LinePanel({
   const marqueeRef = useRef<MarqueeState | null>(null)
   const autoScrollFrame = useRef<number | null>(null)
   const suppressClick = useRef(false)
+  const touchLongPressTimer = useRef<number | null>(null)
+  const touchLongPress = useRef<{ pointerId: number; lineId: string; x: number; y: number; triggered: boolean } | null>(null)
   const [marquee, setMarquee] = useState<MarqueeState | null>(null)
+  const clearTouchLongPress = () => {
+    if (touchLongPressTimer.current !== null) window.clearTimeout(touchLongPressTimer.current)
+    touchLongPressTimer.current = null
+    touchLongPress.current = null
+  }
+  const beginTouchLongPress = (event: ReactPointerEvent<HTMLDivElement>) => {
+    // Real browsers report touch; jsdom and some embedded runtimes may leave pointerType empty.
+    if (!mobileMode || (event.pointerType !== 'touch' && Boolean(event.pointerType))) return
+    const target = event.target as Element | null
+    if (target?.closest('.line-state-button')) return
+    const row = target?.closest('[data-line-id]') as HTMLElement | null
+    const lineId = row?.dataset.lineId
+    if (!lineId) return
+    clearTouchLongPress()
+    const state = { pointerId: event.pointerId, lineId, x: event.clientX, y: event.clientY, triggered: false }
+    touchLongPress.current = state
+    touchLongPressTimer.current = window.setTimeout(() => {
+      if (touchLongPress.current?.pointerId !== state.pointerId) return
+      state.triggered = true
+      suppressClick.current = true
+      onMobileLongPress?.(state.lineId)
+    }, 520)
+  }
+  const moveTouchLongPress = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const state = touchLongPress.current
+    if (!state || state.pointerId !== event.pointerId) return
+    if (Math.hypot(event.clientX - state.x, event.clientY - state.y) > 10) clearTouchLongPress()
+  }
+  const endTouchLongPress = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (touchLongPress.current?.pointerId === event.pointerId) {
+      if (touchLongPress.current.triggered) suppressClick.current = true
+      clearTouchLongPress()
+    }
+  }
   const selected = new Set(selectedLineIds)
   if (selection?.type === 'line') selected.add(selection.id)
 
@@ -98,6 +139,7 @@ export function LinePanel({
     autoScrollFrame.current = requestAnimationFrame(tick)
   }
   const finishPointer = (event: ReactPointerEvent<HTMLDivElement>, cancelled = false) => {
+    endTouchLongPress(event)
     const state = marqueeRef.current
     if (!state || state.pointerId !== event.pointerId) return
     const list = listRef.current
@@ -112,6 +154,7 @@ export function LinePanel({
     else onClearSelection?.()
   }
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    beginTouchLongPress(event)
     if (event.pointerType === 'touch' || event.pointerType === 'pen' || event.button !== 0 || (typeof window !== 'undefined' && window.matchMedia?.('(max-width: 699px)').matches)) return
     const target = event.target as Element | null
     if (target?.closest('.line-state-button')) return
@@ -126,6 +169,7 @@ export function LinePanel({
     list.setPointerCapture?.(event.pointerId)
   }
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    moveTouchLongPress(event)
     const current = marqueeRef.current
     if (!current || current.pointerId !== event.pointerId) return
     const next = { ...current, currentX: event.clientX, currentY: event.clientY }
@@ -156,7 +200,7 @@ export function LinePanel({
 
   return <aside className="left-panel panel" aria-label="线路结构">
     <div className="panel-heading"><div><h2>线路</h2><span className="panel-subtitle">线路与图层</span></div><button className="icon-button" onClick={onAddLine} aria-label="新增线路">＋</button></div>
-    <div ref={listRef} className="line-list" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={finishPointer} onPointerCancel={event => finishPointer(event, true)} onContextMenu={event => { if (marqueeRef.current) event.preventDefault() }}>
+    <div ref={listRef} className="line-list" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={finishPointer} onPointerCancel={event => { endTouchLongPress(event); finishPointer(event, true) }} onContextMenu={event => { if (marqueeRef.current) event.preventDefault() }}>
       {project.lines.map(line => {
         const isSelected = selected.has(line.id)
         const isActive = activeLineId === line.id

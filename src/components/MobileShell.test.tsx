@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { demoProject } from '../data/demo'
 import type { Selection } from '../data/model'
@@ -45,5 +45,36 @@ describe('MobileShell', () => {
     expect(screen.queryByRole('button', { name: '分享 SVG' })).toBeNull()
     expect(screen.queryByRole('button', { name: '分享工程' })).toBeNull()
     expect(screen.queryByRole('button', { name: '分享矢量图' })).toBeNull()
+  })
+  it('enters shared line multi-select mode on a long press and exposes batch actions', () => {
+    vi.useFakeTimers()
+    const onStart = vi.fn(), onToggle = vi.fn(), onVisible = vi.fn(), onLocked = vi.fn(), onDelete = vi.fn()
+    const view = render(<MobileShell project={structuredClone(demoProject)} selection={null} activeLineId={demoProject.lines[0].id} selectedLineIds={['line-a']} onSelectLine={vi.fn()} onStartLineMultiSelect={onStart} onToggleLineSelection={onToggle} onBatchSetLinesVisible={onVisible} onBatchSetLinesLocked={onLocked} onBatchDeleteLines={onDelete} onChange={vi.fn()} onAddLine={vi.fn()} onOpenPresentation={vi.fn()} onAddText={vi.fn()} onImportProject={vi.fn()} onImportBackground={vi.fn()} onExportProject={vi.fn()} onExportSvg={vi.fn()} onExportImage={vi.fn()} onShareProject={vi.fn()} onShareSvg={vi.fn()} onFitAll={vi.fn()} onZoomSelection={vi.fn()} onDeleteSelection={vi.fn()} onAddLineBadge={vi.fn()} onPhasePreview={vi.fn()} onStartPhaseDrawing={vi.fn()} onUndo={vi.fn()} onRedo={vi.fn()} canUndo={false} canRedo={false} />)
+    fireEvent.click(screen.getByRole('button', { name: '线路' }))
+    const row = view.container.querySelector('[data-line-id="line-a"]')!
+    fireEvent.pointerDown(row, { pointerId: 1, pointerType: 'touch', clientX: 10, clientY: 10 })
+    act(() => { vi.advanceTimersByTime(520) })
+    expect(onStart).toHaveBeenCalledWith('line-a')
+    expect(screen.queryByText('长按线路进入多选模式')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '全部隐藏' }))
+    fireEvent.click(screen.getByRole('button', { name: '全部锁定' }))
+    fireEvent.click(screen.getByRole('button', { name: '删除所选线路' }))
+    expect(onVisible).toHaveBeenCalledWith(false)
+    expect(onLocked).toHaveBeenCalledWith(true)
+    expect(onDelete).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('exposes existing Segment actions in the mobile Inspector drawer', () => {
+    const onAddWaypoint = vi.fn(), onInsertStation = vi.fn(), onStructure = vi.fn()
+    render(<MobileShell project={structuredClone(demoProject)} selection={{ type: 'segment', id: 'a-1' }} activeLineId={demoProject.lines[0].id} onSelectLine={vi.fn()} onChange={vi.fn()} onAddLine={vi.fn()} onOpenPresentation={vi.fn()} onAddText={vi.fn()} onImportProject={vi.fn()} onImportBackground={vi.fn()} onExportProject={vi.fn()} onExportSvg={vi.fn()} onExportImage={vi.fn()} onShareProject={vi.fn()} onShareSvg={vi.fn()} onFitAll={vi.fn()} onZoomSelection={vi.fn()} onDeleteSelection={vi.fn()} onAddLineBadge={vi.fn()} onPhasePreview={vi.fn()} onStartPhaseDrawing={vi.fn()} onInsertStation={onInsertStation} onAddWaypoint={onAddWaypoint} onStructureChange={onStructure} onUndo={vi.fn()} onRedo={vi.fn()} canUndo={false} canRedo={false} />)
+    fireEvent.click(screen.getByRole('button', { name: '属性' }))
+    fireEvent.click(screen.getByRole('button', { name: '＋站点' }))
+    fireEvent.click(screen.getByRole('button', { name: '＋路径点' }))
+    expect(onInsertStation).toHaveBeenCalledTimes(1)
+    expect(onAddWaypoint).toHaveBeenCalledTimes(1)
+    const select = screen.getByLabelText('线路结构')
+    fireEvent.change(select, { target: { value: 'elevated' } })
+    expect(onStructure).toHaveBeenCalledWith('elevated')
   })
 })

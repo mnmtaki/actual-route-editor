@@ -1037,6 +1037,7 @@ export default function App() {
         onAddRoad={() => startRoadDrawing()}
         onAddBasemapPath={startBasemapDrawing}
         onImportProject={() => void importNativeJson("project")}
+        onImportTopology={() => void importNativeJson("topology")}
         onImportBackground={() => void importNativeBackground()}
         onExportProject={() => void saveProjectFile()}
         onExportSvg={() => void saveSvgFile()}

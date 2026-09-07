@@ -26,6 +26,12 @@ export interface PresentationBeat extends HistoryEvent {
   beatId: string
   presentationStart: number
   cameraTransitionDuration: number
+  /** Optional construction-origin prelude, evaluated as part of the pure Presentation timeline. */
+  originStationId?: string
+  needsOriginReveal: boolean
+  originRevealStart: number
+  originRevealDuration: number
+  originHoldDuration: number
   revealStart: number
   revealDuration: number
   revealEnd: number

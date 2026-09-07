@@ -2,7 +2,7 @@ import type { ActualRouteProject, Line, OpeningPhase, PresentationSettings, Segm
 import { getSegmentCurveLength, getSegmentPoints } from '../geometry/path'
 import { PRESENTATION_ANIMATION, clamp } from './config'
 import { compileCameraTrack } from './camera'
-import { getBeatRevealFronts } from './reveal'
+import { getBeatRevealFronts, ORIGIN_HOLD_DURATION, ORIGIN_REVEAL_DURATION } from './reveal'
 import { getStationNameAt, normalizeStationNameHistory } from '../data/stationNameHistory'
 import { resolveSegmentLineAt, normalizeSegmentLineHistory } from '../data/segmentLineHistory'
 import { resolveMetersPerWorldUnit } from '../data/distance'
@@ -106,17 +106,28 @@ export function compilePresentationBeats(project: ActualRouteProject, events: Hi
     const opening = event.eventTypes.includes('SEGMENT_OPENING')
     const revealDuration = event.type === 'LINE_REASSIGNMENT' ? 0.001 : opening ? totalPathLength / speed : event.type.includes('CLOSURE') ? PRESENTATION_ANIMATION.closureFadeDuration : settings.stationOpeningDuration
     const cameraTransitionDuration = index === 0 || event.type === 'LINE_REASSIGNMENT' ? 0 : PRESENTATION_ANIMATION.cameraTransitionDuration
-    const revealStart = cursor + cameraTransitionDuration, revealEnd = revealStart + revealDuration
+    const constructionStart = cursor + cameraTransitionDuration
+    const originStationId = opening ? event.branches[primaryBranchIndex]?.[0]?.fromStationId : undefined
+    const needsOriginReveal = Boolean(opening && originStationId && !stationWasVisibleBeforeBeat(project, events, index, originStationId, event.historyDate))
+    const originRevealDuration = needsOriginReveal ? ORIGIN_REVEAL_DURATION : 0
+    const originHoldDuration = needsOriginReveal ? ORIGIN_HOLD_DURATION : 0
+    const originRevealStart = constructionStart
+    const revealStart = constructionStart + originRevealDuration + originHoldDuration, revealEnd = revealStart + revealDuration
     const overviewAfter = Boolean(settings.overviewAfterEachPhase && event.openingPhaseId)
     const pauseDuration = Math.max(0, settings.pauseDuration, event.interchangeStationIds.length ? PRESENTATION_ANIMATION.transferMorphDuration : 0)
     const overviewEnterDuration = overviewAfter ? PRESENTATION_ANIMATION.overviewTransitionDuration : 0
     const overviewHoldDuration = overviewAfter ? Math.max(0, settings.overviewHoldDuration) : 0
     const overviewExitDuration = overviewAfter ? PRESENTATION_ANIMATION.overviewTransitionDuration : 0
     const overviewStart = revealEnd + pauseDuration, overviewEnd = overviewStart + overviewEnterDuration + overviewHoldDuration + overviewExitDuration
-    const beat: PresentationBeat = { ...event, beatId: `beat-${index}-${event.id}`, presentationStart: cursor, cameraTransitionDuration, revealStart, revealDuration, revealEnd, animationDuration: revealDuration, pauseDuration, presentationEnd: overviewEnd, totalPathLength, branchLengths, primaryBranchIndex, overviewAfter, overviewStart, overviewEnterDuration, overviewHoldDuration, overviewExitDuration, overviewEnd }
+    const beat: PresentationBeat = { ...event, beatId: `beat-${index}-${event.id}`, presentationStart: cursor, cameraTransitionDuration, originStationId, needsOriginReveal, originRevealStart, originRevealDuration, originHoldDuration, revealStart, revealDuration, revealEnd, animationDuration: originRevealDuration + originHoldDuration + revealDuration, pauseDuration, presentationEnd: overviewEnd, totalPathLength, branchLengths, primaryBranchIndex, overviewAfter, overviewStart, overviewEnterDuration, overviewHoldDuration, overviewExitDuration, overviewEnd }
     cursor = beat.presentationEnd
     return beat
   })
+}
+
+function stationWasVisibleBeforeBeat(project: ActualRouteProject, events: HistoryEvent[], index: number, stationId: string, date: string) {
+  if (activeLineIds(project, stationId, previousDate(date)).length > 0) return true
+  return events.slice(0, index).some(event => event.historyDate <= date && !event.eventTypes.some(type => type.includes('CLOSURE')) && [...event.stationIds, ...event.interchangeStationIds].includes(stationId))
 }
 
 export function compilePresentation(project: ActualRouteProject, settings: PresentationSettings = project.presentation, aspectOverride?: number): PresentationSequence {

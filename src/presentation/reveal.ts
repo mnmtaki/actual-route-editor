@@ -2,7 +2,43 @@ import type { ActualRouteProject } from '../data/model'
 import { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import { sampleSegmentAtLengthRatio } from '../geometry/path'
 import type { PresentationBeat, RevealFront } from './types'
-import { clamp } from './config'
+import { clamp, easing } from './config'
+
+/** Presentation-only timing policy for a genuinely new construction origin. */
+export const ORIGIN_REVEAL_DURATION = 0.3
+export const ORIGIN_HOLD_DURATION = 0.1
+export const ORIGIN_LABEL_DELAY = 0.08
+export const ORIGIN_SCALE_FROM = 0.75
+
+export interface OpeningAnimationState {
+  originRevealProgress: number
+  originOpacity: number
+  originScale: number
+  originLabelOpacity: number
+  lineRevealProgress: number
+}
+
+/**
+ * Deterministically evaluates the opening prelude and the existing line reveal.
+ * It has no frame-to-frame state and is shared by Preview, scrub and export.
+ */
+export function getOpeningAnimationState(beat: PresentationBeat, time: number): OpeningAnimationState {
+  const hasPrelude = Boolean(beat.needsOriginReveal && beat.originRevealDuration > 0)
+  const originDuration = hasPrelude ? beat.originRevealDuration : 0
+  const originProgress = hasPrelude ? clamp((time - beat.originRevealStart) / originDuration) : 1
+  const easedOrigin = hasPrelude ? easing.station(originProgress) : 1
+  const labelProgress = hasPrelude
+    ? easing.station(clamp((time - beat.originRevealStart - ORIGIN_LABEL_DELAY) / Math.max(.000001, originDuration - ORIGIN_LABEL_DELAY)))
+    : 1
+  const lineRevealProgress = clamp((time - beat.revealStart) / Math.max(.000001, beat.revealDuration))
+  return {
+    originRevealProgress: originProgress,
+    originOpacity: hasPrelude ? easedOrigin : 1,
+    originScale: hasPrelude ? ORIGIN_SCALE_FROM + (1 - ORIGIN_SCALE_FROM) * easedOrigin : 1,
+    originLabelOpacity: hasPrelude ? labelProgress : 1,
+    lineRevealProgress,
+  }
+}
 
 export function getBeatSegmentRevealProgress(beat: PresentationBeat, segmentId: string, globalRevealProgress: number) {
   for (let branchIndex = 0; branchIndex < beat.branches.length; branchIndex += 1) {

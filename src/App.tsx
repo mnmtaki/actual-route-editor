@@ -951,6 +951,13 @@ export default function App() {
           onStyle={() => setStyleOpen(true)}
           onSettings={() => setSettingsOpen(true)}
           onPresentation={() => setPresentationOpen(true)}
+          projectName={getProjectName(history.project)}
+          onProjectNameChange={(name) => history.commit((current) => {
+            const next = structuredClone(current)
+            next.projectName = name
+            next.name = name
+            return next
+          })}
           drawing={!!drawing}
           onFinish={finishDrawing}
           importProject={() => void importNativeJson("project")}

@@ -37,4 +37,13 @@ describe('MobileShell', () => {
     expect(screen.getByRole('button', { name: '导入底图' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '导出图片…' })).toBeTruthy()
   })
+
+  it('does not expose the temporary JSON or SVG share actions', () => {
+    renderShell()
+    fireEvent.click(screen.getByRole('button', { name: '导出' }))
+    expect(screen.queryByRole('button', { name: '分享 JSON' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '分享 SVG' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '分享工程' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '分享矢量图' })).toBeNull()
+  })
 })

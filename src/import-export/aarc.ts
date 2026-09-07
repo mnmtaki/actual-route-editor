@@ -1,14 +1,14 @@
 import type { ActualRouteProject, BasemapPath, Line, Segment, Station, StationLineRelation, Waypoint } from '../data/model'
 import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from '../data/model'
-import { normalizeISODate } from '../timeline/date'
 import { reconstructAarcLineGeometry, type AarcGeometryPoint } from './aarcGeometry'
 import { convertAarcVisualStyle } from './aarcVisualStyle'
+import { aggregateAarcInterval, decodeAarcTimestamp, resolveAarcAtomicDates, type AarcTemporalSlice } from './aarcTime'
 import { removeRepeatedTerminalPoint } from '../data/basemapPaths'
 
 interface AarcPoint { id?: unknown; pos?: unknown; sta?: unknown; dir?: unknown; name?: unknown; nameS?: unknown; nameP?: unknown }
-interface AarcLine { id?: unknown; name?: unknown; color?: unknown; pts?: unknown; type?: unknown; isFake?: unknown; width?: unknown; zIndex?: unknown; isFilled?: unknown; time?: { open?: unknown } }
+interface AarcLine { id?: unknown; name?: unknown; color?: unknown; pts?: unknown; type?: unknown; isFake?: unknown; width?: unknown; zIndex?: unknown; isFilled?: unknown; parent?: unknown; time?: { open?: unknown; close?: unknown } }
 interface AarcPointLink { pts?: unknown }
-interface AarcProject { lines?: unknown; points?: unknown; pointLinks?: unknown; cvsSize?: unknown; config?: unknown }
+interface AarcProject { lines?: unknown; points?: unknown; pointLinks?: unknown; cvsSize?: unknown; config?: unknown; timeSlices?: unknown }
 
 export interface AarcImportSummary {
   realLineCount: number
@@ -49,6 +49,8 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
   const canonicalPoint = buildPointLinkAliases(source.pointLinks, pointMap, warnings)
   const rawLines = source.lines as AarcLine[]
   const realLines = rawLines.filter(isRealTransitLine)
+  const realLineById = new Map(realLines.map(line => [finiteId(line.id), line]).filter((entry): entry is [number, AarcLine] => entry[0] !== null))
+  const timeSlices = (Array.isArray(source.timeSlices) ? source.timeSlices : []) as AarcTemporalSlice[]
   const terrainLines = rawLines.filter(isAarcTerrainPath)
   const ignoredHelperCount = rawLines.length - realLines.length - terrainLines.length
   if (!realLines.length) throw new Error('AARC 工程中没有可导入的真实运营线路')
@@ -106,11 +108,15 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
   realLines.forEach((rawLine, lineOrder) => {
     const sourceLineId = finiteId(rawLine.id) ?? lineOrder
     const lineId = `aarc-line-${sourceLineId}`
-    const openedAt = reliableAarcDate(rawLine.time?.open)
-    if (rawLine.time?.open != null && !openedAt) warnings.push(`AARC 线路 ${sourceLineId} 的 time.open 无法可靠换算为日期，已保留为空`)
-    const line: Line = { id: lineId, name: text(rawLine.name)!, color: validColor(rawLine.color), stationSequence: [], lineOrder, openedAt, closedAt: null, visible: true, locked: false, source: { format: 'aarc', lineId: sourceLineId } }
+    const ownOpenedAt = decodeAarcTimestamp(rawLine.time?.open), ownClosedAt = decodeAarcTimestamp(rawLine.time?.close)
+    const openedAt = ownOpenedAt ?? resolveInheritedLineDate(rawLine, realLineById, 'open')
+    const closedAt = ownClosedAt ?? resolveInheritedLineDate(rawLine, realLineById, 'close')
+    if (rawLine.time?.open != null && !ownOpenedAt) warnings.push(`AARC 线路 ${sourceLineId} 的 time.open 无法可靠换算为日期，已使用可用的继承日期或保留为空`)
+    if (rawLine.time?.close != null && !ownClosedAt) warnings.push(`AARC 线路 ${sourceLineId} 的 time.close 无法可靠换算为日期，已使用可用的继承日期或保留为空`)
+    const line: Line = { id: lineId, name: text(rawLine.name)!, color: validColor(rawLine.color), stationSequence: [], lineOrder, openedAt, closedAt, visible: true, locked: false, source: { format: 'aarc', lineId: sourceLineId } }
     lines.push(line)
     const chain = Array.isArray(rawLine.pts) ? rawLine.pts : []
+    const atomicDates = resolveAarcAtomicDates(rawLine, timeSlices, openedAt, closedAt, warnings)
     const geometryPoints: AarcGeometryPoint[] = []
     for (const rawId of chain) {
       const pointId = finiteId(rawId)
@@ -128,11 +134,13 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
     diagonalLegCount += reconstructed.stats.diagonalLegCount
 
     let previousStation: Station | null = null
+    let previousStationSourceIndex: number | undefined
     let pendingWaypoints: Waypoint[] = []
     let segmentIndex = 0
     const relationStationIds = new Set<string>()
     reconstructed.nodes.forEach((node, nodeIndex) => {
-      const sourcePoint = node.sourcePointIndex === undefined ? null : geometryPoints[node.sourcePointIndex]
+      const sourcePointIndex = node.sourcePointIndex
+      const sourcePoint = sourcePointIndex === undefined ? null : geometryPoints[sourcePointIndex]
       if (sourcePoint?.station) {
         const station = ensureStation(sourcePoint.id)
         if (!station) return
@@ -142,10 +150,13 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
         }
         if (!line.stationSequence.length || line.stationSequence.at(-1) !== station.id) line.stationSequence.push(station.id)
         if (previousStation && previousStation.id !== station.id) {
-          segments.push({ id: `aarc-segment-${sourceLineId}-${segmentIndex}`, lineId, fromStationId: previousStation.id, toStationId: station.id, mode: pendingWaypoints.length ? 'rounded' : 'straight', ...(pendingWaypoints.length ? { cornerRadius: 42 } : {}), structureType: 'underground', structureNodes: [], waypoints: pendingWaypoints, openedAt, closedAt: null })
+          const interval = previousStationSourceIndex === undefined || sourcePointIndex === undefined
+            ? { openedAt, closedAt }
+            : aggregateAarcInterval(atomicDates, previousStationSourceIndex, sourcePointIndex, { openedAt, closedAt })
+          segments.push({ id: `aarc-segment-${sourceLineId}-${segmentIndex}`, lineId, fromStationId: previousStation.id, toStationId: station.id, mode: pendingWaypoints.length ? 'rounded' : 'straight', ...(pendingWaypoints.length ? { cornerRadius: 42 } : {}), structureType: 'underground', structureNodes: [], waypoints: pendingWaypoints, openedAt: interval.openedAt, closedAt: interval.closedAt })
           segmentIndex += 1
         } else if (pendingWaypoints.length) warnings.push(`AARC 线路 ${sourceLineId} 在首站前的 ${pendingWaypoints.length} 个几何点无法归属区间，已忽略`)
-        previousStation = station; pendingWaypoints = []
+        previousStation = station; previousStationSourceIndex = sourcePointIndex; pendingWaypoints = []
         return
       }
       if (!previousStation) return
@@ -161,18 +172,29 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
     })
     if (pendingWaypoints.length) warnings.push(`AARC 线路 ${sourceLineId} 在末站后的 ${pendingWaypoints.length} 个几何点无法归属区间，已忽略`)
     if (line.stationSequence.length < 2) warnings.push(`AARC 线路 ${sourceLineId} 少于两个有效车站`)
+    const lineRelations = relations.filter(relation => relation.lineId === lineId)
+    for (const relation of lineRelations) {
+      const incident = segments.filter(segment => segment.lineId === lineId && (segment.fromStationId === relation.stationId || segment.toStationId === relation.stationId))
+      const openedDates = incident.map(segment => segment.openedAt).filter((value): value is string => Boolean(value))
+      const closedDates = incident.map(segment => segment.closedAt).filter((value): value is string => Boolean(value))
+      relation.openedAt = openedDates.length ? openedDates.reduce((left, right) => left <= right ? left : right) : openedAt
+      relation.closedAt = [...closedDates, ...(closedAt ? [closedAt] : [])].reduce<string | null>((earliest, value) => earliest === null || value < earliest ? value : earliest, null)
+    }
   })
 
   const visualCalibration = convertAarcVisualStyle(realLines, source.config)
   if (!visualCalibration) warnings.push('AARC 视觉映射缺少有效 line.width 或 config.lineWidthMapped，已使用编辑器默认视觉')
   else if (visualCalibration.multipliers.distinctLineWidths.length > 1) warnings.push(`AARC 真实线路包含多种宽度（${visualCalibration.multipliers.distinctLineWidths.join('、')}），当前全局样式按首个真实线路宽度 ${visualCalibration.multipliers.lineWidth} 标定`)
   const today = new Date().toISOString().slice(0, 10)
+  const importedDates = [...lines, ...segments, ...relations].flatMap(item => [item.openedAt, item.closedAt]).filter((value): value is string => Boolean(value)).sort()
+  const startDate = importedDates[0] ?? today
+  const endDate = importedDates.at(-1) ?? today
   const project: ActualRouteProject = {
     version: 1,
     name: projectName(fileName), projectName: projectName(fileName),
     stations, lines, stationLineRelations: relations, openingPhases: [], geometry: { segments }, mapElements: [], basemapPaths, background: null,
-    timeline: { currentDate: today, startDate: today, endDate: today, playing: false },
-    presentation: { ...DEFAULT_PRESENTATION_SETTINGS, startDate: today, endDate: today },
+    timeline: { currentDate: endDate, startDate, endDate, playing: false },
+    presentation: { ...DEFAULT_PRESENTATION_SETTINGS, startDate, endDate },
     settings: { ...DEFAULT_SETTINGS, ...(visualCalibration?.settings ?? {}) },
   }
   const totalWaypointCount = segments.reduce((count, segment) => count + segment.waypoints.length, 0)
@@ -222,13 +244,15 @@ function buildPointLinkAliases(raw: unknown, points: Map<number, AarcPoint>, war
   }
   return aliases
 }
-function reliableAarcDate(value: unknown): string | null {
-  const normalized = normalizeISODate(value)
-  if (normalized) return normalized
-  if (typeof value !== 'number' || !Number.isFinite(value)) return null
-  const date = new Date(value)
-  const year = date.getUTCFullYear()
-  return year >= 1800 && year <= 2500 ? date.toISOString().slice(0, 10) : null
+function resolveInheritedLineDate(line: AarcLine, lines: Map<number, AarcLine>, field: 'open' | 'close', seen = new Set<number>()): string | null {
+  const own = decodeAarcTimestamp(field === 'open' ? line.time?.open : line.time?.close)
+  if (own) return own
+  const lineId = finiteId(line.id)
+  const parentId = finiteId(line.parent)
+  if (lineId !== null && seen.has(lineId)) return null
+  if (lineId !== null) seen.add(lineId)
+  const parent = parentId === null ? undefined : lines.get(parentId)
+  return parent ? resolveInheritedLineDate(parent, lines, field, seen) : null
 }
 function finiteId(value: unknown): number | null { const number = typeof value === 'number' ? value : Number(value); return Number.isFinite(number) ? number : null }
 function validPosition(value: unknown): [number, number] | null { const pair = validPair(value); return pair ? [pair[0], pair[1]] : null }

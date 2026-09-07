@@ -90,11 +90,20 @@ describe('direct manipulation gestures', () => {
     expect(onPreview).toHaveBeenLastCalledWith(demoProject)
   })
 
-  it('drags a rotated bilingual label by world delta without moving its Station',()=>{
+  it('snaps a rotated bilingual label to the nearest direction without moving its Station',()=>{
     const project=structuredClone(demoProject),station=project.stations.find(item=>item.id==='s4')!;station.nameS='Linjiang';station.labelRotation=45
     const onDragCommit=vi.fn(),{container}=render(<NetworkCanvas {...baseProps} project={project} onDragCommit={onDragCommit}/>)
     const svg=container.querySelector('svg')!;Object.defineProperty(svg,'clientWidth',{configurable:true,value:920});vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
-    const label=container.querySelector('[data-label-rotation="45"]')!;fireEvent.pointerDown(label,{pointerId:12,clientX:station.x+station.labelOffsetX,clientY:station.y+station.labelOffsetY,bubbles:true});fireEvent.pointerMove(svg,{pointerId:12,clientX:station.x+station.labelOffsetX+30,clientY:station.y+station.labelOffsetY+20,bubbles:true});fireEvent.pointerUp(svg,{pointerId:12,clientX:0,clientY:0,bubbles:true});const moved=onDragCommit.mock.calls[0][1].stations.find((item:{id:string})=>item.id==='s4');expect(moved.x).toBe(station.x);expect(moved.y).toBe(station.y);expect(moved.labelOffsetX).toBeCloseTo(station.labelOffsetX+30);expect(moved.labelOffsetY).toBeCloseTo(station.labelOffsetY+20);expect(moved.labelRotation).toBe(45)
+    const label=container.querySelector('[data-label-rotation="45"]')!;fireEvent.pointerDown(label,{pointerId:12,clientX:station.x+station.labelOffsetX,clientY:station.y+station.labelOffsetY,bubbles:true});fireEvent.pointerMove(svg,{pointerId:12,clientX:station.x+station.labelOffsetX+30,clientY:station.y+station.labelOffsetY+20,bubbles:true});fireEvent.pointerUp(svg,{pointerId:12,clientX:0,clientY:0,bubbles:true});const moved=onDragCommit.mock.calls[0][1].stations.find((item:{id:string})=>item.id==='s4');expect(moved.x).toBe(station.x);expect(moved.y).toBe(station.y);expect(moved.labelOffsetX).toBeCloseTo(Math.hypot(station.labelOffsetX+30,station.labelOffsetY+20));expect(moved.labelOffsetY).toBe(0);expect(moved.labelRotation).toBe(45)
+  })
+  it('updates a dragged label preview immediately when it enters the top sector',()=>{
+    const project=structuredClone(demoProject),station=project.stations.find(item=>item.id==='s4')!,onPreview=vi.fn(),onDragCommit=vi.fn()
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} onPreview={onPreview} onDragCommit={onDragCommit}/>),svg=container.querySelector('svg')!
+    vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
+    const label=container.querySelector(`[data-label-anchor-x="${station.x+station.labelOffsetX}"]`)!;fireEvent.pointerDown(label,{pointerId:15,clientX:station.x+station.labelOffsetX,clientY:station.y+station.labelOffsetY,bubbles:true});fireEvent.pointerMove(svg,{pointerId:15,clientX:station.x+5,clientY:station.y-100,bubbles:true})
+    const latest=onPreview.mock.calls.at(-1)?.[0] as typeof project,previewStation=latest.stations.find(item=>item.id===station.id)!,previewLabel=container.querySelector(`[data-label-anchor-x="${station.x}"]`)
+    expect(previewStation.labelOffsetX).toBe(0);expect(previewStation.labelOffsetY).toBeCloseTo(-Math.hypot(5,100));expect(previewLabel).toHaveAttribute('data-label-horizontal-anchor','middle');expect(previewLabel).toHaveAttribute('data-label-vertical-anchor','above')
+    fireEvent.pointerUp(svg,{pointerId:15,clientX:station.x+5,clientY:station.y-100,bubbles:true});expect(onDragCommit).toHaveBeenCalledTimes(1)
   })
   it('selects and freely drags one Line-owned badge without moving its siblings',()=>{
     const project=structuredClone(demoProject),line=project.lines.find(item=>item.id==='line-a')!,onSelect=vi.fn(),onDragCommit=vi.fn()

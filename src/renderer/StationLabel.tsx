@@ -1,14 +1,19 @@
 import type { ProjectSettings, Station } from '../data/model'
-import { effectiveLabelRotation, effectiveStationStyle, resolveLabelAnchor } from '../data/style'
+import { effectiveLabelRotation, effectiveStationStyle, resolveLabelAnchor, resolveStationLabelDirection } from '../data/style'
 import { getAarcLabelAlignmentOffset, getAarcLabelBlockMetrics, resolveAarcLabelAnchor } from '../import-export/aarcVisualStyle'
 
 export function StationLabel({ station, settings, showForeign, presentation=false, opacity, onPointerDown, name, nameS }:{ station:Station; settings:ProjectSettings; showForeign:boolean; presentation?:boolean; opacity?:number; onPointerDown?:(event:React.PointerEvent<SVGGElement>)=>void; name?:string; nameS?:string }){
   const { labelSize, labelFontFamily, labelFontWeight, labelColor, foreignLabelSize, foreignLabelFontFamily, foreignLabelFontWeight, foreignLabelColor, foreignLabelGap }=effectiveStationStyle(station,settings),rotation=effectiveLabelRotation(station,settings)
-  const x=station.x+station.labelOffsetX,y=station.y+station.labelOffsetY
+  const isAarcBlock=station.source?.labelAnchorMode==='aarc-block'
+  const direction=resolveStationLabelDirection(station.labelOffsetX,station.labelOffsetY)
+  // For the cardinal vertical sectors, the block is centered on the Station while
+  // retaining the exact stored distance. AARC's calibrated block path stays raw.
+  const renderOffsetX=!isAarcBlock&&(direction==='up'||direction==='down')?0:station.labelOffsetX
+  const x=station.x+renderOffsetX,y=station.y+station.labelOffsetY
   const resolvedName=name ?? station.name, resolvedNameS=nameS ?? station.nameS, foreignLines=showForeign&&resolvedNameS?resolvedNameS.split(/\r?\n/):[]
   const foreignStart=labelSize+foreignLabelGap
   const anchor=resolveLabelAnchor(station.labelOffsetX,station.labelOffsetY)
-  if(station.source?.labelAnchorMode==='aarc-block'){
+  if(isAarcBlock){
     const blockAnchor=resolveAarcLabelAnchor([station.labelOffsetX,station.labelOffsetY])
     const metrics=getAarcLabelBlockMetrics(labelSize,foreignLabelSize,foreignLabelGap,foreignLines.length)
     const alignmentOffset=getAarcLabelAlignmentOffset(blockAnchor.horizontalAlign,blockAnchor.verticalAlign)

@@ -6,8 +6,24 @@ export const LABEL_DIRECTIONS: { value: LabelDirection; label: string }[] = [
   { value: 'upper-left', label: '左上' }, { value: 'upper-right', label: '右上' }, { value: 'lower-left', label: '左下' }, { value: 'lower-right', label: '右下' },
 ]
 const VECTORS: Record<LabelDirection, [number, number]> = { up:[0,-1], down:[0,1], left:[-1,0], right:[1,0], 'upper-left':[-Math.SQRT1_2,-Math.SQRT1_2], 'upper-right':[Math.SQRT1_2,-Math.SQRT1_2], 'lower-left':[-Math.SQRT1_2,Math.SQRT1_2], 'lower-right':[Math.SQRT1_2,Math.SQRT1_2] }
+const DIRECTION_ORDER: LabelDirection[] = ['right','lower-right','down','lower-left','left','upper-left','up','upper-right']
 export function labelOffsetFor(direction: LabelDirection, distance: number) { const [x,y]=VECTORS[direction]; return { x:x*distance, y:y*distance } }
-export function inferLabelDirection(x:number,y:number,toleranceDegrees=12): LabelDirection | 'custom' { if(!x&&!y)return 'custom'; const angle=Math.atan2(y,x)*180/Math.PI; const candidates: [LabelDirection,number][]=[['right',0],['lower-right',45],['down',90],['lower-left',135],['left',180],['upper-left',-135],['up',-90],['upper-right',-45]]; const found=candidates.find(([,candidate])=>Math.abs((((angle-candidate)+540)%360)-180)<=toleranceDegrees); return found?.[0]??'custom' }
+/** Resolve a world-space label vector to one deterministic 45° direction sector. */
+export function resolveStationLabelDirection(x:number,y:number): LabelDirection | 'custom' {
+  if (Math.hypot(x,y) <= 1e-9) return 'custom'
+  const angle=(Math.atan2(y,x)*180/Math.PI+360)%360
+  const sector=Math.floor((angle+22.5)/45)%8
+  return DIRECTION_ORDER[sector]
+}
+/** Kept as the existing public helper; direction inference now uses the same eight-sector resolver. */
+export function inferLabelDirection(x:number,y:number,_toleranceDegrees=12): LabelDirection | 'custom' { return resolveStationLabelDirection(x,y) }
+/** Snap only an actively edited offset; untouched stored offsets remain unchanged. */
+export function snapLabelOffset(x:number,y:number) {
+  const direction=resolveStationLabelDirection(x,y)
+  if (direction==='custom') return { x, y, direction }
+  const offset=labelOffsetFor(direction,Math.hypot(x,y))
+  return { ...offset, direction }
+}
 export function effectiveLabelRotation(station: Station, settings: ProjectSettings){ return Number.isFinite(station.labelRotation) ? station.labelRotation! : settings.defaultStationLabelRotation }
 const positiveOverride=(value:number|undefined,fallback:number)=>Number.isFinite(value)&&value!>0?value!:fallback
 const nonNegativeOverride=(value:number|undefined,fallback:number)=>Number.isFinite(value)&&value!>=0?value!:fallback
@@ -37,9 +53,9 @@ export function resetVisualSettings(settings: ProjectSettings): ProjectSettings 
 export type LabelHorizontalAnchor = 'start' | 'middle' | 'end'
 export type LabelVerticalAnchor = 'above' | 'middle' | 'below'
 export function resolveLabelAnchor(offsetX:number,offsetY:number){
-  const epsilon=1e-6
-  const textAnchor:LabelHorizontalAnchor=offsetX>epsilon?'start':offsetX<-epsilon?'end':'middle'
-  const verticalAnchor:LabelVerticalAnchor=offsetY>epsilon?'below':offsetY<-epsilon?'above':'middle'
+  const direction=resolveStationLabelDirection(offsetX,offsetY)
+  const textAnchor:LabelHorizontalAnchor=direction==='left'||direction==='upper-left'||direction==='lower-left'?'end':direction==='right'||direction==='upper-right'||direction==='lower-right'?'start':'middle'
+  const verticalAnchor:LabelVerticalAnchor=direction==='up'||direction==='upper-left'||direction==='upper-right'?'above':direction==='down'||direction==='lower-left'||direction==='lower-right'?'below':'middle'
   const dominantBaseline: 'hanging' | 'middle' | 'auto' = verticalAnchor==='below'?'hanging':verticalAnchor==='middle'?'middle':'auto'
   return {textAnchor,verticalAnchor,dominantBaseline}
 }

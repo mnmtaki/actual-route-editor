@@ -12,7 +12,7 @@ import { LineLegendLayer } from './LineLegend'
 import { LineBadgesLayer } from './LineBadges'
 import { VectorBasemapLayer } from './VectorBasemap'
 import type { DrawingMode } from '../data/basemapPaths'
-import { effectiveLineWidth, effectiveStationStyle } from '../data/style'
+import { effectiveLineWidth, effectiveStationStyle, snapLabelOffset } from '../data/style'
 import { getLineStyle, resolveLineStyle } from '../data/lineStyles'
 import { isSegmentGeometryLocked, isStationGeometryLocked, lockedStationMessage } from '../data/lineLock'
 
@@ -144,7 +144,7 @@ export function NetworkCanvas({ project, selection, drawing, roadDraft, phasePre
       if (segment && node && !node.waypointId) node.progress = findSegmentProgressForPoint(next, segment, point)
     } else if (current.kind === 'draggingLabel') {
       const station = next.stations.find(item => item.id === current.id)
-      if (station) { station.labelOffsetX = current.origin.x + dx; station.labelOffsetY = current.origin.y + dy }
+      if (station) { const offset=snapLabelOffset(current.origin.x + dx, current.origin.y + dy); station.labelOffsetX = offset.x; station.labelOffsetY = offset.y }
     } else if (current.kind === 'draggingLineBadge') {
       const badge = next.lines.find(line => line.id === current.ownerLineId)?.lineBadges?.find(item => item.id === current.id)
       if (badge) { badge.x = current.origin.x + dx; badge.y = current.origin.y + dy }

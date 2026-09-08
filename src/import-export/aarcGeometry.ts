@@ -22,6 +22,11 @@ export interface AarcGeometryStats {
   diagonalLegCount: number
   legalCollinearRunCount: number
   lockedDirectEdgeCount: number
+  sourceLegCount: number
+  directLegCount: number
+  oneImplicitReconstructionCount: number
+  twoImplicitReconstructionCount: number
+  unresolvedCount: number
 }
 
 export interface AarcGeometryResult {
@@ -35,7 +40,10 @@ interface EdgeSolution { points: Vector[]; length: number; corners: number; cost
 interface StationAnchor { point: AarcGeometryPoint; sourceIndex: number }
 interface StationInterval { fromAnchor: number; toAnchor: number; sourceStart: number; sourceEnd: number; explicitControlIndices: number[]; directHeading: AarcOrientation | null; lockedDirect: boolean }
 
-const EPSILON = 1e-7
+// AARC exports occasionally contain tails such as 2699.99999.  A small
+// coordinate epsilon is enough to treat those as the intended octilinear
+// direction without changing any coordinates.
+const EPSILON = 1e-4
 const CORNER_PENALTY = 1
 const ORIENTATION_ORDER: AarcOrientation[] = ['horizontal', 'vertical', 'diag-positive', 'diag-negative']
 const VECTORS: Record<AarcOrientation, Vector> = {
@@ -54,29 +62,22 @@ export function reconstructAarcLineGeometry(points: AarcGeometryPoint[]): AarcGe
   const stationDirections = resolveStationAnchorDirections(anchors, intervals)
   const orientations: Array<AarcOrientation | null> = points.map(() => null)
   anchors.forEach((anchor, index) => { orientations[anchor.sourceIndex] = stationDirections[index] })
-  const nodes: AarcSkeletonNode[] = [{ x: points[0].x, y: points[0].y, sourcePointIndex: 0, implicit: false }]
-
-  for (let intervalIndex = 0; intervalIndex < intervals.length; intervalIndex += 1) {
-    const interval = intervals[intervalIndex]
-    if (interval.explicitControlIndices.length) {
-      appendExplicitInterval(points, interval, nodes)
-      continue
-    }
-    const fromPoint = anchors[interval.fromAnchor].point
-    const toPoint = anchors[interval.toAnchor].point
-    if (interval.lockedDirect) {
-      pushDistinct(nodes, { x: toPoint.x, y: toPoint.y, sourcePointIndex: anchors[interval.toAnchor].sourceIndex, implicit: false })
-      continue
-    }
-    const edge = solveEdge(fromPoint, toPoint, stationDirections[interval.fromAnchor], stationDirections[interval.toAnchor])
-    edge.points.slice(1, -1).forEach(point => pushDistinct(nodes, { ...point, implicit: true }))
-    pushDistinct(nodes, { x: toPoint.x, y: toPoint.y, sourcePointIndex: anchors[interval.toAnchor].sourceIndex, implicit: false })
-  }
-
-  if (anchors[0].sourceIndex > 0) nodes.splice(0, nodes.length, ...points.map((point, sourcePointIndex) => ({ x: point.x, y: point.y, sourcePointIndex, implicit: false })))
+  // Reconstruct the complete source chain.  The previous implementation
+  // solved only station-to-station intervals and then selected one
+  // orientation per station, which could insert a corner even when the
+  // source pair was already a legal H/V/45 degree edge.  Source points
+  // (including sta:0 controls) are now always emitted in source order and
+  // implicit points are inserted only for an illegal adjacent pair.
+  const chain = reconstructSourceChain(points)
+  const nodes: AarcSkeletonNode[] = chain.nodes
   const stats = measureNodes(nodes)
   stats.legalCollinearRunCount = runCount
   stats.lockedDirectEdgeCount = intervals.filter(interval => interval.lockedDirect).length
+  stats.sourceLegCount = Math.max(0, points.length - 1)
+  stats.directLegCount = chain.directLegCount
+  stats.oneImplicitReconstructionCount = chain.oneImplicitReconstructionCount
+  stats.twoImplicitReconstructionCount = chain.twoImplicitReconstructionCount
+  stats.unresolvedCount = chain.unresolvedCount
   return { orientations, nodes, stats }
 }
 
@@ -163,6 +164,237 @@ function buildStationIntervals(points: AarcGeometryPoint[], anchors: StationAnch
   })
 }
 
+interface ChainReconstruction {
+  nodes: AarcSkeletonNode[]
+  directLegCount: number
+  oneImplicitReconstructionCount: number
+  twoImplicitReconstructionCount: number
+  unresolvedCount: number
+}
+
+/**
+ * Reconstruct the source point chain without replacing source geometry.
+ * A pair is always tested for a direct octilinear leg first.  Only an illegal
+ * pair is routed through deterministic one-/two-corner candidates.
+ */
+function reconstructSourceChain(points: AarcGeometryPoint[]): ChainReconstruction {
+  const nodes: AarcSkeletonNode[] = points.length
+    ? [{ x: points[0].x, y: points[0].y, sourcePointIndex: 0, implicit: false }]
+    : []
+  let directLegCount = 0
+  let oneImplicitReconstructionCount = 0
+  let twoImplicitReconstructionCount = 0
+  let unresolvedCount = 0
+
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const from = points[index]
+    const to = points[index + 1]
+    const directHeading = headingBetween(from, to)
+    if (directHeading) {
+      // A small backwards-compatibility guard for legacy AARC chains whose
+      // two dir=0 anchors sit on a diagonal between an orthogonal incoming
+      // and outgoing run.  The source pair is geometrically legal, but the
+      // surrounding chain explicitly describes the preserved orthogonal bend
+      // used by older imports.  Mixed-dir pairs (including the confirmed
+      // Mintang→Kaibu case) always take the direct fast path.
+      const legacyCorner = legacyOrthogonalCorner(points, index, directHeading)
+      if (legacyCorner) {
+        legacyCorner.points.slice(1, -1).forEach(value => pushDistinct(nodes, { ...value, implicit: true }))
+        pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false })
+        oneImplicitReconstructionCount += legacyCorner.corners === 1 ? 1 : 0
+        twoImplicitReconstructionCount += legacyCorner.corners === 2 ? 1 : 0
+        continue
+      }
+      directLegCount += 1
+      pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false })
+      continue
+    }
+
+    const fromHints = resolveSideHeadingCandidates(points, index, 'outgoing')
+    const toHints = resolveSideHeadingCandidates(points, index + 1, 'incoming')
+    let candidates = generateEdgeCandidates(from, to, fromHints, toHints)
+    // If the nearest continuation family cannot span the displacement (for
+    // example a short horizontal run facing a taller offset), expand to the
+    // endpoint dir families.  This is a deterministic fallback, not an
+    // arbitrary-angle segment; every candidate is still validated as H/V/45.
+    if (!candidates.length) {
+      candidates = generateEdgeCandidates(from, to,
+        Array.from(new Set([...fromHints, ...candidatesFor(from)])),
+        Array.from(new Set([...toHints, ...candidatesFor(to)])))
+    }
+    const best = chooseEdgeCandidate(candidates)
+    if (!best) {
+      unresolvedCount += 1
+      // Keep the source point and fail loudly in measureNodes rather than
+      // silently introducing an arbitrary-angle segment.
+      pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false })
+      continue
+    }
+    if (best.corners === 1) oneImplicitReconstructionCount += 1
+    else if (best.corners === 2) twoImplicitReconstructionCount += 1
+    best.points.slice(1, -1).forEach(value => pushDistinct(nodes, { ...value, implicit: true }))
+    pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false })
+  }
+
+  return { nodes, directLegCount, oneImplicitReconstructionCount, twoImplicitReconstructionCount, unresolvedCount }
+}
+
+function legacyOrthogonalCorner(points: AarcGeometryPoint[], index: number, directHeading: AarcOrientation): EdgeSolution | null {
+  if (directHeading !== 'diag-positive' && directHeading !== 'diag-negative') return null
+  const from = points[index], to = points[index + 1]
+  if (from.dir !== 0 || to.dir !== 0 || index === 0 || index + 2 >= points.length) return null
+  const incoming = headingBetween(points[index - 1], from)
+  const outgoing = headingBetween(to, points[index + 2])
+  if (!incoming || !outgoing || incoming === outgoing || parallel(VECTORS[incoming], VECTORS[outgoing])) return null
+  const candidate = solveOneImplicitEdge(from, to, incoming, outgoing)
+  return candidate && candidate.corners === 1 ? candidate : null
+}
+
+type EdgeSide = 'incoming' | 'outgoing'
+
+/** Resolve per-side directions from the nearest legal source legs. */
+function resolveSideHeadingCandidates(points: AarcGeometryPoint[], index: number, side: EdgeSide): AarcOrientation[] {
+  const adjacentIndex = side === 'outgoing' ? index + 1 : index - 1
+  if (adjacentIndex >= 0 && adjacentIndex < points.length) {
+    const direct = side === 'outgoing'
+      ? headingBetween(points[index], points[adjacentIndex])
+      : headingBetween(points[adjacentIndex], points[index])
+    if (direct) return withDiagonalAlternative(direct)
+  }
+  // An illegal pair often sits between a stable run on either side.  The
+  // source leg immediately behind an outgoing endpoint (or ahead of an
+  // incoming endpoint) is the most useful continuation constraint.  Search
+  // both directions deterministically before falling back to the point's dir
+  // family; this is what distinguishes the two mirrored intersection choices.
+  const primaryPairs = side === 'outgoing' ? [[index - 1, index]] : [[index, index + 1]]
+  for (const [fromIndex, toIndex] of primaryPairs) {
+    if (fromIndex < 0 || toIndex < 0 || fromIndex >= points.length || toIndex >= points.length) continue
+    const direct = headingBetween(points[fromIndex], points[toIndex])
+    if (direct) return withDiagonalAlternative(direct)
+  }
+  const primarySearch = side === 'outgoing'
+    ? (distance: number) => [index - distance, index - distance + 1]
+    : (distance: number) => [index + distance - 1, index + distance]
+  const secondarySearch = side === 'outgoing'
+    ? (distance: number) => [index + distance, index + distance + 1]
+    : (distance: number) => [index - distance, index - distance + 1]
+  const findHeading = (makePair: (distance: number) => number[]): AarcOrientation | null => {
+    for (let distance = 1; distance < points.length; distance += 1) {
+      const [fromIndex, toIndex] = makePair(distance)
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= points.length || toIndex >= points.length) continue
+      const direct = headingBetween(points[fromIndex], points[toIndex])
+      if (direct) return direct
+    }
+    return null
+  }
+  const primaryHeading = findHeading(primarySearch)
+  if (primaryHeading) return withDiagonalAlternative(primaryHeading)
+  const secondaryHeading = findHeading(secondarySearch)
+  if (secondaryHeading) return withDiagonalAlternative(secondaryHeading)
+  return candidatesFor(points[index])
+}
+
+function withDiagonalAlternative(heading: AarcOrientation): AarcOrientation[] {
+  return heading === 'diag-positive' || heading === 'diag-negative'
+    ? [heading, heading === 'diag-positive' ? 'diag-negative' : 'diag-positive']
+    : [heading]
+}
+
+interface ScoredEdgeSolution extends EdgeSolution {
+  orientationChanges: number
+}
+
+function generateEdgeCandidates(a: AarcGeometryPoint, b: AarcGeometryPoint, fromHints: AarcOrientation[], toHints: AarcOrientation[]): ScoredEdgeSolution[] {
+  const candidates: ScoredEdgeSolution[] = []
+  for (const from of fromHints) for (const to of toHints) {
+    const one = solveOneImplicitEdge(a, b, from, to)
+    if (one) candidates.push({ ...one, orientationChanges: from === to ? 0 : 1 })
+    if (parallel(VECTORS[from], VECTORS[to])) {
+      const bridge = solveParallelBridge(a, b, from)
+      if (bridge) candidates.push({ ...bridge, orientationChanges: from === to ? 0 : 1 })
+    }
+  }
+  return candidates
+}
+
+function solveOneImplicitEdge(a: Vector, b: Vector, from: AarcOrientation, to: AarcOrientation): ScoredEdgeSolution | null {
+  if (parallel(VECTORS[from], VECTORS[to])) return null
+  const intersection = intersectLines(a, VECTORS[from], b, VECTORS[to])
+  if (!intersection) return null
+  const solution = makeSolution([a, intersection, b])
+  if (solution.corners !== 1 || !isValidOctilinearSolution(solution, a, b, from, to)) return null
+  return { ...solution, orientationChanges: from === to ? 0 : 1 }
+}
+
+/**
+ * Two parallel endpoint directions with a lateral offset cannot be expressed
+ * by a single implicit point.  Split the remaining primary-axis distance so
+ * the middle connector is a legal 45 degree leg.
+ */
+function solveParallelBridge(a: Vector, b: Vector, heading: AarcOrientation): EdgeSolution | null {
+  const axis = VECTORS[heading]
+  const delta = subtract(b, a)
+  const alongSigned = dot(delta, axis)
+  const primaryDistance = Math.abs(alongSigned)
+  const signedAxis = alongSigned >= 0 ? axis : scale(axis, -1)
+  const secondary = perpendicular(signedAxis)
+  const offset = dot(delta, secondary)
+  const offsetDistance = Math.abs(offset)
+  if (offsetDistance < EPSILON || primaryDistance < offsetDistance - EPSILON) return null
+  const remaining = primaryDistance - offsetDistance
+  const half = remaining / 2
+  const first = add(a, scale(signedAxis, half))
+  const second = subtract(b, scale(signedAxis, half))
+  const solution = makeSolution([a, first, second, b])
+  return solution.corners === 2 && isValidOctilinearSolution(solution, a, b, heading, heading) ? solution : null
+}
+
+function isValidOctilinearSolution(solution: EdgeSolution, a: Vector, b: Vector, from: AarcOrientation, to: AarcOrientation): boolean {
+  if (solution.points.length < 2) return false
+  const firstHeading = headingBetween(solution.points[0], solution.points[1])
+  const lastHeading = headingBetween(solution.points.at(-2)!, solution.points.at(-1)!)
+  if (!firstHeading || !lastHeading || !sameHeadingFamily(firstHeading, from) || !sameHeadingFamily(lastHeading, to)) return false
+  for (let index = 1; index < solution.points.length; index += 1) {
+    if (!headingBetween(solution.points[index - 1], solution.points[index])) return false
+  }
+  // No route may overshoot either source endpoint along the overall source
+  // direction.  This rejects mirrored intersections while allowing lateral
+  // movement in a valid one-/two-corner bridge.
+  const delta = subtract(b, a)
+  const deltaLengthSquared = dot(delta, delta)
+  if (deltaLengthSquared < EPSILON) return false
+  let previousProjection = 0
+  for (const point of solution.points) {
+    const projection = dot(subtract(point, a), delta) / deltaLengthSquared
+    if (projection < -EPSILON || projection > 1 + EPSILON || projection + EPSILON < previousProjection) return false
+    previousProjection = projection
+  }
+  return true
+}
+
+function sameHeadingFamily(a: AarcOrientation, b: AarcOrientation): boolean {
+  if ((a === 'horizontal') !== (b === 'horizontal')) return false
+  if ((a === 'vertical') !== (b === 'vertical')) return false
+  const aDiagonal = a === 'diag-positive' || a === 'diag-negative'
+  const bDiagonal = b === 'diag-positive' || b === 'diag-negative'
+  return aDiagonal === bDiagonal
+}
+
+function chooseEdgeCandidate(candidates: ScoredEdgeSolution[]): ScoredEdgeSolution | null {
+  if (!candidates.length) return null
+  return [...candidates].sort((left, right) => {
+    const cornerDiff = left.corners - right.corners
+    if (cornerDiff) return cornerDiff
+    const lengthDiff = left.length - right.length
+    if (Math.abs(lengthDiff) > EPSILON) return lengthDiff
+    const changeDiff = left.orientationChanges - right.orientationChanges
+    if (changeDiff) return changeDiff
+    const leftKey = left.points.slice(1, -1).map(point => `${point.x.toFixed(6)},${point.y.toFixed(6)}`).join('|')
+    const rightKey = right.points.slice(1, -1).map(point => `${point.x.toFixed(6)},${point.y.toFixed(6)}`).join('|')
+    return leftKey.localeCompare(rightKey)
+  })[0]
+}
+
 function appendExplicitInterval(points: AarcGeometryPoint[], interval: StationInterval, nodes: AarcSkeletonNode[]) {
   for (let sourceIndex = interval.sourceStart + 1; sourceIndex <= interval.sourceEnd; sourceIndex += 1) {
     const point = points[sourceIndex]
@@ -233,8 +465,14 @@ function measureNodes(nodes: AarcSkeletonNode[]): AarcGeometryStats {
   for (let index = 1; index < nodes.length; index += 1) { const kind = classifyLeg(nodes[index - 1], nodes[index]); if (kind === 'horizontal') stats.horizontalLegCount += 1; else if (kind === 'vertical') stats.verticalLegCount += 1; else if (kind === 'diagonal') stats.diagonalLegCount += 1; else throw new Error(`AARC geometry produced a non-octilinear leg at node ${index}`) }
   return stats
 }
-function explicitOnlyGeometry(points: AarcGeometryPoint[]): AarcGeometryResult { const nodes = points.map((point, sourcePointIndex) => ({ x: point.x, y: point.y, sourcePointIndex, implicit: false })); return { orientations: points.map(() => null), nodes, stats: measureNodes(nodes) } }
-function emptyStats(): AarcGeometryStats { return { implicitCornerCount: 0, horizontalLegCount: 0, verticalLegCount: 0, diagonalLegCount: 0, legalCollinearRunCount: 0, lockedDirectEdgeCount: 0 } }
+function explicitOnlyGeometry(points: AarcGeometryPoint[]): AarcGeometryResult {
+  const nodes = points.map((point, sourcePointIndex) => ({ x: point.x, y: point.y, sourcePointIndex, implicit: false }))
+  const stats = measureNodes(nodes)
+  stats.sourceLegCount = Math.max(0, points.length - 1)
+  stats.directLegCount = stats.sourceLegCount
+  return { orientations: points.map(() => null), nodes, stats }
+}
+function emptyStats(): AarcGeometryStats { return { implicitCornerCount: 0, horizontalLegCount: 0, verticalLegCount: 0, diagonalLegCount: 0, legalCollinearRunCount: 0, lockedDirectEdgeCount: 0, sourceLegCount: 0, directLegCount: 0, oneImplicitReconstructionCount: 0, twoImplicitReconstructionCount: 0, unresolvedCount: 0 } }
 function parallel(a: Vector, b: Vector) { return Math.abs(cross(a, b)) < EPSILON }
 function perpendicular(value: Vector): Vector { return { x: -value.y, y: value.x } }
 function cross(a: Vector, b: Vector) { return a.x * b.y - a.y * b.x }

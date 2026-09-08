@@ -14,6 +14,65 @@ const segmentBetween = (project: ActualRouteProject, a: number, b: number) => pr
 const coordinates = (segment: Segment) => segment.waypoints.map(waypoint => [waypoint.x, waypoint.y])
 
 describe('AARC octilinear chain reconstruction', () => {
+  it('takes a legal mixed-dir 45° source leg directly with no implicit point', () => {
+    const result = reconstructAarcLineGeometry([point(270, 2375, 4625, 1), point(161, 2525, 4475, 0)])
+    expect(result.nodes.map(node => [node.x, node.y])).toEqual([[2375, 4625], [2525, 4475]])
+    expect(result.stats).toMatchObject({ sourceLegCount: 1, directLegCount: 1, implicitCornerCount: 0, unresolvedCount: 0 })
+  })
+
+  it('uses the previous horizontal continuation for the 文化宫 → Point619 bend', () => {
+    const result = reconstructAarcLineGeometry([
+      point(620, 3350, 4850, 0), point(616, 2925, 4850, 0), point(619, 2675, 4675, 1, false), point(474, 2550, 4800, 1),
+    ])
+    expect(result.nodes.map(node => [node.x, node.y])).toContainEqual([2850, 4850])
+    expect(result.nodes.find(node => node.sourcePointIndex === 2)).toMatchObject({ x: 2675, y: 4675, implicit: false })
+    expect(result.nodes.map((node, index) => index === 0 ? null : classifyLeg(result.nodes[index - 1], node))).not.toContain('invalid')
+  })
+
+  it('uses the previous horizontal continuation for the 七洋路 → 驰马墩 bend', () => {
+    const result = reconstructAarcLineGeometry([
+      point(217, 3375, 4600, 1), point(508, 3150, 4600, 0), point(752, 2875, 4475, 1), point(267, 2700, 4300, 1),
+    ])
+    expect(result.nodes.map(node => [node.x, node.y])).toContainEqual([3000, 4600])
+    expect(result.nodes.map((node, index) => index === 0 ? null : classifyLeg(result.nodes[index - 1], node))).not.toContain('invalid')
+  })
+
+  it('bridges parallel non-collinear vertical sides with two implicit points', () => {
+    const result = reconstructAarcLineGeometry([
+      point(361, 4175, 5125, 0), point(412, 4100, 5400, 0), point(26, 4100, 5700, 0),
+    ])
+    expect(result.nodes.map(node => [node.x, node.y])).toEqual([
+      [4175, 5125], [4175, 5225], [4100, 5300], [4100, 5400], [4100, 5700],
+    ])
+    expect(result.stats.twoImplicitReconstructionCount).toBe(1)
+  })
+
+  it('reverses a reconstructed chain without changing its geometry', () => {
+    const forward = reconstructAarcLineGeometry([
+      point(361, 4175, 5125, 0), point(412, 4100, 5400, 0), point(26, 4100, 5700, 0),
+    ])
+    const reverse = reconstructAarcLineGeometry([
+      point(26, 4100, 5700, 0), point(412, 4100, 5400, 0), point(361, 4175, 5125, 0),
+    ])
+    expect(reverse.nodes.map(node => [node.x, node.y])).toEqual(forward.nodes.map(node => [node.x, node.y]).reverse())
+  })
+
+  it('treats small floating-point tails as a legal diagonal', () => {
+    const result = reconstructAarcLineGeometry([point(1, 0, 0, 0), point(2, 100, 100.00001, 1)])
+    expect(result.nodes).toHaveLength(2)
+    expect(result.stats.implicitCornerCount).toBe(0)
+  })
+
+  it('preserves sta:0 source points as explicit geometry nodes', () => {
+    const result = reconstructAarcLineGeometry([
+      point(1, 0, 0, 0), point(2, 100, 0, 0, false), point(3, 200, 100, 1),
+    ])
+    expect(result.nodes.filter(node => node.sourcePointIndex === 1)).toEqual([
+      expect.objectContaining({ x: 100, y: 0, sourcePointIndex: 1, implicit: false }),
+    ])
+    expect(result.nodes.filter(node => node.implicit)).toHaveLength(0)
+  })
+
   it('uses whole-chain context for 锦头 → 合蔺 and preserves a local rounded corner', () => {
     const result = reconstructAarcLineGeometry([
       point(16, 5000, 3400, 0), point(15, 5250, 3400, 0), point(14, 5450, 3600, 0), point(13, 5450, 3850, 0),

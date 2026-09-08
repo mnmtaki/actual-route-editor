@@ -5,7 +5,7 @@ export type SegmentMode = 'straight' | 'smooth' | 'corner' | 'rounded'
 export type StructureType = 'underground' | 'elevated'
 export type LabelDirection = 'up' | 'down' | 'left' | 'right' | 'upper-left' | 'upper-right' | 'lower-left' | 'lower-right'
 
-export interface SourceMetadata { format: 'aarc'; pointId?: number; lineId?: number; kind?: 'explicit-control-point' | 'implicit-corner'; nameP?: [number, number]; labelAnchorMode?: 'aarc-block'; stationNameFontWeight?: 'normal' | 'bold' | number }
+export interface SourceMetadata { format: 'aarc'; pointId?: number; pointIds?: number[]; lineId?: number; kind?: 'explicit-control-point' | 'implicit-corner'; nameP?: [number, number]; labelAnchorMode?: 'aarc-block'; stationNameFontWeight?: 'normal' | 'bold' | number }
 export interface LineStyleOverrides { lineWidth?: number }
 export type LineStyleColorMode = 'followLine' | 'custom'
 export type LineStyleWidthMode = 'ratio' | 'absolute'

@@ -6,7 +6,7 @@ import { getPresentationState } from '../presentation/engine'
 import { parseProjectJson, serializeProject } from './projectJson'
 
 const imported = () => convertAarcToActualRouteProject(rawSample, '桐洲地铁未来规划.aarc.json')
-const stationId = (project: ReturnType<typeof imported>['project'], pointId: number) => project.stations.find(station => station.source?.pointId === pointId)?.id
+const stationId = (project: ReturnType<typeof imported>['project'], pointId: number) => project.stations.find(station => station.source?.pointId === pointId || station.source?.pointIds?.includes(pointId))?.id
 const relation = (project: ReturnType<typeof imported>['project'], pointId: number, sourceLineId: number) => project.stationLineRelations.find(item => item.stationId === stationId(project, pointId) && item.lineId === `aarc-line-${sourceLineId}`)
 const segment = (project: ReturnType<typeof imported>['project'], sourceLineId: number, fromPointId: number, toPointId: number) => {
   const from = stationId(project, fromPointId), to = stationId(project, toPointId)

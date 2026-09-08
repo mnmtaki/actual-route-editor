@@ -3,11 +3,11 @@ import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from '../data/model'
 import { reconstructAarcLineGeometry, type AarcGeometryPoint } from './aarcGeometry'
 import { convertAarcVisualStyle } from './aarcVisualStyle'
 import { aggregateAarcInterval, decodeAarcTimestamp, resolveAarcAtomicDates, type AarcTemporalSlice } from './aarcTime'
+import { buildAarcStationComponents, type AarcStationPointInput } from './aarcStationClustering'
 import { removeRepeatedTerminalPoint } from '../data/basemapPaths'
 
 interface AarcPoint { id?: unknown; pos?: unknown; sta?: unknown; dir?: unknown; name?: unknown; nameS?: unknown; nameP?: unknown }
 interface AarcLine { id?: unknown; name?: unknown; color?: unknown; pts?: unknown; type?: unknown; isFake?: unknown; width?: unknown; zIndex?: unknown; isFilled?: unknown; parent?: unknown; time?: { open?: unknown; close?: unknown } }
-interface AarcPointLink { pts?: unknown }
 interface AarcProject { lines?: unknown; points?: unknown; pointLinks?: unknown; cvsSize?: unknown; config?: unknown; timeSlices?: unknown }
 
 export interface AarcImportSummary {
@@ -46,10 +46,30 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
     if (pointMap.has(id)) { warnings.push(`AARC Point ${id} 重复，已使用第一项`); continue }
     pointMap.set(id, point)
   }
-  const canonicalPoint = buildPointLinkAliases(source.pointLinks, pointMap, warnings)
   const rawLines = source.lines as AarcLine[]
   const realLines = rawLines.filter(isRealTransitLine)
   const realLineById = new Map(realLines.map(line => [finiteId(line.id), line]).filter((entry): entry is [number, AarcLine] => entry[0] !== null))
+  const stationPointInputs: AarcStationPointInput[] = [...pointMap.entries()].flatMap(([id, point], sourceOrder) => {
+    if (point.sta !== 1) return []
+    const position = validPosition(point.pos)
+    if (!position) return []
+    const nameP = validPair(point.nameP)
+    return [{ id, x: position[0], y: position[1], ...(text(point.name) ? { name: text(point.name)! } : {}), ...(typeof point.nameS === 'string' && point.nameS.length ? { nameS: point.nameS } : {}), ...(nameP ? { nameP } : {}), sourceOrder }]
+  })
+  const stationMemberships = new Map<number, number[]>()
+  for (const [lineOrder, rawLine] of realLines.entries()) {
+    const sourceLineId = finiteId(rawLine.id) ?? lineOrder
+    for (const rawId of Array.isArray(rawLine.pts) ? rawLine.pts : []) {
+      const pointId = finiteId(rawId)
+      const point = pointId === null ? undefined : pointMap.get(pointId)
+      if (pointId === null || point?.sta !== 1) continue
+      const current = stationMemberships.get(pointId) ?? []
+      if (!current.includes(sourceLineId)) current.push(sourceLineId)
+      stationMemberships.set(pointId, current)
+    }
+  }
+  const stationClustering = buildAarcStationComponents(stationPointInputs, stationMemberships, source.pointLinks)
+  warnings.push(...stationClustering.warnings)
   const timeSlices = (Array.isArray(source.timeSlices) ? source.timeSlices : []) as AarcTemporalSlice[]
   const terrainLines = rawLines.filter(isAarcTerrainPath)
   const ignoredHelperCount = rawLines.length - realLines.length - terrainLines.length
@@ -84,14 +104,11 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
   let verticalLegCount = 0
   let diagonalLegCount = 0
 
-  const ensureStation = (rawPointId: number): Station | null => {
-    const pointId = canonicalPoint.get(rawPointId) ?? rawPointId
-    const existing = stationByPoint.get(pointId)
-    if (existing) return existing
+  for (const component of stationClustering.components) {
+    const pointId = component.canonicalPointId
     const point = pointMap.get(pointId)
-    if (!point || point.sta !== 1) return null
-    const position = validPosition(point.pos)
-    if (!position) { warnings.push(`AARC Station Point ${pointId} 缺少有效 pos，已跳过`); return null }
+    const position = point ? validPosition(point.pos) : null
+    if (!point || !position) { warnings.push(`AARC Station Point ${pointId} 缺少有效 pos，已跳过`); continue }
     const nameP = validPair(point.nameP)
     const station: Station = {
       id: `aarc-station-${pointId}`,
@@ -100,10 +117,13 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
       x: position[0], y: position[1],
       labelOffsetX: nameP?.[0] ?? 14,
       labelOffsetY: nameP?.[1] ?? -14,
-      source: { format: 'aarc', pointId, stationNameFontWeight, ...(nameP ? { nameP, labelAnchorMode: 'aarc-block' as const } : {}) },
+      source: { format: 'aarc', pointId, pointIds: component.referencedPointIds, stationNameFontWeight, ...(nameP ? { nameP, labelAnchorMode: 'aarc-block' as const } : {}) },
     }
-    stationByPoint.set(pointId, station); stations.push(station); return station
+    stations.push(station)
+    for (const memberPointId of component.pointIds) stationByPoint.set(memberPointId, station)
   }
+
+  const ensureStation = (rawPointId: number): Station | null => stationByPoint.get(rawPointId) ?? null
 
   realLines.forEach((rawLine, lineOrder) => {
     const sourceLineId = finiteId(rawLine.id) ?? lineOrder
@@ -222,27 +242,6 @@ function isRealTransitLine(line: AarcLine) {
 }
 function isAarcTerrainPath(line: AarcLine) {
   return Boolean(line && line.isFake !== true && line.type === 1 && Array.isArray(line.pts) && line.pts.length >= 2)
-}
-function buildPointLinkAliases(raw: unknown, points: Map<number, AarcPoint>, warnings: string[]) {
-  const parent = new Map<number, number>()
-  const find = (id: number): number => { const current = parent.get(id) ?? id; if (current === id) return id; const root = find(current); parent.set(id, root); return root }
-  const union = (a: number, b: number) => { const ra = find(a), rb = find(b); if (ra !== rb) parent.set(Math.max(ra, rb), Math.min(ra, rb)) }
-  for (const link of Array.isArray(raw) ? raw as AarcPointLink[] : []) {
-    const ids = Array.isArray(link?.pts) ? link.pts.map(finiteId).filter((id): id is number => id !== null && points.has(id)) : []
-    for (let index = 1; index < ids.length; index += 1) union(ids[0], ids[index])
-  }
-  const groups = new Map<number, number[]>()
-  for (const id of parent.keys()) { const root = find(id); groups.set(root, [...(groups.get(root) ?? []), id]) }
-  const aliases = new Map<number, number>()
-  for (const ids of groups.values()) {
-    const stationIds = ids.filter(id => points.get(id)?.sta === 1)
-    const named = stationIds.filter(id => Boolean(text(points.get(id)?.name)))
-    const names = new Set(named.map(id => text(points.get(id)?.name)!))
-    if (names.size > 1) { warnings.push(`AARC pointLinks 连接了多个不同站名（${[...names].join('、')}），未自动合并`); continue }
-    const canonical = named[0] ?? stationIds[0]
-    if (canonical !== undefined) stationIds.forEach(id => aliases.set(id, canonical))
-  }
-  return aliases
 }
 function resolveInheritedLineDate(line: AarcLine, lines: Map<number, AarcLine>, field: 'open' | 'close', seen = new Set<number>()): string | null {
   const own = decodeAarcTimestamp(field === 'open' ? line.time?.open : line.time?.close)

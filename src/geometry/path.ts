@@ -1,4 +1,5 @@
 import type { ActualRouteProject, Segment, Waypoint } from '../data/model'
+import { getStationAnchorForLine } from '../data/stationAnchor'
 
 export interface Point { x: number; y: number }
 export interface PathSpan { start: Point; control1: Point; control2: Point; end: Point; linear: boolean }
@@ -19,24 +20,24 @@ const MAX_CHORD_RATIO = 0.42
 const EPSILON = 0.0001
 export const DEFAULT_CORNER_RADIUS = 42
 
-export function getSegmentPoints(project: ActualRouteProject, segment: Segment): Point[] {
-  const from = project.stations.find(station => station.id === segment.fromStationId)
-  const to = project.stations.find(station => station.id === segment.toStationId)
+export function getSegmentPoints(project: ActualRouteProject, segment: Segment, resolvedLineId = segment.lineId): Point[] {
+  const from = getStationAnchorForLine(project, segment.fromStationId, resolvedLineId)
+  const to = getStationAnchorForLine(project, segment.toStationId, resolvedLineId)
   if (!from || !to) return []
   return [from, ...segment.waypoints, to]
 }
 
-export function getSegmentPath(project: ActualRouteProject, segment: Segment): string {
-  return pathSpansToSvgPath(getSegmentPathSpans(project, segment))
+export function getSegmentPath(project: ActualRouteProject, segment: Segment, resolvedLineId = segment.lineId): string {
+  return pathSpansToSvgPath(getSegmentPathSpans(project, segment, resolvedLineId))
 }
 
-export function getSegmentPathSpans(project: ActualRouteProject, segment: Segment): PathSpan[] {
-  const points = getSegmentPoints(project, segment)
+export function getSegmentPathSpans(project: ActualRouteProject, segment: Segment, resolvedLineId = segment.lineId): PathSpan[] {
+  const points = getSegmentPoints(project, segment, resolvedLineId)
   if (points.length < 2) return []
   if (segment.mode === 'rounded') return buildRoundedPolylineSpans(points, segment.cornerRadius ?? DEFAULT_CORNER_RADIUS)
   if (segment.mode !== 'smooth') return points.slice(0, -1).map((start, index) => ({ start, end: points[index + 1], control1: start, control2: points[index + 1], linear: true }))
-  const before = getContinuationPoint(project, segment, segment.fromStationId, points[1]) ?? reflect(points[1], points[0])
-  const after = getContinuationPoint(project, segment, segment.toStationId, points.at(-2)!) ?? reflect(points.at(-2)!, points.at(-1)!)
+  const before = getContinuationPoint(project, segment, segment.fromStationId, points[1], resolvedLineId) ?? reflect(points[1], points[0])
+  const after = getContinuationPoint(project, segment, segment.toStationId, points.at(-2)!, resolvedLineId) ?? reflect(points.at(-2)!, points.at(-1)!)
   const extended = [before, ...points, after]
   return points.slice(0, -1).map((start, index) => {
     const end = points[index + 1]
@@ -65,10 +66,10 @@ export function reversePathSpans(spans: PathSpan[]): PathSpan[] {
   return [...spans].reverse().map(span => ({ start: span.end, control1: span.control2, control2: span.control1, end: span.start, linear: span.linear }))
 }
 
-export function getSegmentSubpathSpans(project: ActualRouteProject, segment: Segment, startProgress: number, endProgress: number): PathSpan[] {
+export function getSegmentSubpathSpans(project: ActualRouteProject, segment: Segment, startProgress: number, endProgress: number, resolvedLineId = segment.lineId): PathSpan[] {
   const start = clamp01(Math.min(startProgress, endProgress)), end = clamp01(Math.max(startProgress, endProgress))
   if (end - start < EPSILON) return []
-  const spans = getSegmentPathSpans(project, segment), lengths = spans.map(measurePathSpan), total = lengths.reduce((sum, value) => sum + value, 0)
+  const spans = getSegmentPathSpans(project, segment, resolvedLineId), lengths = spans.map(measurePathSpan), total = lengths.reduce((sum, value) => sum + value, 0)
   if (!spans.length || total < EPSILON) return []
   const targetStart = start * total, targetEnd = end * total
   const result: PathSpan[] = []; let cursor = 0
@@ -131,32 +132,33 @@ function limitedTangent(previous: Point, current: Point, next: Point, chord: num
   return { x: direction.x * handleLength, y: direction.y * handleLength }
 }
 
-function getContinuationPoint(project: ActualRouteProject, segment: Segment, stationId: string, currentInnerPoint: Point): Point | null {
+function getContinuationPoint(project: ActualRouteProject, segment: Segment, stationId: string, currentInnerPoint: Point, resolvedLineId = segment.lineId): Point | null {
   const station = project.stations.find(item => item.id === stationId)
   if (!station) return null
-  const currentDirection = normalize({ x: currentInnerPoint.x - station.x, y: currentInnerPoint.y - station.y })
+  const stationAnchor = getStationAnchorForLine(project, stationId, resolvedLineId) ?? station
+  const currentDirection = normalize({ x: currentInnerPoint.x - stationAnchor.x, y: currentInnerPoint.y - stationAnchor.y })
   const candidates = project.geometry.segments
-    .filter(item => item.id !== segment.id && item.lineId === segment.lineId && (item.fromStationId === stationId || item.toStationId === stationId))
-    .map(item => ({ point: nearestInnerPoint(project, item, stationId), item }))
+    .filter(item => item.id !== segment.id && item.lineId === resolvedLineId && (item.fromStationId === stationId || item.toStationId === stationId))
+    .map(item => ({ point: nearestInnerPoint(project, item, stationId, resolvedLineId), item }))
     .filter((value): value is { point: Point; item: Segment } => Boolean(value.point))
-    .map(value => ({ ...value, alignment: dot(currentDirection, normalize({ x: value.point.x - station.x, y: value.point.y - station.y })) }))
+    .map(value => ({ ...value, alignment: dot(currentDirection, normalize({ x: value.point.x - stationAnchor.x, y: value.point.y - stationAnchor.y })) }))
     .sort((a, b) => a.alignment - b.alignment)
   return candidates[0]?.point ?? null
 }
 
-function nearestInnerPoint(project: ActualRouteProject, segment: Segment, stationId: string): Point | null {
-  const points = getSegmentPoints(project, segment)
+function nearestInnerPoint(project: ActualRouteProject, segment: Segment, stationId: string, resolvedLineId = segment.lineId): Point | null {
+  const points = getSegmentPoints(project, segment, resolvedLineId)
   if (points.length < 2) return null
   if (segment.fromStationId === stationId) return points[1]
   if (segment.toStationId === stationId) return points.at(-2)!
   return null
 }
 
-export function getSegmentCurveSamples(project: ActualRouteProject, segment: Segment, samplesPerSpan = 18): Point[] {
-  const points = getSegmentPoints(project, segment)
+export function getSegmentCurveSamples(project: ActualRouteProject, segment: Segment, samplesPerSpan = 18, resolvedLineId = segment.lineId): Point[] {
+  const points = getSegmentPoints(project, segment, resolvedLineId)
   if (points.length < 2 || (segment.mode !== 'smooth' && segment.mode !== 'rounded')) return points
   const result: Point[] = []
-  for (const span of getSegmentPathSpans(project, segment)) {
+  for (const span of getSegmentPathSpans(project, segment, resolvedLineId)) {
     if (!result.length) result.push(span.start)
     if (span.linear) { result.push(span.end); continue }
     for (let index = 1; index <= samplesPerSpan; index += 1) result.push(cubic(span.start, span.control1, span.control2, span.end, index / samplesPerSpan))
@@ -164,13 +166,13 @@ export function getSegmentCurveSamples(project: ActualRouteProject, segment: Seg
   return result
 }
 
-export function getSegmentCurveLength(project: ActualRouteProject, segment: Segment, samplesPerSpan = 18): number {
-  const samples = getSegmentCurveSamples(project, segment, samplesPerSpan)
+export function getSegmentCurveLength(project: ActualRouteProject, segment: Segment, samplesPerSpan = 18, resolvedLineId = segment.lineId): number {
+  const samples = getSegmentCurveSamples(project, segment, samplesPerSpan, resolvedLineId)
   return Math.max(1, samples.slice(1).reduce((sum, point, index) => sum + distance(samples[index], point), 0))
 }
 
-export function sampleSegmentAtLengthRatio(project: ActualRouteProject, segment: Segment, ratio: number): { point: Point; tangent: Point } | null {
-  const samples = getSegmentCurveSamples(project, segment)
+export function sampleSegmentAtLengthRatio(project: ActualRouteProject, segment: Segment, ratio: number, resolvedLineId = segment.lineId): { point: Point; tangent: Point } | null {
+  const samples = getSegmentCurveSamples(project, segment, 18, resolvedLineId)
   if (samples.length < 2) return null
   const lengths = samples.slice(1).map((point, index) => distance(samples[index], point))
   const total = lengths.reduce((sum, value) => sum + value, 0)
@@ -188,8 +190,8 @@ export function sampleSegmentAtLengthRatio(project: ActualRouteProject, segment:
   return null
 }
 
-export function findSegmentProgressForPoint(project: ActualRouteProject, segment: Segment, point: Point): number {
-  const spans = getSegmentPathSpans(project, segment), lengths = spans.map(measurePathSpan), total = lengths.reduce((sum, value) => sum + value, 0) || 1
+export function findSegmentProgressForPoint(project: ActualRouteProject, segment: Segment, point: Point, resolvedLineId = segment.lineId): number {
+  const spans = getSegmentPathSpans(project, segment, resolvedLineId), lengths = spans.map(measurePathSpan), total = lengths.reduce((sum, value) => sum + value, 0) || 1
   if (!spans.length) return 0
   let bestDistance = Number.POSITIVE_INFINITY, bestProgress = 0, cursor = 0
   spans.forEach((span, index) => {
@@ -235,21 +237,21 @@ function cubicSecondDerivative(span: PathSpan, t: number): Point {
   return { x: 6 * u * (span.control2.x - 2 * span.control1.x + span.start.x) + 6 * t * (span.end.x - 2 * span.control2.x + span.control1.x), y: 6 * u * (span.control2.y - 2 * span.control1.y + span.start.y) + 6 * t * (span.end.y - 2 * span.control2.y + span.control1.y) }
 }
 const squaredDistance = (a: Point, b: Point) => (a.x - b.x) ** 2 + (a.y - b.y) ** 2
-export function getSegmentSubpathSamples(project: ActualRouteProject, segment: Segment, startProgress: number, endProgress: number): Point[] {
+export function getSegmentSubpathSamples(project: ActualRouteProject, segment: Segment, startProgress: number, endProgress: number, resolvedLineId = segment.lineId): Point[] {
   const start = clamp01(Math.min(startProgress, endProgress)), end = clamp01(Math.max(startProgress, endProgress))
   if (end - start < EPSILON) return []
-  const length = getSegmentCurveLength(project, segment), steps = Math.max(2, Math.ceil(length * (end - start) / 12))
-  return Array.from({ length: steps + 1 }, (_, index) => sampleSegmentAtLengthRatio(project, segment, start + (end - start) * index / steps)?.point).filter((point): point is Point => Boolean(point))
+  const length = getSegmentCurveLength(project, segment, 18, resolvedLineId), steps = Math.max(2, Math.ceil(length * (end - start) / 12))
+  return Array.from({ length: steps + 1 }, (_, index) => sampleSegmentAtLengthRatio(project, segment, start + (end - start) * index / steps, resolvedLineId)?.point).filter((point): point is Point => Boolean(point))
 }
-export function sampleSegmentNearStation(project: ActualRouteProject, segment: Segment, stationId: string, epsilon = 0.025): Point | null {
-  const points = getSegmentPoints(project, segment)
+export function sampleSegmentNearStation(project: ActualRouteProject, segment: Segment, stationId: string, epsilon = 0.025, resolvedLineId = segment.lineId): Point | null {
+  const points = getSegmentPoints(project, segment, resolvedLineId)
   if (points.length < 2 || (segment.fromStationId !== stationId && segment.toStationId !== stationId)) return null
   if (segment.mode !== 'smooth' && segment.mode !== 'rounded') {
     const start = segment.fromStationId === stationId ? points[0] : points.at(-1)!
     const inner = segment.fromStationId === stationId ? points[1] : points.at(-2)!
     return lerp(start, inner, epsilon)
   }
-  const spans = getSegmentPathSpans(project, segment)
+  const spans = getSegmentPathSpans(project, segment, resolvedLineId)
   const fromSide = segment.fromStationId === stationId
   const span = fromSide ? spans[0] : spans.at(-1)!
   if (span.linear) return fromSide ? lerp(span.start, span.end, epsilon) : lerp(span.end, span.start, epsilon)
@@ -296,9 +298,9 @@ export function getRoundedPolylineCornerPlans(points: RoundedPoint[], defaultRad
   return plans.filter((plan): plan is RoundedCornerPlan & { incoming: Point; outgoing: Point } => Boolean(plan))
 }
 
-export function getSegmentRoundedCornerPlans(project: ActualRouteProject, segment: Segment): SegmentRoundedCornerPlan[] {
+export function getSegmentRoundedCornerPlans(project: ActualRouteProject, segment: Segment, resolvedLineId = segment.lineId): SegmentRoundedCornerPlan[] {
   if (segment.mode !== 'rounded') return []
-  return getRoundedPolylineCornerPlans(getSegmentPoints(project, segment), segment.cornerRadius ?? DEFAULT_CORNER_RADIUS).flatMap(plan => {
+  return getRoundedPolylineCornerPlans(getSegmentPoints(project, segment, resolvedLineId), segment.cornerRadius ?? DEFAULT_CORNER_RADIUS).flatMap(plan => {
     const waypoint = segment.waypoints[plan.pointIndex - 1]
     return waypoint ? [{ ...plan, waypointId: waypoint.id }] : []
   })

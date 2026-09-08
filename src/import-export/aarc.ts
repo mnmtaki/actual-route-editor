@@ -5,6 +5,7 @@ import { convertAarcVisualStyle } from './aarcVisualStyle'
 import { aggregateAarcInterval, decodeAarcTimestamp, resolveAarcAtomicDates, type AarcTemporalSlice } from './aarcTime'
 import { buildAarcStationComponents, type AarcStationPointInput } from './aarcStationClustering'
 import { removeRepeatedTerminalPoint } from '../data/basemapPaths'
+import { normalizeStationAnchor } from '../data/stationAnchor'
 
 interface AarcPoint { id?: unknown; pos?: unknown; sta?: unknown; dir?: unknown; name?: unknown; nameS?: unknown; nameP?: unknown }
 interface AarcLine { id?: unknown; name?: unknown; color?: unknown; pts?: unknown; type?: unknown; isFake?: unknown; width?: unknown; zIndex?: unknown; isFilled?: unknown; parent?: unknown; time?: { open?: unknown; close?: unknown } }
@@ -165,7 +166,8 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC å
         const station = ensureStation(sourcePoint.id)
         if (!station) return
         if (!relationStationIds.has(station.id)) {
-          relations.push({ id: `aarc-relation-${sourceLineId}-${station.source?.pointId ?? sourcePoint.id}`, stationId: station.id, lineId, openedAt, closedAt: null })
+          const anchor = normalizeStationAnchor({ x: sourcePoint.x, y: sourcePoint.y }, station)
+          relations.push({ id: `aarc-relation-${sourceLineId}-${station.source?.pointId ?? sourcePoint.id}`, stationId: station.id, lineId, openedAt, closedAt: null, ...(anchor ? { anchor } : {}) })
           relationStationIds.add(station.id)
         }
         if (!line.stationSequence.length || line.stationSequence.at(-1) !== station.id) line.stationSequence.push(station.id)

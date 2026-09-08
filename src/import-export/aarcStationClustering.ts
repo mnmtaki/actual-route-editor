@@ -117,6 +117,22 @@ export function buildAarcStationComponents(
   for (const point of points) dsu.add(point.id)
   const edges: AarcStationConnectivityEdge[] = []
 
+  const warnings: string[] = []
+  const componentLines = new Map<number, Set<number>>(points.map(point => [point.id, new Set(memberships.get(point.id) ?? [])]))
+  const tryUnion = (a: number, b: number, reason: 'proximity' | 'pointLinks') => {
+    const rootA = dsu.find(a), rootB = dsu.find(b)
+    if (rootA === rootB) return true
+    const linesA = componentLines.get(rootA) ?? new Set<number>(), linesB = componentLines.get(rootB) ?? new Set<number>()
+    const conflict = [...linesA].filter(lineId => linesB.has(lineId))
+    if (conflict.length) {
+      warnings.push(`AARC 站点连接被拒绝（${reason}）：组件 ${rootA} 与 ${rootB} 包含同一线路 ${conflict.join("、")} 的多个不同源站点`)
+      return false
+    }
+    dsu.union(a, b)
+    const root = dsu.find(a), merged = new Set([...(componentLines.get(rootA) ?? []), ...(componentLines.get(rootB) ?? [])])
+    componentLines.delete(rootA); componentLines.delete(rootB); componentLines.set(root, merged)
+    return true
+  }
   // AARC's implicit station snap is an undirected proximity relation.  Keep
   // the exact Euclidean distance for diagnostics, but never alter coordinates.
   for (let i = 0; i < points.length; i += 1) {
@@ -130,18 +146,15 @@ export function buildAarcStationComponents(
       if (aLines.some(lineId => bLines.includes(lineId))) continue
       const distance = Math.hypot(a.x - b.x, a.y - b.y)
       if (distance <= AARC_STATION_SNAP_DISTANCE + AARC_STATION_SNAP_EPSILON) {
-        dsu.union(a.id, b.id)
-        edges.push({ a: a.id, b: b.id, reason: 'proximity', distance })
+        if (tryUnion(a.id, b.id, 'proximity')) edges.push({ a: a.id, b: b.id, reason: 'proximity', distance })
       }
     }
   }
 
-  const warnings: string[] = []
   for (const [linkIndex, link] of linkGroups(rawPointLinks).entries()) {
     const ids = validPointIds((link as { pts?: unknown })?.pts, pointMap, warnings, linkIndex)
     for (let index = 1; index < ids.length; index += 1) {
-      dsu.union(ids[0], ids[index])
-      edges.push({ a: ids[0], b: ids[index], reason: 'pointLinks' })
+      if (tryUnion(ids[0], ids[index], 'pointLinks')) edges.push({ a: ids[0], b: ids[index], reason: 'pointLinks' })
     }
   }
 

@@ -15,6 +15,7 @@ import type { DrawingMode } from '../data/basemapPaths'
 import { effectiveLineWidth, effectiveStationStyle, snapLabelOffset } from '../data/style'
 import { getLineStyle, resolveLineStyle } from '../data/lineStyles'
 import { isSegmentGeometryLocked, isStationGeometryLocked, lockedStationMessage } from '../data/lineLock'
+import { translateStationWithAnchors } from '../data/stationAnchor'
 
 type View = { x: number; y: number; width: number; height: number }
 type Point = { x: number; y: number }
@@ -136,7 +137,7 @@ export function NetworkCanvas({ project, selection, drawing, roadDraft, phasePre
     const next = structuredClone(current.before)
     if (current.kind === 'draggingStation') {
       const station = next.stations.find(item => item.id === current.id)
-      if (station) { station.x = current.origin.x + dx; station.y = current.origin.y + dy }
+      if (station) translateStationWithAnchors(next, station.id, dx, dy)
     } else if (current.kind === 'draggingWaypoint') {
       const waypoint = next.geometry.segments.find(item => item.id === current.segmentId)?.waypoints.find(item => item.id === current.id)
       if (waypoint) { waypoint.x = current.origin.x + dx; waypoint.y = current.origin.y + dy }

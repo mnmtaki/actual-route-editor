@@ -387,7 +387,7 @@ export function updateRoadStyle(
 
 export function createRoadStyle(
   project: ActualRouteProject,
-  sourceStyleId = ROAD_STYLE_IDS.local,
+  sourceStyleId: string = ROAD_STYLE_IDS.local,
   name = "自定义道路",
 ): { project: ActualRouteProject; styleId: string } {
   const next = structuredClone(project),

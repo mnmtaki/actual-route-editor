@@ -33,8 +33,8 @@ export function FontWeightControl({label,value,onChange,overridden,onReset}:{lab
   return <div className="field typography-field"><span>{label}</span><div className="typography-control-row"><select aria-label={label} value={value} onChange={event=>onChange(Number(event.target.value))}>{values.map(weight=><option key={weight} value={weight}>{weight}</option>)}</select><Reset overridden={overridden} onReset={onReset}/></div></div>
 }
 
-export function ColorControl({label,value,onChange,overridden,onReset}:{label:string;value:string;onChange:(value:string)=>void}&Resettable){
+export function ColorControl({label,value,onChange,overridden,onReset,disabled=false}:{label:string;value:string;onChange:(value:string)=>void;disabled?:boolean}&Resettable){
   const [draft,setDraft]=useState(value)
   useEffect(()=>setDraft(value),[value])
-  return <div className="field typography-field"><span>{label}</span><div className="color-control-row"><input aria-label={`${label}颜色选择`} type="color" value={normalizeHexColor(value)??'#000000'} onChange={event=>{setDraft(event.target.value);onChange(event.target.value)}}/><input aria-label={`${label} HEX`} value={draft} onChange={event=>{const next=event.target.value;setDraft(next);const normalized=normalizeHexColor(next);if(normalized)onChange(normalized)}} onBlur={()=>{if(!normalizeHexColor(draft))setDraft(value)}}/><Reset overridden={overridden} onReset={onReset}/></div></div>
+  return <div className="field typography-field"><span>{label}</span><div className="color-control-row"><input disabled={disabled} aria-label={`${label}颜色选择`} type="color" value={normalizeHexColor(value)??'#000000'} onChange={event=>{setDraft(event.target.value);onChange(event.target.value)}}/><input disabled={disabled} aria-label={`${label} HEX`} value={draft} onChange={event=>{const next=event.target.value;setDraft(next);const normalized=normalizeHexColor(next);if(normalized)onChange(normalized)}} onBlur={()=>{if(!normalizeHexColor(draft))setDraft(value)}}/><Reset overridden={overridden} onReset={disabled?undefined:onReset}/></div></div>
 }

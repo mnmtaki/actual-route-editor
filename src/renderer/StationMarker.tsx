@@ -1,6 +1,6 @@
 import type { ActualRouteProject, Station } from '../data/model'
 import { getActiveLinesAtStation } from '../timeline/active'
-import { getTransferMarkerRotation } from '../geometry/tangent'
+import { getTransferMarkerLayout } from '../geometry/tangent'
 import { getStationStyle } from './stationStyles'
 import { StationLabel } from './StationLabel'
 import { effectiveStationStyle } from '../data/style'
@@ -14,8 +14,9 @@ export function StationMarker({ project, station, time, selected, hitRadius = 24
   const { stationStyleId } = project.settings
   const style = getStationStyle(stationStyleId)
   const selectionColor = lines[0]?.color ?? '#596161'
+  const transferLayout = lines.length > 1 ? getTransferMarkerLayout(project, station.id, time, undefined, transferEndPadding) : null
   const marker = lines.length > 1
-    ? style.renderTransfer({ station, lines, size: stationSize, minorAxis: transferMinorAxis, dotGap: transferDotGap, endPadding: transferEndPadding, rotation: getTransferMarkerRotation(project, station.id, time) })
+    ? style.renderTransfer({ station, lines, size: stationSize, minorAxis: transferMinorAxis, dotGap: transferDotGap, endPadding: transferEndPadding, rotation: transferLayout?.rotation ?? 0, centerX: transferLayout?.centerX, centerY: transferLayout?.centerY, minMajorAxis: transferLayout?.anchorSpan })
     : style.renderOrdinary({ station, size: stationSize })
   const selectionRadius = stationSize / 2 + 4
   return <g>

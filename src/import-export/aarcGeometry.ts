@@ -254,46 +254,52 @@ type EdgeSide = 'incoming' | 'outgoing'
 
 /** Resolve per-side directions from the nearest legal source legs. */
 function resolveSideHeadingCandidates(points: AarcGeometryPoint[], index: number, side: EdgeSide): AarcOrientation[] {
+  const family = candidatesFor(points[index])
+  const accepts = (heading: AarcOrientation) => family.some(candidate => sameHeadingFamily(candidate, heading))
+  const closedRing = points.length > 2 && points[0].id === points.at(-1)?.id && distance(points[0], points.at(-1)!) <= EPSILON
+  const resolveContextPair = (pair: number[]): [number, number] | null => {
+    if (!closedRing) {
+      if (pair.some(value => value < 0 || value >= points.length)) return null
+      return [pair[0], pair[1]]
+    }
+    const ringLength = points.length - 1
+    const wrap = (value: number) => ((value % ringLength) + ringLength) % ringLength
+    const result: [number, number] = [wrap(pair[0]), wrap(pair[1])]
+    return result[0] === result[1] ? null : result
+  }
+  const choose = (heading: AarcOrientation | null): AarcOrientation[] | null => heading && accepts(heading) ? withDiagonalAlternative(heading).filter(item => accepts(item)) : null
   const adjacentIndex = side === 'outgoing' ? index + 1 : index - 1
   if (adjacentIndex >= 0 && adjacentIndex < points.length) {
-    const direct = side === 'outgoing'
-      ? headingBetween(points[index], points[adjacentIndex])
-      : headingBetween(points[adjacentIndex], points[index])
-    if (direct) return withDiagonalAlternative(direct)
+    const direct = side === 'outgoing' ? headingBetween(points[index], points[adjacentIndex]) : headingBetween(points[adjacentIndex], points[index])
+    const preferred = choose(direct)
+    if (preferred?.length) return preferred
   }
-  // An illegal pair often sits between a stable run on either side.  The
-  // source leg immediately behind an outgoing endpoint (or ahead of an
-  // incoming endpoint) is the most useful continuation constraint.  Search
-  // both directions deterministically before falling back to the point's dir
-  // family; this is what distinguishes the two mirrored intersection choices.
   const primaryPairs = side === 'outgoing' ? [[index - 1, index]] : [[index, index + 1]]
-  for (const [fromIndex, toIndex] of primaryPairs) {
-    if (fromIndex < 0 || toIndex < 0 || fromIndex >= points.length || toIndex >= points.length) continue
-    const direct = headingBetween(points[fromIndex], points[toIndex])
-    if (direct) return withDiagonalAlternative(direct)
+  for (const pair of primaryPairs) {
+    const resolved = resolveContextPair(pair)
+    if (!resolved) continue
+    const preferred = choose(headingBetween(points[resolved[0]], points[resolved[1]]))
+    if (preferred?.length) return preferred
   }
-  const primarySearch = side === 'outgoing'
-    ? (distance: number) => [index - distance, index - distance + 1]
-    : (distance: number) => [index + distance - 1, index + distance]
-  const secondarySearch = side === 'outgoing'
-    ? (distance: number) => [index + distance, index + distance + 1]
-    : (distance: number) => [index - distance, index - distance + 1]
+  const primarySearch = side === 'outgoing' ? (distance: number) => [index - distance, index - distance + 1] : (distance: number) => [index + distance - 1, index + distance]
+  const secondarySearch = side === 'outgoing' ? (distance: number) => [index + distance, index + distance + 1] : (distance: number) => [index - distance, index - distance + 1]
   const findHeading = (makePair: (distance: number) => number[]): AarcOrientation | null => {
     for (let distance = 1; distance < points.length; distance += 1) {
-      const [fromIndex, toIndex] = makePair(distance)
-      if (fromIndex < 0 || toIndex < 0 || fromIndex >= points.length || toIndex >= points.length) continue
-      const direct = headingBetween(points[fromIndex], points[toIndex])
-      if (direct) return direct
+      const resolved = resolveContextPair(makePair(distance))
+      if (!resolved) continue
+      const direct = headingBetween(points[resolved[0]], points[resolved[1]])
+      if (direct && accepts(direct)) return direct
     }
     return null
   }
   const primaryHeading = findHeading(primarySearch)
-  if (primaryHeading) return withDiagonalAlternative(primaryHeading)
+  const primaryPreferred = choose(primaryHeading)
+  if (primaryPreferred?.length) return primaryPreferred
   const secondaryHeading = findHeading(secondarySearch)
-  if (secondaryHeading) return withDiagonalAlternative(secondaryHeading)
-  return candidatesFor(points[index])
+  const secondaryPreferred = choose(secondaryHeading)
+  if (secondaryPreferred?.length) return secondaryPreferred
+  return family
 }
-
 function withDiagonalAlternative(heading: AarcOrientation): AarcOrientation[] {
   return heading === 'diag-positive' || heading === 'diag-negative'
     ? [heading, heading === 'diag-positive' ? 'diag-negative' : 'diag-positive']
@@ -306,7 +312,11 @@ interface ScoredEdgeSolution extends EdgeSolution {
 
 function generateEdgeCandidates(a: AarcGeometryPoint, b: AarcGeometryPoint, fromHints: AarcOrientation[], toHints: AarcOrientation[]): ScoredEdgeSolution[] {
   const candidates: ScoredEdgeSolution[] = []
+  const fromFamily = candidatesFor(a), toFamily = candidatesFor(b)
   for (const from of fromHints) for (const to of toHints) {
+    // Endpoint dir families are hard constraints.  Context is only a hint
+    // for axis/sign selection and can never authorize a cross-family leg.
+    if (!fromFamily.some(candidate => sameHeadingFamily(candidate, from)) || !toFamily.some(candidate => sameHeadingFamily(candidate, to))) continue
     const one = solveOneImplicitEdge(a, b, from, to)
     if (one) candidates.push({ ...one, orientationChanges: from === to ? 0 : 1 })
     if (parallel(VECTORS[from], VECTORS[to])) {

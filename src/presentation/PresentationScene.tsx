@@ -1,7 +1,7 @@
 import { memo, useMemo, type Ref } from 'react'
 import type { ActualRouteProject, Line } from '../data/model'
 import { getSegmentPath } from '../geometry/path'
-import { getTransferMarkerRotation } from '../geometry/tangent'
+import { getTransferMarkerLayout } from '../geometry/tangent'
 import { SegmentArtwork, StructureRunArtwork } from '../renderer/segmentStyles'
 import { compileElevatedRuns } from '../data/structure'
 import { getStationStyle } from '../renderer/stationStyles'
@@ -22,7 +22,7 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
   const lineMap = useMemo(() => new Map(project.lines.map(line => [line.id, line])), [project.lines])
   const historicalProject = useMemo(() => ({ ...project, geometry: { ...project.geometry, segments: project.geometry.segments.map(segment => ({ ...segment, lineId: state.segmentStates[segment.id]?.lineId ?? segment.lineId })) } }), [project, state.segmentStates])
   const segmentArtwork = useMemo(() => project.geometry.segments.map(segment => { const lineId = state.segmentStates[segment.id]?.lineId ?? segment.lineId; const historicalSegment = historicalProject.geometry.segments.find(item => item.id === segment.id) ?? segment; return { segment, line: lineMap.get(lineId), path: getSegmentPath(historicalProject, historicalSegment) } }), [project, state.segmentStates, historicalProject, lineMap])
-  const rotations = useMemo(() => new Map(project.stations.map(station => [station.id, getTransferMarkerRotation(project, station.id, state.historyDate)])), [project, state.historyDate])
+  const transferLayouts = useMemo(() => new Map(project.stations.map(station => { const visibleRelationIds = state.stationStates[station.id]?.visibleRelationIds; const style = effectiveStationStyle(station, project.settings); return [station.id, getTransferMarkerLayout(project, station.id, state.historyDate, visibleRelationIds, style.transferEndPadding)] as const })), [project, state.historyDate, state.stationStates])
   const elevatedRuns = useMemo(() => compileElevatedRuns(historicalProject, new Set(historicalProject.geometry.segments.filter(segment => lineMap.get(segment.lineId)?.visible).map(segment => segment.id)), Object.fromEntries(Object.entries(state.segmentStates).map(([id, value]) => [id, { revealProgress: value.revealProgress, revealFrom: value.revealFrom, opacity: value.opacity }]))), [historicalProject, lineMap, state.segmentStates])
   const visibleLineIds = new Set(segmentArtwork.filter(({ segment, line }) => line?.visible && (state.segmentStates[segment.id]?.revealProgress ?? 0) > 0).map(({ segment }) => state.segmentStates[segment.id]?.lineId ?? segment.lineId))
   const findLines = (ids: string[]) => ids.map(id => lineMap.get(id)).filter((line): line is Line => Boolean(line))
@@ -41,7 +41,7 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
       if (!stationState || stationState.opacity <= 0) return null
       const lines = findLines(stationState.lineIds), previousLines = findLines(stationState.previousLineIds), stationStyle = effectiveStationStyle(station, project.settings)
       return <g key={station.id} data-station-id={station.id} data-station-opacity={stationState.opacity.toFixed(4)} data-label-opacity={stationState.labelOpacity.toFixed(4)} data-transfer-progress={stationState.transferProgress.toFixed(4)} data-historical-state={stationState.historicalState} data-visible-line-ids={stationState.lineIds.join(',')} data-visible-relation-ids={stationState.visibleRelationIds.join(',')}>
-        {style.renderPresentation({ station, lines, previousLines, size: stationStyle.stationSize, minorAxis: stationStyle.transferMinorAxis, dotGap: stationStyle.transferDotGap, endPadding: stationStyle.transferEndPadding, rotation: rotations.get(station.id) ?? 0, morphProgress: stationState.transferProgress, opacity: stationState.opacity, scale: stationState.scale })}
+        {style.renderPresentation({ station, lines, previousLines, size: stationStyle.stationSize, minorAxis: stationStyle.transferMinorAxis, dotGap: stationStyle.transferDotGap, endPadding: stationStyle.transferEndPadding, rotation: transferLayouts.get(station.id)?.rotation ?? 0, centerX: transferLayouts.get(station.id)?.centerX, centerY: transferLayouts.get(station.id)?.centerY, minMajorAxis: transferLayouts.get(station.id)?.anchorSpan, morphProgress: stationState.transferProgress, opacity: stationState.opacity, scale: stationState.scale })}
         {sequence.settings.showLabels && project.settings.labelsVisible && !station.labelHidden && <StationLabel station={station} settings={project.settings} showForeign={sequence.settings.showForeignStationNames && project.settings.showForeignStationNames} presentation opacity={stationState.labelOpacity} {...getStationNameAt(station,state.historyDate)} />}
       </g>
     })}</g>

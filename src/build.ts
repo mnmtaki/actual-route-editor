@@ -1,1 +1,1 @@
-export const BUILD_VERSION = '2026-09-08-aarc-station-anchor-59'
+export const BUILD_VERSION = '2026-09-09-aarc-geometry-edge-transfer-60'

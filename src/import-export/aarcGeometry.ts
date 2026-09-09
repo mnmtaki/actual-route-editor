@@ -37,6 +37,7 @@ export interface AarcGeometryResult {
 
 interface Vector { x: number; y: number }
 interface EdgeSolution { points: Vector[]; length: number; corners: number; cost: number }
+type ConcreteHeading = 'E' | 'W' | 'N' | 'S' | 'NE' | 'NW' | 'SE' | 'SW'
 interface StationAnchor { point: AarcGeometryPoint; sourceIndex: number }
 interface StationInterval { fromAnchor: number; toAnchor: number; sourceStart: number; sourceEnd: number; explicitControlIndices: number[]; directHeading: AarcOrientation | null; lockedDirect: boolean }
 
@@ -186,6 +187,7 @@ function reconstructSourceChain(points: AarcGeometryPoint[]): ChainReconstructio
   let twoImplicitReconstructionCount = 0
   let unresolvedCount = 0
 
+  const incidentHeadings = resolveConcreteIncidentHeadings(points)
   for (let index = 0; index < points.length - 1; index += 1) {
     const from = points[index]
     const to = points[index + 1]
@@ -210,8 +212,12 @@ function reconstructSourceChain(points: AarcGeometryPoint[]): ChainReconstructio
       continue
     }
 
-    const fromHints = resolveSideHeadingCandidates(points, index, 'outgoing')
-    const toHints = resolveSideHeadingCandidates(points, index + 1, 'incoming')
+    const continuity = {
+      from: from.station ? incidentHeadings[index].incoming : undefined,
+      to: to.station ? incidentHeadings[index + 1].outgoing : undefined,
+    }
+    const fromHints = continuity.from ? [orientationOfConcreteHeading(continuity.from)] : resolveSideHeadingCandidates(points, index, 'outgoing')
+    const toHints = continuity.to ? [orientationOfConcreteHeading(continuity.to)] : resolveSideHeadingCandidates(points, index + 1, 'incoming')
     let candidates = generateEdgeCandidates(from, to, fromHints, toHints)
     // If the nearest continuation family cannot span the displacement (for
     // example a short horizontal run facing a taller offset), expand to the
@@ -222,7 +228,7 @@ function reconstructSourceChain(points: AarcGeometryPoint[]): ChainReconstructio
         Array.from(new Set([...fromHints, ...candidatesFor(from)])),
         Array.from(new Set([...toHints, ...candidatesFor(to)])))
     }
-    const best = chooseEdgeCandidate(candidates)
+    const best = chooseEdgeCandidate(candidates, continuity)
     if (!best) {
       unresolvedCount += 1
       // Keep the source point and fail loudly in measureNodes rather than
@@ -237,6 +243,34 @@ function reconstructSourceChain(points: AarcGeometryPoint[]): ChainReconstructio
   }
 
   return { nodes, directLegCount, oneImplicitReconstructionCount, twoImplicitReconstructionCount, unresolvedCount }
+}
+
+function resolveConcreteIncidentHeadings(points: AarcGeometryPoint[]): Array<{ incoming?: ConcreteHeading; outgoing?: ConcreteHeading }> {
+  const result = points.map(() => ({} as { incoming?: ConcreteHeading; outgoing?: ConcreteHeading }))
+  for (let index = 0; index < points.length; index += 1) {
+    if (index > 0) result[index].incoming = concreteHeadingForPair(points[index - 1], points[index], points[index].dir)
+    if (index + 1 < points.length) result[index].outgoing = concreteHeadingForPair(points[index], points[index + 1], points[index].dir)
+  }
+  return result
+}
+
+function concreteHeadingForPair(from: Vector, to: Vector, endpointDir: 0 | 1): ConcreteHeading | undefined {
+  const direct = headingBetween(from, to)
+  if (direct) return concreteHeadingBetween(from, to) ?? undefined
+  const dx = to.x - from.x, dy = to.y - from.y
+  if (endpointDir === 1) {
+    if (Math.abs(dx) < EPSILON || Math.abs(dy) < EPSILON) return undefined
+    return dx > 0 ? (dy > 0 ? 'NE' : 'SE') : (dy > 0 ? 'NW' : 'SW')
+  }
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 'E' : 'W'
+  return dy >= 0 ? 'S' : 'N'
+}
+
+function orientationOfConcreteHeading(heading: ConcreteHeading): AarcOrientation {
+  return heading === 'E' || heading === 'W' ? 'horizontal'
+    : heading === 'N' || heading === 'S' ? 'vertical'
+      : heading === 'NE' || heading === 'SW' ? 'diag-positive'
+        : 'diag-negative'
 }
 
 function legacyOrthogonalCorner(points: AarcGeometryPoint[], index: number, directHeading: AarcOrientation): EdgeSolution | null {
@@ -390,9 +424,17 @@ function sameHeadingFamily(a: AarcOrientation, b: AarcOrientation): boolean {
   return aDiagonal === bDiagonal
 }
 
-function chooseEdgeCandidate(candidates: ScoredEdgeSolution[]): ScoredEdgeSolution | null {
+function chooseEdgeCandidate(candidates: ScoredEdgeSolution[], continuity?: { from?: ConcreteHeading; to?: ConcreteHeading }): ScoredEdgeSolution | null {
   if (!candidates.length) return null
-  return [...candidates].sort((left, right) => {
+  const continuityScore = (candidate: ScoredEdgeSolution) => {
+    if (!continuity) return 0
+    const first = concreteHeadingBetween(candidate.points[0], candidate.points[1])
+    const last = concreteHeadingBetween(candidate.points.at(-2)!, candidate.points.at(-1)!)
+    return (continuity.from && first === continuity.from ? 1 : 0) + (continuity.to && last === continuity.to ? 1 : 0)
+  }
+  const highestContinuity = Math.max(...candidates.map(continuityScore))
+  const preferred = candidates.filter(candidate => continuityScore(candidate) === highestContinuity)
+  return [...preferred].sort((left, right) => {
     const cornerDiff = left.corners - right.corners
     if (cornerDiff) return cornerDiff
     const lengthDiff = left.length - right.length
@@ -460,6 +502,18 @@ function makeSolution(input: Vector[]): EdgeSolution {
 }
 function invalidSolution(a: Vector, b: Vector): EdgeSolution { return { points: [a, b], length: distance(a, b), corners: 0, cost: 1e12 } }
 function intersectLines(a: Vector, u: Vector, b: Vector, v: Vector): Vector | null { const denominator = cross(u, v); if (Math.abs(denominator) < EPSILON) return null; return add(a, scale(u, cross(subtract(b, a), v) / denominator)) }
+function concreteHeadingBetween(a: Vector, b: Vector): ConcreteHeading | null {
+  const dx = b.x - a.x, dy = b.y - a.y
+  if (Math.abs(dx) < EPSILON && Math.abs(dy) < EPSILON) return null
+  if (Math.abs(dy) < EPSILON) return dx > 0 ? 'E' : 'W'
+  if (Math.abs(dx) < EPSILON) return dy > 0 ? 'S' : 'N'
+  if (Math.abs(Math.abs(dx) - Math.abs(dy)) < EPSILON) {
+    if (dx > 0) return dy > 0 ? 'NE' : 'SE'
+    return dy > 0 ? 'NW' : 'SW'
+  }
+  return null
+}
+
 function headingBetween(a: Vector, b: Vector): AarcOrientation | null {
   const dx = b.x - a.x, dy = b.y - a.y
   if (Math.abs(dx) < EPSILON && Math.abs(dy) < EPSILON) return null

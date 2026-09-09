@@ -23,11 +23,11 @@ describe('常陵 AARC known line anchors', () => {
     expect(relationAnchor(project, '如意桥', '19')).toEqual({ x: 4625, y: 5700 })
     expect(relationAnchor(project, '稻香楼', '17')).toEqual({ x: 5175, y: 5550 })
     expect(project.geometry.segments).toHaveLength(570)
-    // Endpoint dir-family validation removes 13 legacy, family-inconsistent implicit nodes; source coordinates and topology remain unchanged.
-    expect(project.geometry.segments.flatMap(segment => segment.waypoints)).toHaveLength(97)
+    // Concrete heading continuity restores the real two-implicit bridges while preserving source coordinates and topology.
+    expect(project.geometry.segments.flatMap(segment => segment.waypoints)).toHaveLength(100)
     const summary = importedResult().summary
     expect(summary.explicitWaypointCount).toBe(21)
-    expect(summary.implicitCornerCount).toBe(76)
+    expect(summary.implicitCornerCount).toBe(79)
     expect(project.stations).toHaveLength(436)
   })
 })

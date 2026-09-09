@@ -72,6 +72,7 @@ import { isLineLocked, isSegmentGeometryLocked, isStationGeometryLocked, lockedS
 import { createLineLegend, getLineLegendWorldBounds } from "./data/lineLegend";
 import { calibrationMetersPerWorldUnit } from "./data/distance";
 import { getProjectName, projectFilename as makeProjectFilename } from "./data/projectMetadata";
+import { setLinesBoolean, removeBackground as removeBackgroundCommand } from "./data/editorCommands";
 type Drawing = DrawingMode;
 type Point = { x: number; y: number };
 export default function App() {
@@ -183,12 +184,7 @@ export default function App() {
   };
   const batchSetLineValue = (field: "visible" | "locked", value: boolean) => {
     if (selectedLineIds.length < 2) return;
-    history.commit(current => {
-      const next = structuredClone(current);
-      const selected = new Set(selectedLineIds);
-      next.lines.forEach(line => { if (selected.has(line.id)) line[field] = value; });
-      return next;
-    });
+    history.commit(current => setLinesBoolean(current, selectedLineIds, field, value));
   };
   const batchDeleteSelectedLines = () => {
     if (selectedLineIds.length < 2) return;
@@ -477,10 +473,7 @@ export default function App() {
       )
     )
       return false;
-    history.commit((current) => ({
-      ...structuredClone(current),
-      background: null,
-    }));
+    history.commit((current) => removeBackgroundCommand(current));
     if (selection?.type === "background") setSelection(null);
     setNotice("已删除底图");
     return true;

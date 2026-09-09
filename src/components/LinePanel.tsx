@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { ActualRouteProject, Selection } from '../data/model'
 import { getSegmentCurveLength } from '../geometry/path'
 import { worldUnitsToKilometers } from '../data/distance'
+import { setLineLocked, setLineVisibility } from '../data/editorCommands'
 
 function EyeIcon({ hidden = false }: { hidden?: boolean }) {
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="line-state-icon"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />{!hidden && <circle cx="12" cy="12" r="2.5" fill="currentColor" />}{hidden && <path d="m4 4 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />}</svg>
@@ -51,7 +52,6 @@ export function LinePanel({
   mobileMode?: boolean
   onMobileLongPress?: (lineId: string) => void
 }) {
-  const patch = (mutate: (next: ActualRouteProject) => void) => { const next = structuredClone(project); mutate(next); onChange(next) }
   const lineStats = project.lines.map(line => ({ line, length: worldUnitsToKilometers(project.geometry.segments.filter(segment => segment.lineId === line.id).reduce((sum, segment) => sum + getSegmentCurveLength(project, segment), 0), project), stations: new Set(line.stationSequence).size }))
   const totalLength = lineStats.reduce((sum, item) => sum + item.length, 0)
   const totalStations = new Set(project.stationLineRelations.map(relation => relation.stationId)).size
@@ -206,8 +206,8 @@ export function LinePanel({
         const isActive = activeLineId === line.id
         return <div key={line.id} ref={node => { if (node) rowRefs.current.set(line.id, node); else rowRefs.current.delete(line.id) }} data-line-id={line.id} className={`line-row ${isSelected ? 'selected' : ''} ${isActive ? 'active' : ''} ${isSelected && !isActive ? 'secondary-selected' : ''}`}>
           <button type="button" className="line-row-main" onClick={event => onClickMain(event, line.id)}><span aria-hidden="true" className="line-color" style={{ background: line.color }} /><span className="line-name">{line.name}</span></button>
-          <button type="button" className={`line-state-button ${line.visible ? 'is-on' : ''}`} aria-label={line.visible ? `${line.name}隐藏线路` : `${line.name}显示线路`} title={line.visible ? '隐藏线路' : '显示线路'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => patch(next => { const target = next.lines.find(item => item.id === line.id); if (target) target.visible = !target.visible })}><span aria-hidden="true"><EyeIcon hidden={!line.visible} /></span></button>
-          <button type="button" className={`line-state-button ${line.locked ? 'is-on' : ''}`} aria-label={line.locked ? `${line.name}解锁线路` : `${line.name}锁定线路`} title={line.locked ? '解锁线路' : '锁定线路'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => patch(next => { const target = next.lines.find(item => item.id === line.id); if (target) target.locked = !target.locked })}><span aria-hidden="true"><LockIcon locked={line.locked} /></span></button>
+          <button type="button" className={`line-state-button ${line.visible ? 'is-on' : ''}`} aria-label={line.visible ? `${line.name}隐藏线路` : `${line.name}显示线路`} title={line.visible ? '隐藏线路' : '显示线路'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onChange(setLineVisibility(project, line.id, !line.visible))}><span aria-hidden="true"><EyeIcon hidden={!line.visible} /></span></button>
+          <button type="button" className={`line-state-button ${line.locked ? 'is-on' : ''}`} aria-label={line.locked ? `${line.name}解锁线路` : `${line.name}锁定线路`} title={line.locked ? '解锁线路' : '锁定线路'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onChange(setLineLocked(project, line.id, !line.locked))}><span aria-hidden="true"><LockIcon locked={line.locked} /></span></button>
         </div>
       })}
       {marquee?.active && <div className="line-selection-marquee" data-testid="line-selection-marquee" style={{ left: `${Math.min(marquee.startX, marquee.currentX) - (listRef.current?.getBoundingClientRect().left ?? 0) + (listRef.current?.scrollLeft ?? 0)}px`, top: `${Math.min(marquee.startY, marquee.currentY) - (listRef.current?.getBoundingClientRect().top ?? 0) + (listRef.current?.scrollTop ?? 0)}px`, width: `${Math.abs(marquee.currentX - marquee.startX)}px`, height: `${Math.abs(marquee.currentY - marquee.startY)}px` }} />}

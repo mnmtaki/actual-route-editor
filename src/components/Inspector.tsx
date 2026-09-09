@@ -13,6 +13,7 @@ import { getLineStyles } from '../data/lineStyles'
 import { insertBasemapPoint } from '../data/basemapPaths'
 import { deleteRoadPoint, getRoadStyles, insertRoadPoint, nudgeRoadZIndex, placeRoadZIndex, setRoadZIndex } from '../data/roads'
 import { isSegmentGeometryLocked, isStationGeometryLocked } from '../data/lineLock'
+import { setLineLocked } from '../data/editorCommands'
 
 const round=(value:number)=>Math.round(value*100)/100
 const inferDirectionFromVector=(x:number,y:number,fallback:LabelDirection):LabelDirection=>inferLabelDirection(x,y)==='custom'?fallback:inferLabelDirection(x,y) as LabelDirection
@@ -81,7 +82,7 @@ export function Inspector({ project, selection, onChange, onDelete, onAddLineBad
       <button onClick={() => onAddLineBadge(line.id)}>添加线路标号</button>
       <LineSplitEditor project={project} line={line} onChange={onChange} />
       <OpeningPhaseEditor project={project} line={line} onChange={onChange} onPreview={onPhasePreview} onStartDrawing={onStartPhaseDrawing} />
-      <label className="toggle-row">锁定线路<input type="checkbox" checked={line.locked} onChange={(e) => patch((n) => { n.lines.find((l) => l.id === line.id)!.locked = e.target.checked })} /></label>
+      <label className="toggle-row">锁定线路<input type="checkbox" checked={line.locked} onChange={(e) => onChange(setLineLocked(project, line.id, e.target.checked))} /></label>
       {line.stationSequence.length >= 3 && <button disabled={line.locked} onClick={() => patch((n) => { const current = n.lines.find((l) => l.id === line.id)!; const from = current.stationSequence.at(-1)!; const to = current.stationSequence[0]; const exists = n.geometry.segments.some((s) => s.lineId === line.id && ((s.fromStationId === from && s.toStationId === to) || (s.fromStationId === to && s.toStationId === from))); if (!exists) n.geometry.segments.push({ id: uid('segment_loop'), lineId: line.id, fromStationId: from, toStationId: to, mode: 'straight', structureType: 'underground', waypoints: [], openedAt: line.openedAt }) })}>连接首尾形成环线</button>}
       <button className="danger" onClick={onDelete}>删除线路</button>
     </> }

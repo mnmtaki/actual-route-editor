@@ -6,8 +6,8 @@ import { Inspector } from './Inspector'
 import { ContextActions } from './ContextActions'
 import type { WaypointStructureChange } from '../data/structure'
 import type { OpeningPhasePath } from '../data/openingPhases'
-import { withoutBackground } from '../data/background'
 import { BasemapPathPanel } from './BasemapPathPanel'
+import { removeBackground as removeBackgroundCommand } from '../data/editorCommands'
 import { RoadPanel } from './RoadPanel'
 import { ProjectSettingsPanel } from './ProjectSettingsPanel'
 import { getProjectName } from '../data/projectMetadata'
@@ -35,7 +35,7 @@ export function MobileShell({ project, selection, activeLineId, selectedLineIds 
   const close = () => { if (lineMultiMode) exitLineMultiMode(); setActive(null) }
   const selectLine = (id: string) => { if (lineMultiMode) onToggleLineSelection?.(id); else { onSelectLine(id); close() } }
   const enterLineMultiMode = (id: string) => { setLineMultiMode(true); onStartLineMultiSelect?.(id) }
-  const removeBackground = () => { if (onRemoveBackground) return onRemoveBackground(); if (!project.background) return false; if (!window.confirm('删除当前底图？\n删除后将从当前工程中移除底图，不影响线路和车站。')) return false; onChange(withoutBackground(project)); return true }
+  const removeBackground = () => { if (onRemoveBackground) return onRemoveBackground(); if (!project.background) return false; if (!window.confirm('删除当前底图？\\n删除后将从当前工程中移除底图，不影响线路和车站。')) return false; onChange(removeBackgroundCommand(project)); return true }
   const activeLabel = active === 'inspector' ? '属性' : entries.find(entry => entry.id === active)?.label
   useEffect(() => {
     const viewport = window.visualViewport

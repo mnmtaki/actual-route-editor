@@ -9,7 +9,9 @@ export interface StationStyleDefinition { id:string; name:string; renderOrdinary
 
 export function getDefaultTransferMetrics(size:number,count:number,dotGap:number,endPadding:number,minorAxis:number,minMajorAxis=0){
   const dotDiameter=size*TRANSFER_DOT_DIAMETER_RATIO
-  return { dotDiameter, gap:Math.max(0,dotGap), horizontalPadding:Math.max(0,endPadding), height:Math.max(dotDiameter,minorAxis), width:Math.max(Math.max(0,endPadding)*2+count*dotDiameter+Math.max(0,count-1)*Math.max(0,dotGap),minMajorAxis) }
+  const gap=Math.max(0,dotGap), horizontalPadding=Math.max(0,endPadding)
+  const naturalWidth=horizontalPadding*2+count*dotDiameter+Math.max(0,count-1)*gap
+  return { dotDiameter, gap, horizontalPadding, naturalWidth, height:Math.max(dotDiameter,minorAxis), width:Math.max(naturalWidth,minMajorAxis) }
 }
 const ordinary=({station,size}:OrdinaryStationRenderProps)=><circle cx={station.x} cy={station.y} r={size/2} fill="white" data-testid={`station-${station.id}`}/>
 const transfer=({station,lines,size,minorAxis,dotGap,endPadding,rotation,centerX=centerOf(station).x,centerY=centerOf(station).y,minMajorAxis=0}:TransferStationRenderProps)=>{const metrics=getDefaultTransferMetrics(size,lines.length,dotGap,endPadding,minorAxis,minMajorAxis);return <g transform={`rotate(${rotation} ${centerX} ${centerY})`} data-testid={`transfer-${station.id}`}><rect x={centerX-metrics.width/2} y={centerY-metrics.height/2} width={metrics.width} height={metrics.height} rx={metrics.height/2} {...TRANSFER_CONTAINER_STYLE}/>{lines.map((line,index)=><circle key={line.id} cx={dotX(centerX,metrics,index)} cy={centerY} r={metrics.dotDiameter/2} fill={line.color}/>)}</g>}
@@ -17,6 +19,9 @@ const presentation=({station,previousLines,lines,size,minorAxis,dotGap,endPaddin
 export const DEFAULT_STATION_STYLE:StationStyleDefinition={id:'default',name:'默认站点',renderOrdinary:ordinary,renderTransfer:transfer,renderPresentation:presentation}
 const STATION_STYLES:Record<string,StationStyleDefinition>={[DEFAULT_STATION_STYLE.id]:DEFAULT_STATION_STYLE}
 export function getStationStyle(styleId:string|undefined):StationStyleDefinition{return STATION_STYLES[styleId??'default']??DEFAULT_STATION_STYLE}
-function dotX(center:number,metrics:ReturnType<typeof getDefaultTransferMetrics>,index:number){return center-metrics.width/2+metrics.horizontalPadding+metrics.dotDiameter/2+index*(metrics.dotDiameter+metrics.gap)}
+function dotX(center:number,metrics:ReturnType<typeof getDefaultTransferMetrics>,index:number){
+ const contentInset=(metrics.width-metrics.naturalWidth)/2
+ return center-metrics.width/2+contentInset+metrics.horizontalPadding+metrics.dotDiameter/2+index*(metrics.dotDiameter+metrics.gap)
+}
 function centerOf(station:Station){return {x:station.x,y:station.y}}
 const lerp=(a:number,b:number,t:number)=>a+(b-a)*t

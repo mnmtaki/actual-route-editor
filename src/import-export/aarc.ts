@@ -2,13 +2,13 @@ import type { ActualRouteProject, BasemapPath, Line, Segment, Station, StationLi
 import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from '../data/model'
 import { reconstructAarcLineGeometry, type AarcGeometryPoint } from './aarcGeometry'
 import { convertAarcVisualStyle } from './aarcVisualStyle'
+import { parseAarcTerrainWidth, resolveAarcTerrainAppearance, resolveAarcTerrainWidth } from './aarcTerrain'
 import { aggregateAarcInterval, decodeAarcTimestamp, resolveAarcAtomicDates, type AarcTemporalSlice } from './aarcTime'
 import { buildAarcStationComponents, type AarcStationPointInput } from './aarcStationClustering'
-import { removeRepeatedTerminalPoint } from '../data/basemapPaths'
 import { normalizeStationAnchor } from '../data/stationAnchor'
 
 interface AarcPoint { id?: unknown; pos?: unknown; sta?: unknown; dir?: unknown; name?: unknown; nameS?: unknown; nameP?: unknown }
-interface AarcLine { id?: unknown; name?: unknown; color?: unknown; pts?: unknown; type?: unknown; isFake?: unknown; width?: unknown; zIndex?: unknown; isFilled?: unknown; parent?: unknown; time?: { open?: unknown; close?: unknown } }
+interface AarcLine { id?: unknown; name?: unknown; color?: unknown; colorPre?: unknown; pts?: unknown; type?: unknown; isFake?: unknown; width?: unknown; zIndex?: unknown; isFilled?: unknown; parent?: unknown; time?: { open?: unknown; close?: unknown } }
 interface AarcProject { lines?: unknown; points?: unknown; pointLinks?: unknown; cvsSize?: unknown; config?: unknown; timeSlices?: unknown }
 
 export interface AarcImportSummary {
@@ -50,7 +50,18 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
   const rawLines = source.lines as AarcLine[]
   const realLines = rawLines.filter(isRealTransitLine)
   const realLineById = new Map(realLines.map(line => [finiteId(line.id), line]).filter((entry): entry is [number, AarcLine] => entry[0] !== null))
+  const terrainPointIds = new Set<number>()
+  for (const rawLine of rawLines.filter(isAarcTerrainPath)) for (const rawId of Array.isArray(rawLine.pts) ? rawLine.pts : []) {
+    const pointId = finiteId(rawId)
+    if (pointId !== null) terrainPointIds.add(pointId)
+  }
+  const realStationPointIds = new Set<number>()
+  for (const rawLine of realLines) for (const rawId of Array.isArray(rawLine.pts) ? rawLine.pts : []) {
+    const pointId = finiteId(rawId), point = pointId === null ? undefined : pointMap.get(pointId)
+    if (pointId !== null && point?.sta === 1) realStationPointIds.add(pointId)
+  }
   const stationPointInputs: AarcStationPointInput[] = [...pointMap.entries()].flatMap(([id, point], sourceOrder) => {
+    if (terrainPointIds.has(id) && !realStationPointIds.has(id)) return []
     if (point.sta !== 1) return []
     const position = validPosition(point.pos)
     if (!position) return []
@@ -74,7 +85,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
   const timeSlices = (Array.isArray(source.timeSlices) ? source.timeSlices : []) as AarcTemporalSlice[]
   const terrainLines = rawLines.filter(isAarcTerrainPath)
   const ignoredHelperCount = rawLines.length - realLines.length - terrainLines.length
-  if (!realLines.length) throw new Error('AARC 工程中没有可导入的真实运营线路')
+  if (!realLines.length && !terrainLines.length) throw new Error('AARC 工程中没有可导入的真实运营线路或地形路径')
 
   const basemapPaths: BasemapPath[] = terrainLines.flatMap((rawLine, lineIndex) => {
     const sourceLineId = finiteId(rawLine.id) ?? lineIndex
@@ -88,9 +99,14 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
     })
     if (points.length < 2) { warnings.push(`AARC 底图路径 ${sourceLineId} 少于两个有效路径点，已跳过`); return [] }
     const repeated = points[0].id === points.at(-1)?.id || (points[0].x === points.at(-1)?.x && points[0].y === points.at(-1)?.y)
+    const appearance = resolveAarcTerrainAppearance(rawLine.colorPre, rawLine.color)
+    if (appearance.usedFallbackColor) warnings.push(`AARC 地形路径 ${sourceLineId} 的颜色无效，已使用底图默认颜色`)
+    const width = parseAarcTerrainWidth(rawLine.width)
+    if (rawLine.width !== undefined && rawLine.width !== null && width.usedDefault) warnings.push(`AARC 地形路径 ${sourceLineId} 的 width 无效，已使用默认值 1`)
+    const rawZIndex = Number(rawLine.zIndex), zIndex = Number.isFinite(rawZIndex) ? rawZIndex : 0
+    if (rawLine.zIndex !== undefined && rawLine.zIndex !== null && !Number.isFinite(rawZIndex)) warnings.push(`AARC 地形路径 ${sourceLineId} 的 zIndex 无效，已使用默认层级 0`)
     const closed = rawLine.isFilled === true || repeated
-    const width = Number(rawLine.width)
-    const path = removeRepeatedTerminalPoint({ id: `aarc-basemap-${sourceLineId}`, ...(typeof rawLine.name === 'string' && rawLine.name ? { name: rawLine.name } : {}), category: 'other', points, color: validColor(rawLine.color), width: Number.isFinite(width) && width > 0 ? width : 1, opacity: 1, closed, isFilled: rawLine.isFilled === true && closed, zIndex: Number.isFinite(Number(rawLine.zIndex)) ? Number(rawLine.zIndex) : 0, visible: true, locked: false, source: { format: 'aarc', sourceLineId } })
+    const path: BasemapPath = { id: `aarc-basemap-${sourceLineId}`, ...(typeof rawLine.name === 'string' && rawLine.name ? { name: rawLine.name } : {}), category: appearance.category, points, color: appearance.color, width: resolveAarcTerrainWidth(width.raw), opacity: 1, closed, isFilled: rawLine.isFilled === true, zIndex, visible: true, locked: false, source: { format: 'aarc', sourceLineId } }
     return [path]
   })
   const stations: Station[] = []
@@ -240,10 +256,10 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
 }
 
 function isRealTransitLine(line: AarcLine) {
-  return Boolean(line && line.isFake !== true && line.type !== 1 && text(line.name) && Array.isArray(line.pts) && line.pts.length >= 2)
+  return Boolean(line && line.isFake !== true && Number(line.type) !== 1 && text(line.name) && Array.isArray(line.pts) && line.pts.length >= 2)
 }
 function isAarcTerrainPath(line: AarcLine) {
-  return Boolean(line && line.isFake !== true && line.type === 1 && Array.isArray(line.pts) && line.pts.length >= 2)
+  return Boolean(line && line.isFake !== true && Number(line.type) === 1 && Array.isArray(line.pts) && line.pts.length >= 2)
 }
 function resolveInheritedLineDate(line: AarcLine, lines: Map<number, AarcLine>, field: 'open' | 'close', seen = new Set<number>()): string | null {
   const own = decodeAarcTimestamp(field === 'open' ? line.time?.open : line.time?.close)

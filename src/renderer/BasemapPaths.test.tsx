@@ -20,4 +20,14 @@ describe('BasemapPathsLayer', () => {
     expect(paths[1].getAttribute('fill')).toBe('none')
     expect(exportSvg(container.querySelector('svg')!, false)).toContain('data-basemap-path-id="low"')
   })
+
+  it('renders imported filled AARC terrain as fill without a fallback stroke', () => {
+    const project = createEmptyProject()
+    project.basemapPaths = [{ id: 'aarc-fill', category: 'terrain', points: [{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 20, y: 0 }, { id: 'c', x: 20, y: 20 }, { id: 'd', x: 0, y: 0 }], color: '#CEEDA4', width: 125, opacity: 1, closed: true, isFilled: true, zIndex: 0, visible: true, locked: false, source: { format: 'aarc', sourceLineId: 46 } }]
+    const { container } = render(createElement('svg', null, createElement(BasemapPathsLayer, { project })))
+    const path = container.querySelector('[data-basemap-path-id="aarc-fill"] > path')!
+    expect(path.getAttribute('fill')).toBe('#CEEDA4')
+    expect(path.getAttribute('stroke')).toBe('none')
+    expect(path.getAttribute('stroke-width')).toBe('0')
+  })
 })

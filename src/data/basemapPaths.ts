@@ -25,7 +25,8 @@ export function normalizeBasemapPaths(value: unknown): BasemapPath[] | undefined
     const zIndex = Number.isFinite(Number(raw.zIndex)) ? Number(raw.zIndex) : 0
     const sourceLineId = raw.source && typeof raw.source === 'object' ? (raw.source as Record<string, unknown>).sourceLineId : undefined
     const normalized: BasemapPath = { id, ...(typeof raw.name === 'string' && raw.name ? { name: raw.name } : {}), category, points, color, width, opacity, closed, isFilled, zIndex, visible: raw.visible !== false, locked: raw.locked === true, ...(raw.source && typeof raw.source === 'object' && (typeof sourceLineId === 'string' || Number.isFinite(Number(sourceLineId))) ? { source: { format: 'aarc' as const, sourceLineId: typeof sourceLineId === 'string' ? sourceLineId : Number(sourceLineId) } } : {}) }
-    return [removeRepeatedTerminalPoint(normalized)]
+    const isAarcSource = raw.source && typeof raw.source === 'object' && (raw.source as Record<string, unknown>).format === 'aarc'
+    return [isAarcSource ? normalized : removeRepeatedTerminalPoint(normalized)]
   })
   return paths
 }

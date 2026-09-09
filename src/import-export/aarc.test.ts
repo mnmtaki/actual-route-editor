@@ -85,9 +85,9 @@ describe('AARC importer with the real 木阳 sample', () => {
   it('imports type-1 AARC terrain as a closed BasemapPath without rail pollution', () => {
     const { project } = imported()
     expect(project.basemapPaths).toHaveLength(1)
-    expect(project.basemapPaths?.[0]).toMatchObject({ source: { format: 'aarc', sourceLineId: 127 }, closed: true, isFilled: true, zIndex: 0, color: '#2B5D52', width: 12 })
+    expect(project.basemapPaths?.[0]).toMatchObject({ source: { format: 'aarc', sourceLineId: 127 }, closed: true, isFilled: true, zIndex: 0, color: '#2B5D52', width: 166.66666666666669 })
     expect(project.basemapPaths?.[0].points.at(-1)?.id).not.toBe(project.basemapPaths?.[0].points[0].id)
-    expect(project.basemapPaths?.[0].points).toHaveLength(8)
+    expect(project.basemapPaths?.[0].points).toHaveLength(9)
     expect(project.lines.map(line => line.name)).toEqual(['1', '3', '4', '6'])
   })
 

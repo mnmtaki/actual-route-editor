@@ -1,13 +1,14 @@
 import type { ActualRouteProject, Selection, StructureType } from '../data/model'
 import { getWaypointStructureChange, type WaypointStructureChange } from '../data/structure'
 import { DropdownArrow } from './Toolbar'
+import { getLineDisplayName } from '../data/lineIdentity'
 
 export function ContextActions({ project, selection, onExtend, onInsertStation, onAddWaypoint, onStraighten, onStructureChange, onSetStructureAtPoint, onWaypointStructureChange, onStructureNodeChange, onDelete }: {
   project: ActualRouteProject; selection: Selection; onExtend: (stationId: string) => void; onInsertStation: () => void; onAddWaypoint: () => void; onStraighten: () => void
   onStructureChange: (value: StructureType) => void; onSetStructureAtPoint?: (value: StructureType) => void; onWaypointStructureChange?: (value: WaypointStructureChange) => void; onStructureNodeChange?: (value: StructureType) => void; onDelete: () => void
 }) {
   if (!selection) return null
-  const title = selection.type === 'station' ? project.stations.find(item => item.id === selection.id)?.name ?? '站点' : selection.type === 'segment' ? '区间' : selection.type === 'waypoint' ? '路径点' : selection.type === 'structureNode' ? '结构节点' : selection.type === 'line' ? project.lines.find(item => item.id === selection.id)?.name ?? '线路' : '底图'
+  const title = selection.type === 'station' ? project.stations.find(item => item.id === selection.id)?.name ?? '站点' : selection.type === 'segment' ? '区间' : selection.type === 'waypoint' ? '路径点' : selection.type === 'structureNode' ? '结构节点' : selection.type === 'line' ? getLineDisplayName(project, selection.id) || '线路' : '底图'
   const segment = selection.type === 'segment' ? project.geometry.segments.find(item => item.id === selection.id) : null
   const waypointSegment = selection.type === 'waypoint' ? project.geometry.segments.find(item => item.id === selection.segmentId) : null
   const waypointStructure = selection.type === 'waypoint' && waypointSegment ? getWaypointStructureChange(waypointSegment, selection.id) : 'none'

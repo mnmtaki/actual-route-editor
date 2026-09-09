@@ -4,6 +4,7 @@ import { PRESENTATION_ANIMATION, clamp, easing, inverseLineEasing } from './conf
 import { getBeatRevealFronts, getBeatRevealedDistance, getBeatSegmentRevealProgress, getOpeningAnimationState, getStationArrivalRatio } from './reveal'
 import { stationLineKey } from './compiler'
 import { resolveSegmentLineAt } from '../data/segmentLineHistory'
+import { collapseLineIdsByServiceFamily } from '../data/lineIdentity'
 import { worldUnitsToKilometers } from '../data/distance'
 import type { PresentationBeat, PresentationSequence, PresentationState, StationPresentationState } from './types'
 
@@ -47,7 +48,9 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
     const targetLineIds = activeLineIds(sequence, station.id, transition?.historyDate ?? historyDate)
     const previousLineIds = transition ? presentationVisibleLineIds(project,sequence,station.id,historyDate,transitionArrivalTime-1e-6) : presentationVisibleLineIds(project,sequence,station.id,historyDate,time)
     const lineIds = presentationVisibleLineIds(project,sequence,station.id,historyDate,time)
-    const relationSetChanged=previousLineIds.length!==lineIds.length||previousLineIds.some((id,index)=>id!==lineIds[index])
+    const previousPassengerLineIds = collapseLineIdsByServiceFamily(project, previousLineIds)
+    const passengerLineIds = collapseLineIdsByServiceFamily(project, lineIds)
+    const relationSetChanged=previousPassengerLineIds.length!==passengerLineIds.length||previousPassengerLineIds.some((id,index)=>id!==passengerLineIds[index])
     const transferProgress = transition && relationSetChanged ? easing.transfer(clamp((time - transitionArrivalTime) / PRESENTATION_ANIMATION.transferMorphDuration)) : 1
     const openingHasStarted = !opening || time >= (isOriginStation ? opening.originRevealStart : opening.revealStart), historicallyEligible = targetLineIds.length > 0, isClosed = !historicallyEligible && openingHasStarted
     const closingNow = Boolean(currentBeat?.type.includes('CLOSURE') && currentBeat.stationIds.includes(station.id) && previousLineIds.length > 0 && lineIds.length === 0)
@@ -56,7 +59,7 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
     const historicalState: StationPresentationState['historicalState'] = opening && time < (isOriginStation ? opening.originRevealStart : opening.revealStart) ? 'future' : transitionAnimating ? 'current-partial' : historicallyEligible ? 'previous-stable' : 'future'
     const opacity = historicalState === 'future' ? 0 : isClosed ? closureOpacity : markerProgress
     const effectiveLabelOpacity = historicalState === 'future' ? 0 : isClosed ? closureOpacity : labelProgress
-    const visibleRelationIds=project.stationLineRelations.filter(relation=>relation.stationId===station.id&&lineIds.includes(relation.lineId)).map(relation=>relation.id)
+    const visibleRelationIds = presentationVisibleRelationIds(project, station.id, historyDate, lineIds)
     const scale = originAnimation ? originAnimation.originScale : PRESENTATION_ANIMATION.stationScaleFrom + (1 - PRESENTATION_ANIMATION.stationScaleFrom) * markerProgress
     stationStates[station.id] = { opacity, scale, labelOpacity: effectiveLabelOpacity, previousLineIds, lineIds, visibleRelationIds, transferProgress, historicalState }
   }
@@ -77,6 +80,10 @@ function beatSegmentProgress(beat: PresentationBeat, segmentId: string, time: nu
 function beatSegmentDirection(beat: PresentationBeat, segmentId: string, segmentFrom: string): 'from' | 'to' { const directed = beat.branches.flat().find(item => item.segmentId === segmentId); return !directed || directed.fromStationId === segmentFrom ? 'from' : 'to' }
 function activeLineIds(sequence: PresentationSequence, stationId: string, date: string) { return sequence.cache.activeLineIdsByDate[date]?.[stationId] ?? [] }
 function presentationVisibleLineIds(project:ActualRouteProject,sequence:PresentationSequence,stationId:string,date:string,time:number){return activeLineIds(sequence,stationId,date).filter(lineId=>{const beatIndex=sequence.cache.stationLineOpeningBeat[stationLineKey(stationId,lineId)];if(beatIndex===undefined)return true;const beat=sequence.beats[beatIndex],arrival=getStationArrivalRatio(beat,stationId),isOrigin=Boolean(beat.needsOriginReveal&&beat.originStationId===stationId),arrivalTime=isOrigin?beat.originRevealStart:beat.revealStart+inverseLineEasing(arrival)*beat.revealDuration;return time+1e-9>=arrivalTime&&Boolean(project.stationLineRelations.find(relation=>relation.stationId===stationId&&relation.lineId===lineId))})}
+function presentationVisibleRelationIds(project: ActualRouteProject, stationId: string, date: string, lineIds: string[]) {
+  const representativeLineIds = collapseLineIdsByServiceFamily(project, lineIds)
+  return project.stationLineRelations.filter(relation => relation.stationId === stationId && representativeLineIds.includes(relation.lineId) && active(relation.openedAt, relation.closedAt, date)).map(relation => relation.id)
+}
 function active(openedAt: string | null | undefined, closedAt: string | null | undefined, date: string) { return (!openedAt || openedAt <= date) && (!closedAt || date < closedAt) }
 function historicallyVisible(openedAt: string | null | undefined, closedAt: string | null | undefined, date: string) { return active(openedAt, closedAt, date) }
 function formatDateLabel(date: string) { const normalized = /^\d{4}$/.test(date) ? `${date}-01-01` : /^\d{4}-\d{2}$/.test(date) ? `${date}-01` : date; return normalized ? normalized.replaceAll('-', '.') : '' }

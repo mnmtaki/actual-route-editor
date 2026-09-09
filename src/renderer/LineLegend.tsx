@@ -1,5 +1,6 @@
 import type { LineLegend, ActualRouteProject } from '../data/model'
 import { getLineLegendLayout } from '../data/lineLegend'
+import { getEffectiveLineColor } from '../data/lineIdentity'
 
 export function LineLegendLayer({ project, presentation = false, selectedId, hitRadius = 22, onPointerDown }: {
   project: ActualRouteProject
@@ -29,7 +30,7 @@ export function LineLegendLayer({ project, presentation = false, selectedId, hit
       const foreignTerminals = item.isRing || item.singleStation ? item.firstStationForeign : [item.firstStationForeign, item.lastStationForeign].filter(Boolean).join(' - ')
       const terminals = item.isRing || item.singleStation ? item.firstStation : [item.firstStation, item.lastStation].filter(Boolean).join(' - ')
       return <g key={item.lineId} className="line-legend-item" data-line-legend-line-id={item.lineId}>
-        <rect className="line-legend-strip" x={item.x} y={item.y + 5} width="8" height={Math.max(10, item.height - 10)} fill={project.lines.find(line => line.id === item.lineId)?.color ?? '#888'} />
+        <rect className="line-legend-strip" x={item.x} y={item.y + 5} width="8" height={Math.max(10, item.height - 10)} fill={project.lines.find(line => line.id === item.lineId) ? getEffectiveLineColor(project, project.lines.find(line => line.id === item.lineId)!) : '#888'} />
         <text className="line-legend-line-name" x={item.x + 16} y={currentY} fill="#303532" fontFamily={labelFont} fontSize="20" fontWeight="700">{item.lineName}</text>
         {legend.showForeignLineName && item.foreignLineName && <text className="line-legend-line-foreign" x={item.x + 16} y={foreignLineY} fill="#858b87" fontFamily={foreignFont} fontSize="14" fontWeight="600">{item.foreignLineName}</text>}
         {legend.showTerminals && terminals && <>

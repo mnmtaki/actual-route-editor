@@ -48,7 +48,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
     pointMap.set(id, point)
   }
   const rawLines = source.lines as AarcLine[]
-  const realLines = rawLines.filter(isRealTransitLine)
+  const realLines = rawLines.filter(line => isRealTransitLine(line, rawLines))
   const realLineById = new Map(realLines.map(line => [finiteId(line.id), line]).filter((entry): entry is [number, AarcLine] => entry[0] !== null))
   const terrainPointIds = new Set<number>()
   for (const rawLine of rawLines.filter(isAarcTerrainPath)) for (const rawId of Array.isArray(rawLine.pts) ? rawLine.pts : []) {
@@ -150,7 +150,9 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
     const closedAt = ownClosedAt ?? resolveInheritedLineDate(rawLine, realLineById, 'close')
     if (rawLine.time?.open != null && !ownOpenedAt) warnings.push(`AARC 线路 ${sourceLineId} 的 time.open 无法可靠换算为日期，已使用可用的继承日期或保留为空`)
     if (rawLine.time?.close != null && !ownClosedAt) warnings.push(`AARC 线路 ${sourceLineId} 的 time.close 无法可靠换算为日期，已使用可用的继承日期或保留为空`)
-    const line: Line = { id: lineId, name: text(rawLine.name)!, color: validColor(rawLine.color), stationSequence: [], lineOrder, openedAt, closedAt, visible: true, locked: false, source: { format: 'aarc', lineId: sourceLineId } }
+    const parentSourceId = finiteId(rawLine.parent)
+    const parentLineId = parentSourceId !== null && realLineById.has(parentSourceId) && parentSourceId !== sourceLineId ? 'aarc-line-' + parentSourceId : undefined
+    const line: Line = { id: lineId, name: text(rawLine.name) ?? '', color: validColor(rawLine.color), ...(parentLineId ? { parentLineId } : {}), stationSequence: [], lineOrder, openedAt, closedAt, visible: true, locked: false, source: { format: 'aarc', lineId: sourceLineId } }
     lines.push(line)
     const chain = Array.isArray(rawLine.pts) ? rawLine.pts : []
     const atomicDates = resolveAarcAtomicDates(rawLine, timeSlices, openedAt, closedAt, warnings)
@@ -255,8 +257,13 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
   return { project, summary }
 }
 
-function isRealTransitLine(line: AarcLine) {
-  return Boolean(line && line.isFake !== true && Number(line.type) !== 1 && text(line.name) && Array.isArray(line.pts) && line.pts.length >= 2)
+function isRealTransitLine(line: AarcLine, allLines: AarcLine[] = []) {
+  if (!line || line.isFake === true || Number(line.type) === 1 || !Array.isArray(line.pts) || line.pts.length < 2) return false
+  if (text(line.name)) return true
+  const parentId = finiteId(line.parent)
+  if (parentId === null) return false
+  const parent = allLines.find(candidate => finiteId(candidate?.id) === parentId)
+  return Boolean(parent && parent !== line && parent.isFake !== true && Number(parent.type) !== 1 && Array.isArray(parent.pts) && parent.pts.length >= 2 && text(parent.name))
 }
 function isAarcTerrainPath(line: AarcLine) {
   return Boolean(line && line.isFake !== true && Number(line.type) === 1 && Array.isArray(line.pts) && line.pts.length >= 2)

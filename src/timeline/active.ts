@@ -1,8 +1,51 @@
 import type { ActualRouteProject, ISODate, Line, StationLineRelation } from '../data/model'
-export function isActiveAt(openedAt:ISODate|undefined,closedAt:ISODate|undefined,time:string){return(!openedAt||openedAt<=time)&&(!closedAt||time<closedAt)}
-function compareRelations(project:ActualRouteProject,stationId:string,a:string,b:string){const f=(lineId:string):StationLineRelation|undefined=>project.stationLineRelations.find(r=>r.stationId===stationId&&r.lineId===lineId);const ra=f(a),rb=f(b);const d=(ra?.openedAt??'0000-00-00').localeCompare(rb?.openedAt??'0000-00-00');return d||((project.lines.find(l=>l.id===a)?.lineOrder??0)-(project.lines.find(l=>l.id===b)?.lineOrder??0))}
-export function isStationHistoricallyActive(project:ActualRouteProject,stationId:string,time:string){return project.stationLineRelations.some(relation=>relation.stationId===stationId&&isActiveAt(relation.openedAt,relation.closedAt,time)&&Boolean(project.lines.find(line=>line.id===relation.lineId&&line.visible&&isActiveAt(line.openedAt,line.closedAt,time))))}
-export function getActiveLinesAtStation(project:ActualRouteProject,stationId:string,time:string):Line[]{return project.stationLineRelations.filter(r=>r.stationId===stationId&&isActiveAt(r.openedAt,r.closedAt,time)).map(r=>project.lines.find(l=>l.id===r.lineId)).filter((l):l is Line=>Boolean(l&&l.visible&&isActiveAt(l.openedAt,l.closedAt,time))).sort((a,b)=>compareRelations(project,stationId,a.id,b.id))}
-export function getFirstLineAtStation(project:ActualRouteProject,stationId:string){const ids=project.stationLineRelations.filter(r=>r.stationId===stationId).map(r=>r.lineId);return project.lines.filter(l=>ids.includes(l.id)).sort((a,b)=>compareRelations(project,stationId,a.id,b.id))[0]}
-export function getOrientationAnchorLine(project:ActualRouteProject,stationId:string,time:string){const station=project.stations.find(s=>s.id===stationId);const anchor=station?.orientationAnchorLineId?project.lines.find(l=>l.id===station.orientationAnchorLineId):getFirstLineAtStation(project,stationId);if(anchor&&project.stationLineRelations.some(r=>r.stationId===stationId&&r.lineId===anchor.id))return anchor;return getActiveLinesAtStation(project,stationId,time)[0]}
-export function getActiveNetworkAtTime(project:ActualRouteProject,time:string){const lines=project.lines.filter(l=>l.visible&&isActiveAt(l.openedAt,l.closedAt,time));const lineIds=new Set(lines.map(l=>l.id));const relations=project.stationLineRelations.filter(r=>lineIds.has(r.lineId)&&isActiveAt(r.openedAt,r.closedAt,time));const stationIds=new Set(relations.map(r=>r.stationId));const stations=project.stations.filter(s=>stationIds.has(s.id));const segments=project.geometry.segments.filter(s=>lineIds.has(s.lineId)&&isActiveAt(s.openedAt,s.closedAt,time));return{lines,stations,relations,segments}}
+import { collapseLinesByServiceFamily } from '../data/lineIdentity'
+
+export function isActiveAt(openedAt: ISODate | undefined, closedAt: ISODate | undefined, time: string) {
+  return (!openedAt || openedAt <= time) && (!closedAt || time < closedAt)
+}
+function compareRelations(project: ActualRouteProject, stationId: string, a: string, b: string) {
+  const relation = (lineId: string): StationLineRelation | undefined => project.stationLineRelations.find(item => item.stationId === stationId && item.lineId === lineId)
+  const ra = relation(a), rb = relation(b)
+  const dateOrder = (ra?.openedAt ?? '0000-00-00').localeCompare(rb?.openedAt ?? '0000-00-00')
+  return dateOrder || ((project.lines.find(line => line.id === a)?.lineOrder ?? 0) - (project.lines.find(line => line.id === b)?.lineOrder ?? 0))
+}
+export function isStationHistoricallyActive(project: ActualRouteProject, stationId: string, time: string) {
+  return project.stationLineRelations.some(relation => relation.stationId === stationId && isActiveAt(relation.openedAt, relation.closedAt, time) && Boolean(project.lines.find(line => line.id === relation.lineId && line.visible && isActiveAt(line.openedAt, line.closedAt, time))))
+}
+export function getActiveLinesAtStation(project: ActualRouteProject, stationId: string, time: string): Line[] {
+  return project.stationLineRelations
+    .filter(relation => relation.stationId === stationId && isActiveAt(relation.openedAt, relation.closedAt, time))
+    .map(relation => project.lines.find(line => line.id === relation.lineId))
+    .filter((line): line is Line => Boolean(line && line.visible && isActiveAt(line.openedAt, line.closedAt, time)))
+    .sort((a, b) => compareRelations(project, stationId, a.id, b.id))
+}
+export function getPassengerLinesAtStation(project: ActualRouteProject, stationId: string, time: string): Line[] {
+  return collapseLinesByServiceFamily(project, getActiveLinesAtStation(project, stationId, time))
+}
+export function getPassengerVisibleRelationIds(project: ActualRouteProject, stationId: string, time: string, lineIds?: string[]): string[] {
+  const ids = lineIds ?? getActiveLinesAtStation(project, stationId, time).map(line => line.id)
+  const representatives = new Set(collapseLinesByServiceFamily(project, ids.map(id => project.lines.find(line => line.id === id)).filter((line): line is Line => Boolean(line))).map(line => line.id))
+  return project.stationLineRelations
+    .filter(relation => relation.stationId === stationId && representatives.has(relation.lineId) && isActiveAt(relation.openedAt, relation.closedAt, time))
+    .map(relation => relation.id)
+}
+export function getFirstLineAtStation(project: ActualRouteProject, stationId: string) {
+  const ids = project.stationLineRelations.filter(relation => relation.stationId === stationId).map(relation => relation.lineId)
+  return project.lines.filter(line => ids.includes(line.id)).sort((a, b) => compareRelations(project, stationId, a.id, b.id))[0]
+}
+export function getOrientationAnchorLine(project: ActualRouteProject, stationId: string, time: string) {
+  const station = project.stations.find(item => item.id === stationId)
+  const anchor = station?.orientationAnchorLineId ? project.lines.find(line => line.id === station.orientationAnchorLineId) : getFirstLineAtStation(project, stationId)
+  if (anchor && project.stationLineRelations.some(relation => relation.stationId === stationId && relation.lineId === anchor.id)) return anchor
+  return getActiveLinesAtStation(project, stationId, time)[0]
+}
+export function getActiveNetworkAtTime(project: ActualRouteProject, time: string) {
+  const lines = project.lines.filter(line => line.visible && isActiveAt(line.openedAt, line.closedAt, time))
+  const lineIds = new Set(lines.map(line => line.id))
+  const relations = project.stationLineRelations.filter(relation => lineIds.has(relation.lineId) && isActiveAt(relation.openedAt, relation.closedAt, time))
+  const stationIds = new Set(relations.map(relation => relation.stationId))
+  const stations = project.stations.filter(station => stationIds.has(station.id))
+  const segments = project.geometry.segments.filter(segment => lineIds.has(segment.lineId) && isActiveAt(segment.openedAt, segment.closedAt, time))
+  return { lines, stations, relations, segments }
+}

@@ -3,6 +3,7 @@ import type { ActualRouteProject } from '../data/model'
 import { sampleSegmentNearStation } from '../geometry/path'
 import { getOrientationAnchorLine, getActiveLinesAtStation } from '../timeline/active'
 import { getStationLineTangent } from '../geometry/tangent'
+import { getEffectiveLineColor } from '../data/lineIdentity'
 
 export function getStationHandleStyle(project: ActualRouteProject, stationId: string, time: string) {
   const station = project.stations.find(item => item.id === stationId)
@@ -21,6 +22,6 @@ export function getStationHandleStyle(project: ActualRouteProject, stationId: st
     if (direction.y > 0) direction = { x: -direction.x, y: -direction.y }
   }
   const distance = Math.max(18, effectiveStationStyle(station, project.settings).stationSize / 2 + 12)
-  return { x: station.x + direction.x * distance, y: station.y + direction.y * distance, color: line.color }
+  return { x: station.x + direction.x * distance, y: station.y + direction.y * distance, color: getEffectiveLineColor(project, line) }
 }
 

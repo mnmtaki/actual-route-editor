@@ -1,22 +1,25 @@
 import type { ActualRouteProject, Station } from '../data/model'
-import { getActiveLinesAtStation } from '../timeline/active'
+import { getPassengerLinesAtStation, getPassengerVisibleRelationIds } from '../timeline/active'
 import { getTransferMarkerLayout } from '../geometry/tangent'
 import { sortTransferLinesForSpatialOrder } from '../geometry/transferOrdering'
 import { getStationStyle } from './stationStyles'
 import { StationLabel } from './StationLabel'
 import { effectiveStationStyle } from '../data/style'
+import { lineWithEffectiveColor } from '../data/lineIdentity'
 
 export function StationMarker({ project, station, time, selected, hitRadius = 24, onPointerDown, onLabelPointerDown }: {
   project: ActualRouteProject; station: Station; time: string; selected: boolean; hitRadius?: number
   onPointerDown: (event: React.PointerEvent) => void; onLabelPointerDown: (event: React.PointerEvent) => void
 }) {
-  const lines = getActiveLinesAtStation(project, station.id, time)
-  const renderLines = lines.length > 1 ? sortTransferLinesForSpatialOrder(project, station.id, lines) : lines
+  const lines = getPassengerLinesAtStation(project, station.id, time)
+  const renderLines = lines.length > 1
+    ? sortTransferLinesForSpatialOrder(project, station.id, lines).map(line => lineWithEffectiveColor(project, line))
+    : lines.map(line => lineWithEffectiveColor(project, line))
   const { stationSize, transferMinorAxis, transferDotGap, transferEndPadding } = effectiveStationStyle(station, project.settings)
-  const { stationStyleId } = project.settings
-  const style = getStationStyle(stationStyleId)
-  const selectionColor = lines[0]?.color ?? '#596161'
-  const transferLayout = lines.length > 1 ? getTransferMarkerLayout(project, station.id, time, undefined, transferEndPadding) : null
+  const style = getStationStyle(project.settings.stationStyleId)
+  const selectionColor = renderLines[0]?.color ?? '#596161'
+  const visibleRelationIds = lines.length > 1 ? getPassengerVisibleRelationIds(project, station.id, time, lines.map(line => line.id)) : undefined
+  const transferLayout = lines.length > 1 ? getTransferMarkerLayout(project, station.id, time, visibleRelationIds, transferEndPadding) : null
   const marker = lines.length > 1
     ? style.renderTransfer({ station, lines: renderLines, size: stationSize, minorAxis: transferMinorAxis, dotGap: transferDotGap, endPadding: transferEndPadding, rotation: transferLayout?.rotation ?? 0, centerX: transferLayout?.centerX, centerY: transferLayout?.centerY, minMajorAxis: transferLayout?.anchorSpan })
     : style.renderOrdinary({ station, size: stationSize })

@@ -1,4 +1,5 @@
 import type { ActualRouteProject } from './model'
+import { getLineDisplayName } from './lineIdentity'
 
 /** Returns whether a Line currently owns a geometry lock. */
 export function isLineLocked(project: ActualRouteProject, lineId: string | undefined): boolean {
@@ -48,7 +49,7 @@ export function canEditSegmentGeometry(project: ActualRouteProject, segmentId: s
 
 export function lockedStationMessage(project: ActualRouteProject, stationId: string): string {
   const names = getLockedStationLineIds(project, stationId)
-    .map(lineId => project.lines.find(line => line.id === lineId)?.name)
+    .map(lineId => getLineDisplayName(project, lineId))
     .filter((name): name is string => Boolean(name))
   return names.length ? `该站点关联了已锁定的 ${names.join('、')}` : '该站点关联了已锁定线路'
 }

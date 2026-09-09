@@ -19,6 +19,13 @@ describe('station markers', () => {
     const three = renderAt('2025-01-01').getByTestId('transfer-s2')
     expect(three.querySelectorAll('circle')).toHaveLength(3)
   })
+  it('treats a main line and its branch as one marker family while keeping unrelated transfer',()=>{
+    const project=structuredClone(demoProject),branch={id:'line-a-branch',name:'',color:'#000000',parentLineId:'line-a',stationSequence:['s1','s2'],lineOrder:3,openedAt:'2000-01-01',visible:true,locked:false}
+    project.lines.push(branch)
+    project.stationLineRelations.push({id:'r-branch-s2',stationId:'s2',lineId:branch.id,openedAt:'2000-01-01'})
+    const view=render(<svg><StationMarker project={project} station={project.stations.find(item=>item.id==='s2')!} time="2015-01-01" selected={false} onPointerDown={()=>{}} onLabelPointerDown={()=>{}}/></svg>)
+    expect(view.getByTestId('transfer-s2').querySelectorAll('circle')).toHaveLength(2)
+  })
   it('uses global station and transfer settings even when legacy object fields exist',()=>{
     const project=structuredClone(demoProject),legacy=project.stations.find(item=>item.id==='s2')!
     Object.assign(legacy,{stationSize:4,transferMinorAxis:8,transferEndPadding:1,transferDotGap:1})

@@ -181,10 +181,16 @@ export const splitLine = splitLineAtStation
 export function deleteLineAndOrphans(project: ActualRouteProject, lineId: string): ActualRouteProject {
   if (isLineLocked(project, lineId)) return project
   const next = structuredClone(project)
-  next.lines = next.lines.filter((line) => line.id !== lineId)
-  next.stationLineRelations = next.stationLineRelations.filter((relation) => relation.lineId !== lineId)
-  next.geometry.segments = next.geometry.segments.filter((segment) => segment.lineId !== lineId)
-  next.openingPhases = next.openingPhases.filter((phase) => phase.lineId !== lineId)
+  const deletedIds = new Set<string>([lineId])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const line of next.lines) if (line.parentLineId && deletedIds.has(line.parentLineId) && !deletedIds.has(line.id)) { deletedIds.add(line.id); changed = true }
+  }
+  next.lines = next.lines.filter(line => !deletedIds.has(line.id))
+  next.stationLineRelations = next.stationLineRelations.filter(relation => !deletedIds.has(relation.lineId))
+  next.geometry.segments = next.geometry.segments.filter(segment => !deletedIds.has(segment.lineId))
+  next.openingPhases = next.openingPhases.filter(phase => !deletedIds.has(phase.lineId))
   return pruneOrphanStations(next)
 }
 

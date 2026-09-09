@@ -33,6 +33,7 @@ import {
 } from "./data/operations";
 import { selectLineInList, selectLinesByMarquee } from "./data/lineSelection";
 import { LineMultiInspector } from "./components/LineMultiInspector";
+import { getLineDisplayName } from "./data/lineIdentity";
 import { PresentationPreview } from "./presentation/PresentationPreview";
 import {
   createOpeningPhase,
@@ -1148,7 +1149,7 @@ export default function App() {
                   ? "正在绘制底图路径"
                   : drawing.kind === "road"
                     ? "正在绘制道路"
-                    : `正在绘制 ${history.project.lines.find((l) => l.id === drawing.lineId)?.name ?? "线路"}`}
+                    : `正在绘制 ${getLineDisplayName(history.project, drawing.lineId) || "线路"}`}
                 ； 点击空白新增节点； 点击已有站接入
               </div>
             )}
@@ -1257,7 +1258,7 @@ export default function App() {
             <h3>从这里继续</h3>
             {stationLineIds(history.project, choice).map((id) => (
               <button key={id} onClick={() => choose(id)}>
-                {history.project.lines.find((l) => l.id === id)?.name}
+                {getLineDisplayName(history.project, id)}
               </button>
             ))}
             <button className="primary" onClick={() => choose()}>

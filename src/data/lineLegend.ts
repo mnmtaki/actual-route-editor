@@ -1,5 +1,6 @@
 import type { ActualRouteProject, Line, LineLegend, Station } from './model'
 import { uid } from './model'
+import { getRootLineId, getLineDisplayName } from './lineIdentity'
 
 export const DEFAULT_LINE_LEGEND: Omit<LineLegend, 'id' | 'x' | 'y'> = {
   scale: 1,
@@ -96,7 +97,9 @@ export function createLineLegend(project: ActualRouteProject, point: { x: number
 
 export function getLegendLines(project: ActualRouteProject, legend: LineLegend): Line[] {
   const selected = legend.mode === 'custom' ? new Set(legend.lineIds) : undefined
-  return project.lines.filter(line => line.visible && (!selected || selected.has(line.id)))
+  const candidates = project.lines.filter(line => line.visible && (!selected || selected.has(line.id)))
+  const roots = new Set(candidates.map(line => getRootLineId(project, line)))
+  return project.lines.filter(line => roots.has(line.id))
 }
 
 export function displayLineName(line: Line): string {
@@ -131,7 +134,7 @@ export function getLegendItem(project: ActualRouteProject, line: Line): LineLege
   const singleStation = sequence.length === 1
   return {
     lineId: line.id,
-    lineName: displayLineName(line),
+    lineName: displayLineName(line) || getLineDisplayName(project, line),
     foreignLineName: displayForeignLineName(line),
     firstStation: stationName(first),
     lastStation: ring || singleStation ? stationName(first) : stationName(last),

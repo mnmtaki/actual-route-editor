@@ -4,6 +4,7 @@ import type { ActualRouteProject, Selection } from '../data/model'
 import { getSegmentCurveLength } from '../geometry/path'
 import { worldUnitsToKilometers } from '../data/distance'
 import { setLineLocked, setLineVisibility } from '../data/editorCommands'
+import { getEffectiveLineColor, getLineDisplayName } from '../data/lineIdentity'
 
 function EyeIcon({ hidden = false }: { hidden?: boolean }) {
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="line-state-icon"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />{!hidden && <circle cx="12" cy="12" r="2.5" fill="currentColor" />}{hidden && <path d="m4 4 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />}</svg>
@@ -53,6 +54,9 @@ export function LinePanel({
   onMobileLongPress?: (lineId: string) => void
 }) {
   const lineStats = project.lines.map(line => ({ line, length: worldUnitsToKilometers(project.geometry.segments.filter(segment => segment.lineId === line.id).reduce((sum, segment) => sum + getSegmentCurveLength(project, segment), 0), project), stations: new Set(line.stationSequence).size }))
+  const childrenByParent = new Map<string, typeof project.lines>(); project.lines.forEach(line => { if (line.parentLineId) childrenByParent.set(line.parentLineId, [...(childrenByParent.get(line.parentLineId) ?? []), line]) });
+  const [collapsedParentIds, setCollapsedParentIds] = useState<Set<string>>(new Set())
+  const displayLines: Array<{ line: typeof project.lines[number]; depth: number }> = []; const visited = new Set<string>(); const appendLine = (line: typeof project.lines[number], depth: number) => { if (visited.has(line.id)) return; visited.add(line.id); displayLines.push({ line, depth }); if (!collapsedParentIds.has(line.id)) for (const child of childrenByParent.get(line.id) ?? []) appendLine(child, depth + 1) }; for (const line of project.lines.filter(item => !item.parentLineId || !project.lines.some(parent => parent.id === item.parentLineId))) appendLine(line, 0); for (const line of project.lines) appendLine(line, 0)
   const totalLength = lineStats.reduce((sum, item) => sum + item.length, 0)
   const totalStations = new Set(project.stationLineRelations.map(relation => relation.stationId)).size
   const listRef = useRef<HTMLDivElement>(null)
@@ -201,18 +205,19 @@ export function LinePanel({
   return <aside className="left-panel panel" aria-label="线路结构">
     <div className="panel-heading"><div><h2>线路</h2><span className="panel-subtitle">线路与图层</span></div><button className="icon-button" onClick={onAddLine} aria-label="新增线路">＋</button></div>
     <div ref={listRef} className="line-list" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={finishPointer} onPointerCancel={event => { endTouchLongPress(event); finishPointer(event, true) }} onContextMenu={event => { if (marqueeRef.current) event.preventDefault() }}>
-      {project.lines.map(line => {
+      {displayLines.map(({ line, depth }) => {
         const isSelected = selected.has(line.id)
         const isActive = activeLineId === line.id
+        const displayName = getLineDisplayName(project, line), color = getEffectiveLineColor(project, line), hasChildren = childrenByParent.has(line.id), collapsed = collapsedParentIds.has(line.id)
         return <div key={line.id} ref={node => { if (node) rowRefs.current.set(line.id, node); else rowRefs.current.delete(line.id) }} data-line-id={line.id} className={`line-row ${isSelected ? 'selected' : ''} ${isActive ? 'active' : ''} ${isSelected && !isActive ? 'secondary-selected' : ''}`}>
-          <button type="button" className="line-row-main" onClick={event => onClickMain(event, line.id)}><span aria-hidden="true" className="line-color" style={{ background: line.color }} /><span className="line-name">{line.name}</span></button>
-          <button type="button" className={`line-state-button ${line.visible ? 'is-on' : ''}`} aria-label={line.visible ? `${line.name}隐藏线路` : `${line.name}显示线路`} title={line.visible ? '隐藏线路' : '显示线路'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onChange(setLineVisibility(project, line.id, !line.visible))}><span aria-hidden="true"><EyeIcon hidden={!line.visible} /></span></button>
-          <button type="button" className={`line-state-button ${line.locked ? 'is-on' : ''}`} aria-label={line.locked ? `${line.name}解锁线路` : `${line.name}锁定线路`} title={line.locked ? '解锁线路' : '锁定线路'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onChange(setLineLocked(project, line.id, !line.locked))}><span aria-hidden="true"><LockIcon locked={line.locked} /></span></button>
+          <button type="button" className="line-row-main" onClick={event => onClickMain(event, line.id)}>{hasChildren && <span className="line-tree-toggle" role="button" tabIndex={0} aria-label={collapsed ? '展开支线' : '折叠支线'} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setCollapsedParentIds(previous => { const next = new Set(previous); if (next.has(line.id)) next.delete(line.id); else next.add(line.id); return next }) }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); setCollapsedParentIds(previous => { const next = new Set(previous); if (next.has(line.id)) next.delete(line.id); else next.add(line.id); return next }) } }}>{collapsed ? '▸' : '▾'}</span>}<span aria-hidden="true" className="line-color" style={{ background: color }} /><span className="line-name">{depth ? "└ " : ""}{displayName}</span></button>
+          <button type="button" className={`line-state-button ${line.visible ? 'is-on' : ''}`} aria-label={line.visible ? `${displayName}隐藏线路` : `${displayName}显示线路`} title={line.visible ? '隐藏线路' : '显示线路'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onChange(setLineVisibility(project, line.id, !line.visible))}><span aria-hidden="true"><EyeIcon hidden={!line.visible} /></span></button>
+          <button type="button" className={`line-state-button ${line.locked ? 'is-on' : ''}`} aria-label={line.locked ? `${displayName}解锁线路` : `${displayName}锁定线路`} title={line.locked ? '解锁线路' : '锁定线路'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onChange(setLineLocked(project, line.id, !line.locked))}><span aria-hidden="true"><LockIcon locked={line.locked} /></span></button>
         </div>
       })}
       {marquee?.active && <div className="line-selection-marquee" data-testid="line-selection-marquee" style={{ left: `${Math.min(marquee.startX, marquee.currentX) - (listRef.current?.getBoundingClientRect().left ?? 0) + (listRef.current?.scrollLeft ?? 0)}px`, top: `${Math.min(marquee.startY, marquee.currentY) - (listRef.current?.getBoundingClientRect().top ?? 0) + (listRef.current?.scrollTop ?? 0)}px`, width: `${Math.abs(marquee.currentX - marquee.startX)}px`, height: `${Math.abs(marquee.currentY - marquee.startY)}px` }} />}
     </div>
-    <details className="network-overview"><summary>线网概览</summary><div className="network-summary" aria-label="线网统计"><div className="network-total"><strong>全网</strong><span>{totalLength.toFixed(1)} km</span><span>{totalStations} 座车站</span></div><details className="network-line-details"><summary>查看线路详情</summary><div className="network-line-stats">{lineStats.map(({ line, length, stations }) => <div key={line.id}><i style={{ background: line.color }} /><strong>{line.name}</strong><span>{length.toFixed(1)} km</span><span>{stations} 站</span></div>)}</div></details></div></details>
+    <details className="network-overview"><summary>线网概览</summary><div className="network-summary" aria-label="线网统计"><div className="network-total"><strong>全网</strong><span>{totalLength.toFixed(1)} km</span><span>{totalStations} 座车站</span></div><details className="network-line-details"><summary>查看线路详情</summary><div className="network-line-stats">{lineStats.map(({ line, length, stations }) => <div key={line.id}><i style={{ background: getEffectiveLineColor(project, line) }} /><strong>{getLineDisplayName(project, line)}</strong><span>{length.toFixed(1)} km</span><span>{stations} 站</span></div>)}</div></details></div></details>
     <details className="panel-help"><summary>操作提示</summary><p>直接拖动车站；拖动空白平移。选中车站可延伸线路，选中区间可插入车站或路径点。</p></details>
   </aside>
 }

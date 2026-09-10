@@ -44,7 +44,11 @@ export function NetworkCanvas({ project, selection, drawing, roadDraft, phasePre
   const [canvasWidth, setCanvasWidth] = useState(920)
   const shown = preview ?? project
   const active = useMemo(() => getActiveNetworkAtTime(shown, shown.timeline.currentDate), [shown])
-  const elevatedRuns = useMemo(() => compileElevatedRuns(shown, new Set(active.segments.map(segment => segment.id))), [shown, active.segments])
+  const activeProject = useMemo(() => {
+    const effectiveById = new Map(active.segments.map(segment => [segment.id, segment]))
+    return { ...shown, geometry: { ...shown.geometry, segments: shown.geometry.segments.map(segment => effectiveById.get(segment.id) ?? segment) } }
+  }, [shown, active.segments])
+  const elevatedRuns = useMemo(() => compileElevatedRuns(activeProject, new Set(active.segments.map(segment => segment.id))), [activeProject, active.segments])
   const touchHitPixels = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 699px)').matches ? 44 : 28
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
   const structureHitRadius = Math.max(22, touchHitPixels * view.width / canvasWidth)

@@ -1,6 +1,7 @@
-import type { ActualRouteProject, ISODate, Line, StationLineRelation } from '../data/model'
-import { collapseLinesByServiceFamily } from '../data/lineIdentity'
-import { getCompoundStationRelations } from '../data/compoundStation'
+import type { ActualRouteProject, ISODate, Line, Segment, StationLineRelation } from '../data/model'
+import { collapseLinesByServiceFamily, getRootLineId } from '../data/lineIdentity'
+import { getCompoundStationCanonical, getCompoundStationRelations } from '../data/compoundStation'
+import { resolveSegmentLineAt } from '../data/segmentLineHistory'
 
 export function isActiveAt(openedAt: ISODate | undefined, closedAt: ISODate | undefined, time: string) {
   return (!openedAt || openedAt <= time) && (!closedAt || time < closedAt)
@@ -27,9 +28,12 @@ export function getPassengerLinesAtStation(project: ActualRouteProject, stationI
 }
 export function getPassengerVisibleRelationIds(project: ActualRouteProject, stationId: string, time: string, lineIds?: string[]): string[] {
   const ids = lineIds ?? getActiveLinesAtStation(project, stationId, time).map(line => line.id)
-  const representatives = new Set(collapseLinesByServiceFamily(project, ids.map(id => project.lines.find(line => line.id === id)).filter((line): line is Line => Boolean(line))).map(line => line.id))
+  const representativeFamilies = new Set(ids.map(id => project.lines.find(line => line.id === id)).filter((line): line is Line => Boolean(line)).map(line => getRootLineId(project, line)))
   return getCompoundStationRelations(project, stationId)
-    .filter(relation => representatives.has(relation.lineId) && isActiveAt(relation.openedAt, relation.closedAt, time))
+    .filter(relation => {
+      const relationLine = project.lines.find(line => line.id === relation.lineId)
+      return Boolean(relationLine && representativeFamilies.has(getRootLineId(project, relationLine)) && isActiveAt(relation.openedAt, relation.closedAt, time))
+    })
     .map(relation => relation.id)
 }
 export function getFirstLineAtStation(project: ActualRouteProject, stationId: string) {
@@ -42,12 +46,19 @@ export function getOrientationAnchorLine(project: ActualRouteProject, stationId:
   if (anchor && getCompoundStationRelations(project, stationId).some(relation => relation.lineId === anchor.id)) return anchor
   return getActiveLinesAtStation(project, stationId, time)[0]
 }
+export type ActiveSegment = Segment & { effectiveLineIdAtCurrentDate: string }
 export function getActiveNetworkAtTime(project: ActualRouteProject, time: string) {
   const lines = project.lines.filter(line => line.visible && isActiveAt(line.openedAt, line.closedAt, time))
   const lineIds = new Set(lines.map(line => line.id))
   const relations = project.stationLineRelations.filter(relation => lineIds.has(relation.lineId) && isActiveAt(relation.openedAt, relation.closedAt, time))
-  const stationIds = new Set(relations.map(relation => relation.stationId))
-  const stations = project.stations.filter(station => stationIds.has(station.id))
-  const segments = project.geometry.segments.filter(segment => lineIds.has(segment.lineId) && isActiveAt(segment.openedAt, segment.closedAt, time))
+  const canonicalIds = new Set<string>()
+  for (const relation of relations) canonicalIds.add(getCompoundStationCanonical(project, relation.stationId)?.id ?? relation.stationId)
+  const stations = project.stations.filter(station => canonicalIds.has(station.id))
+  const segments = project.geometry.segments.flatMap(segment => {
+    if (!isActiveAt(segment.openedAt, segment.closedAt, time)) return []
+    const effectiveLineIdAtCurrentDate = resolveSegmentLineAt(segment, time)
+    if (!lineIds.has(effectiveLineIdAtCurrentDate)) return []
+    return [{ ...segment, lineId: effectiveLineIdAtCurrentDate, effectiveLineIdAtCurrentDate }]
+  })
   return { lines, stations, relations, segments }
 }

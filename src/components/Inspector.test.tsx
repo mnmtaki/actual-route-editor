@@ -71,3 +71,33 @@ describe('Inspector station history editing', () => {
     expect(nextSegment.waypoints.find((item:{id:string})=>item.id==='corner-b').cornerRadius).toBe(70)
   })
 })
+
+describe('Inspector compound station summary', () => {
+  it('shows passenger lines and compound member context without changing relations', () => {
+    const project = structuredClone(demoProject)
+    const station = project.stations.find(item => item.id === 's2')!
+    station.compoundGroupId = 'civic'
+    project.stations.push({ ...station, id: 's2-aux', name: '辅助成员', compoundGroupId: 'civic' })
+    const onChange = vi.fn()
+    render(<Inspector project={project} selection={{ type: 'station', id: 's2' }} onChange={onChange} onDelete={() => {}} onPhasePreview={() => {}} onStartPhaseDrawing={() => {}} />)
+    expect(screen.getByTestId('compound-station-summary')).toHaveTextContent('复合换乘站')
+    expect(screen.getByTestId('compound-station-summary')).toHaveTextContent('换乘线路')
+    expect(screen.getByTestId('compound-station-summary')).toHaveTextContent('2 个')
+    expect(screen.getByLabelText('换乘站宽度')).toBeTruthy()
+    expect(onChange).not.toHaveBeenCalled()
+  })
+  it('keeps concrete member relations visible when inspecting an auxiliary station', () => {
+    const project = structuredClone(demoProject)
+    const canonical = project.stations.find(item => item.id === 's2')!
+    canonical.compoundGroupId = 'civic'
+    project.stations.push({ ...canonical, id: 's2-aux', name: '未命名站921', compoundGroupId: 'civic' })
+    project.stationLineRelations.push({ id: 'r-aux-b', stationId: 's2-aux', lineId: 'line-b', openedAt: '2000-01-01' })
+    const view = render(<Inspector project={project} selection={{ type: 'station', id: 's2-aux' }} onChange={() => {}} onDelete={() => {}} onPhasePreview={() => {}} onStartPhaseDrawing={() => {}} />)
+    const summary = screen.getByTestId('compound-station-summary')
+    expect(summary).toHaveTextContent('由其他成员承载')
+    expect(summary).toHaveTextContent('本成员线路')
+    expect(summary).toHaveTextContent('南北线')
+    expect(screen.getByLabelText('南北线车站开通方式')).toBeTruthy()
+    expect(view.container.querySelector('[data-testid="compound-station-summary"]')).toBeTruthy()
+  })
+})

@@ -4,9 +4,9 @@ import { PRESENTATION_ANIMATION, clamp, easing, inverseLineEasing } from './conf
 import { getBeatRevealFronts, getBeatRevealedDistance, getBeatSegmentRevealProgress, getOpeningAnimationState, getStationArrivalRatio } from './reveal'
 import { stationLineKey } from './compiler'
 import { resolveSegmentLineAt } from '../data/segmentLineHistory'
-import { collapseLineIdsByServiceFamily } from '../data/lineIdentity'
+import { collapseLineIdsByServiceFamily, getRootLineId } from '../data/lineIdentity'
 import { worldUnitsToKilometers } from '../data/distance'
-import { getCompoundStationMemberIds, getPassengerStationIdentity, isCompoundStationCanonical } from '../data/compoundStation'
+import { getCompoundStationMemberIds, getCompoundStationRelations, getPassengerStationIdentity, isCompoundStationCanonical } from '../data/compoundStation'
 import type { PresentationBeat, PresentationSequence, PresentationState, StationPresentationState } from './types'
 
 export function getPresentationState(project: ActualRouteProject, sequence: PresentationSequence, presentationTime: number): PresentationState {
@@ -76,7 +76,7 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
   const lines = project.lines.filter(line => line.visible).map(line => ({
     lineId: line.id,
     operatingLengthKm: project.geometry.segments.filter(segment => (segmentStates[segment.id]?.lineId ?? segment.lineId) === line.id).reduce((sum, segment) => { const state = segmentStates[segment.id]; return sum + worldUnitsToKilometers((sequence.cache.segmentLengths[segment.id] ?? 0) * state.revealProgress * state.opacity, project) }, 0),
-    stationCount: project.stations.filter(station => isCompoundStationCanonical(project, station) && (() => { const state = stationStates[station.id]; return state?.opacity > 0 && state.lineIds.includes(line.id) })()).length,
+    stationCount: getPresentationStationCountForLine(project, stationStates, line.id),
   })).filter(statistic => statistic.operatingLengthKm > .001 || statistic.stationCount > 0)
   const camera = sequence.settings.cameraMode === 'fixed' || !currentBeat || beatIndex < 0 ? sequence.fixedCamera : evaluateCameraTrack(sequence.cameraTracks[beatIndex], currentBeat, time)
   return { presentationTime: time, historyDate, dateLabel: formatDateLabel(historyDate), currentBeat, currentEvent: currentBeat, globalRevealProgress, currentRevealedDistance, revealFronts, statistics: { operatingLengthKm, stationCount }, lineStatistics: lines, segmentStates, stationStates, camera }
@@ -96,8 +96,23 @@ function presentationVisibleLineIds(project:ActualRouteProject,sequence:Presenta
   }))
 }
 function presentationVisibleRelationIds(project: ActualRouteProject, stationId: string, date: string, lineIds: string[]) {
-  const representativeLineIds = collapseLineIdsByServiceFamily(project, lineIds)
-  return getCompoundStationMemberIds(project, stationId).flatMap(memberId => project.stationLineRelations.filter(relation => relation.stationId === memberId && representativeLineIds.includes(relation.lineId) && active(relation.openedAt, relation.closedAt, date)).map(relation => relation.id))
+  const representativeFamilies = new Set(lineIds.map(lineId => project.lines.find(line => line.id === lineId)).filter((line): line is ActualRouteProject['lines'][number] => Boolean(line)).map(line => getRootLineId(project, line)))
+  return getCompoundStationMemberIds(project, stationId).flatMap(memberId => project.stationLineRelations.filter(relation => {
+    const relationLine = project.lines.find(line => line.id === relation.lineId)
+    return relation.stationId === memberId && Boolean(relationLine && representativeFamilies.has(getRootLineId(project, relationLine))) && active(relation.openedAt, relation.closedAt, date)
+  }).map(relation => relation.id))
+}
+function getPresentationStationCountForLine(project: ActualRouteProject, stationStates: Record<string, StationPresentationState>, lineId: string) {
+  const counted = new Set<string>()
+  for (const station of project.stations) {
+    if (!isCompoundStationCanonical(project, station)) continue
+    const state = stationStates[station.id]
+    if (!state || state.opacity <= 0) continue
+    const hasVisibleRelation = getCompoundStationRelations(project, station).some(relation => relation.lineId === lineId && state.visibleRelationIds.includes(relation.id))
+    if (!hasVisibleRelation) continue
+    counted.add(getPassengerStationIdentity(project, station.id))
+  }
+  return counted.size
 }
 function active(openedAt: string | null | undefined, closedAt: string | null | undefined, date: string) { return (!openedAt || openedAt <= date) && (!closedAt || date < closedAt) }
 function historicallyVisible(openedAt: string | null | undefined, closedAt: string | null | undefined, date: string) { return active(openedAt, closedAt, date) }

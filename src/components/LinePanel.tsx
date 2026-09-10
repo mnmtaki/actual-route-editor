@@ -5,6 +5,7 @@ import { getSegmentCurveLength } from '../geometry/path'
 import { worldUnitsToKilometers } from '../data/distance'
 import { setLineLocked, setLineVisibility } from '../data/editorCommands'
 import { getEffectiveLineColor, getLineDisplayName } from '../data/lineIdentity'
+import { getPassengerStationCount, getPassengerStationCountForLine } from '../data/passengerStats'
 
 function EyeIcon({ hidden = false }: { hidden?: boolean }) {
   return <svg aria-hidden="true" viewBox="0 0 24 24" className="line-state-icon"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />{!hidden && <circle cx="12" cy="12" r="2.5" fill="currentColor" />}{hidden && <path d="m4 4 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />}</svg>
@@ -53,12 +54,12 @@ export function LinePanel({
   mobileMode?: boolean
   onMobileLongPress?: (lineId: string) => void
 }) {
-  const lineStats = project.lines.map(line => ({ line, length: worldUnitsToKilometers(project.geometry.segments.filter(segment => segment.lineId === line.id).reduce((sum, segment) => sum + getSegmentCurveLength(project, segment), 0), project), stations: new Set(line.stationSequence).size }))
+  const lineStats = project.lines.map(line => ({ line, length: worldUnitsToKilometers(project.geometry.segments.filter(segment => segment.lineId === line.id).reduce((sum, segment) => sum + getSegmentCurveLength(project, segment), 0), project), stations: getPassengerStationCountForLine(project, line.id) }))
   const childrenByParent = new Map<string, typeof project.lines>(); project.lines.forEach(line => { if (line.parentLineId) childrenByParent.set(line.parentLineId, [...(childrenByParent.get(line.parentLineId) ?? []), line]) });
   const [collapsedParentIds, setCollapsedParentIds] = useState<Set<string>>(new Set())
   const displayLines: Array<{ line: typeof project.lines[number]; depth: number }> = []; const visited = new Set<string>(); const appendLine = (line: typeof project.lines[number], depth: number) => { if (visited.has(line.id)) return; visited.add(line.id); displayLines.push({ line, depth }); if (!collapsedParentIds.has(line.id)) for (const child of childrenByParent.get(line.id) ?? []) appendLine(child, depth + 1) }; for (const line of project.lines.filter(item => !item.parentLineId || !project.lines.some(parent => parent.id === item.parentLineId))) appendLine(line, 0); for (const line of project.lines) appendLine(line, 0)
   const totalLength = lineStats.reduce((sum, item) => sum + item.length, 0)
-  const totalStations = new Set(project.stationLineRelations.map(relation => relation.stationId)).size
+  const totalStations = getPassengerStationCount(project)
   const listRef = useRef<HTMLDivElement>(null)
   const rowRefs = useRef(new Map<string, HTMLDivElement>())
   const marqueeRef = useRef<MarqueeState | null>(null)

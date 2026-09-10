@@ -23,8 +23,10 @@ export function normalizeBasemapPaths(value: unknown): BasemapPath[] | undefined
     const width = finitePositive(raw.width, 3), opacity = clamp(Number(raw.opacity), 0, 1, 1), closed = raw.closed === true || raw.isFilled === true
     const isFilled = raw.isFilled === true && closed
     const zIndex = Number.isFinite(Number(raw.zIndex)) ? Number(raw.zIndex) : 0
-    const sourceLineId = raw.source && typeof raw.source === 'object' ? (raw.source as Record<string, unknown>).sourceLineId : undefined
-    const normalized: BasemapPath = { id, ...(typeof raw.name === 'string' && raw.name ? { name: raw.name } : {}), category, points, color, width, opacity, closed, isFilled, zIndex, visible: raw.visible !== false, locked: raw.locked === true, ...(raw.source && typeof raw.source === 'object' && (typeof sourceLineId === 'string' || Number.isFinite(Number(sourceLineId))) ? { source: { format: 'aarc' as const, sourceLineId: typeof sourceLineId === 'string' ? sourceLineId : Number(sourceLineId) } } : {}) }
+    const rawSource = raw.source && typeof raw.source === 'object' ? raw.source as Record<string, unknown> : undefined
+    const sourceLineId = rawSource?.sourceLineId
+    const source = rawSource?.format === 'aarc' && (typeof sourceLineId === 'string' || Number.isFinite(Number(sourceLineId))) ? { format: 'aarc' as const, sourceLineId: typeof sourceLineId === 'string' ? sourceLineId : Number(sourceLineId), sourceWidthRatio: rawSource.sourceWidthRatio as number | undefined, sourcePhysicalWidth: rawSource.sourcePhysicalWidth as number | undefined, sourceColor: rawSource.sourceColor as string | undefined, sourceColorPre: rawSource.sourceColorPre as number | undefined, sourceStyleId: rawSource.sourceStyleId as number | undefined, sourceZIndex: rawSource.sourceZIndex as number | undefined, kind: rawSource.kind as 'terrain' | 'line-style' | undefined, raw: rawSource.raw as Record<string, unknown> | undefined } : undefined
+    const normalized: BasemapPath = { id, ...(typeof raw.name === 'string' && raw.name ? { name: raw.name } : {}), category, points, color, width, opacity, closed, isFilled, zIndex, visible: raw.visible !== false, locked: raw.locked === true, ...(source ? { source } : {}) }
     const isAarcSource = raw.source && typeof raw.source === 'object' && (raw.source as Record<string, unknown>).format === 'aarc'
     return [isAarcSource ? normalized : removeRepeatedTerminalPoint(normalized)]
   })

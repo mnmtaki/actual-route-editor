@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { aggregateAarcInterval, decodeAarcTimestamp, resolveAarcAtomicDates } from './aarcTime'
+import { aggregateAarcInterval, decodeAarcTimestamp, resolveAarcAtomicDates, resolveAarcStyleSliceForInterval, resolveAarcTimeSliceForInterval } from './aarcTime'
 
 describe('AARC calendar time decoding', () => {
   it('decodes epoch milliseconds using the AARC UTC+8 calendar day', () => {
@@ -32,5 +32,15 @@ describe('AARC calendar time decoding', () => {
     expect(legs.slice(7, 8).every(item => item.openedAt === '2026-05-20')).toBe(true)
     expect(legs.slice(8).every(item => item.openedAt === '2026-06-07')).toBe(true)
     expect(aggregateAarcInterval(legs, 7, 9, { openedAt: '2026-05-20', closedAt: null }).openedAt).toBe('2026-06-07')
+  })
+  it('resolves the narrowest covering style slice deterministically', () => {
+    const line = { id: 7, pts: [1, 2, 3, 4] }
+    const slices = [
+      { id: 1, line: 7, fromPt: 1, toPt: 4, style: 10 },
+      { id: 2, line: 7, fromPt: 2, toPt: 3, style: 11 },
+    ]
+    expect(resolveAarcStyleSliceForInterval(line, slices, 2, 3)).toEqual({ id: 2, styleId: 11 })
+    expect(resolveAarcStyleSliceForInterval(line, slices, 1, 2)).toEqual({ id: 1, styleId: 10 })
+    expect(resolveAarcTimeSliceForInterval(line, slices, 2, 3)).toEqual({ id: 2 })
   })
 })

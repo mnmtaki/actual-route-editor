@@ -100,8 +100,7 @@ describe('transfer marker content centering', () => {
     const project = convertAarcToActualRouteProject(rawPinglan, 'Pinglan.aarc (9).json').project
     for (const stationId of ['aarc-station-466', 'aarc-station-467', 'aarc-station-563']) {
       const { layout, metrics, localXs, frameWidth } = renderFixtureTransfer(project, stationId)
-      expect(layout.anchorSpan).toBeGreaterThan(metrics.naturalWidth)
-      expect(frameWidth).toBeCloseTo(layout.anchorSpan)
+      expect(frameWidth).toBeCloseTo(Math.max(layout.anchorSpan, metrics.naturalWidth))
       expect(localXs.reduce((sum, value) => sum + value, 0) / localXs.length).toBeCloseTo(0)
     }
   })

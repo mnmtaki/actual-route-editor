@@ -4,6 +4,8 @@ export interface AarcGeometryPoint {
   y: number
   dir: 0 | 1
   station: boolean
+  /** Upstream free-point semantic: incident edges stay direct. */
+  free?: boolean
 }
 
 export type AarcOrientation = 'horizontal' | 'vertical' | 'diag-positive' | 'diag-negative'
@@ -13,6 +15,7 @@ export interface AarcSkeletonNode {
   y: number
   sourcePointIndex?: number
   implicit: boolean
+  free?: boolean
 }
 
 export interface AarcGeometryStats {
@@ -180,7 +183,7 @@ interface ChainReconstruction {
  */
 function reconstructSourceChain(points: AarcGeometryPoint[]): ChainReconstruction {
   const nodes: AarcSkeletonNode[] = points.length
-    ? [{ x: points[0].x, y: points[0].y, sourcePointIndex: 0, implicit: false }]
+    ? [{ x: points[0].x, y: points[0].y, sourcePointIndex: 0, implicit: false, free: points[0].free }]
     : []
   let directLegCount = 0
   let oneImplicitReconstructionCount = 0
@@ -192,6 +195,11 @@ function reconstructSourceChain(points: AarcGeometryPoint[]): ChainReconstructio
     const from = points[index]
     const to = points[index + 1]
     const directHeading = headingBetween(from, to)
+    if (from.free || to.free) {
+      directLegCount += 1
+      pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false, free: to.free })
+      continue
+    }
     if (directHeading) {
       // A small backwards-compatibility guard for legacy AARC chains whose
       // two dir=0 anchors sit on a diagonal between an orthogonal incoming
@@ -202,13 +210,13 @@ function reconstructSourceChain(points: AarcGeometryPoint[]): ChainReconstructio
       const legacyCorner = legacyOrthogonalCorner(points, index, directHeading)
       if (legacyCorner) {
         legacyCorner.points.slice(1, -1).forEach(value => pushDistinct(nodes, { ...value, implicit: true }))
-        pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false })
+        pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false, free: to.free })
         oneImplicitReconstructionCount += legacyCorner.corners === 1 ? 1 : 0
         twoImplicitReconstructionCount += legacyCorner.corners === 2 ? 1 : 0
         continue
       }
       directLegCount += 1
-      pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false })
+      pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false, free: to.free })
       continue
     }
 
@@ -233,13 +241,13 @@ function reconstructSourceChain(points: AarcGeometryPoint[]): ChainReconstructio
       unresolvedCount += 1
       // Keep the source point and fail loudly in measureNodes rather than
       // silently introducing an arbitrary-angle segment.
-      pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false })
+      pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false, free: to.free })
       continue
     }
     if (best.corners === 1) oneImplicitReconstructionCount += 1
     else if (best.corners === 2) twoImplicitReconstructionCount += 1
     best.points.slice(1, -1).forEach(value => pushDistinct(nodes, { ...value, implicit: true }))
-    pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false })
+    pushDistinct(nodes, { x: to.x, y: to.y, sourcePointIndex: index + 1, implicit: false, free: to.free })
   }
 
   return { nodes, directLegCount, oneImplicitReconstructionCount, twoImplicitReconstructionCount, unresolvedCount }
@@ -526,11 +534,11 @@ function candidatesFor(point: AarcGeometryPoint): AarcOrientation[] { return poi
 function pushDistinct(nodes: AarcSkeletonNode[], node: AarcSkeletonNode) { const previous = nodes.at(-1); if (previous && distance(previous, node) < EPSILON) { if (node.sourcePointIndex !== undefined) Object.assign(previous, node); return }; nodes.push(node) }
 function measureNodes(nodes: AarcSkeletonNode[]): AarcGeometryStats {
   const stats = emptyStats(); stats.implicitCornerCount = nodes.filter(node => node.implicit).length
-  for (let index = 1; index < nodes.length; index += 1) { const kind = classifyLeg(nodes[index - 1], nodes[index]); if (kind === 'horizontal') stats.horizontalLegCount += 1; else if (kind === 'vertical') stats.verticalLegCount += 1; else if (kind === 'diagonal') stats.diagonalLegCount += 1; else throw new Error(`AARC geometry produced a non-octilinear leg at node ${index}`) }
+  for (let index = 1; index < nodes.length; index += 1) { const kind = classifyLeg(nodes[index - 1], nodes[index]); if (kind === 'horizontal') stats.horizontalLegCount += 1; else if (kind === 'vertical') stats.verticalLegCount += 1; else if (kind === 'diagonal') stats.diagonalLegCount += 1; else if (nodes[index - 1].free || nodes[index].free) { /* upstream free direct edge */ } else throw new Error(`AARC geometry produced a non-octilinear leg at node ${index}`) }
   return stats
 }
 function explicitOnlyGeometry(points: AarcGeometryPoint[]): AarcGeometryResult {
-  const nodes = points.map((point, sourcePointIndex) => ({ x: point.x, y: point.y, sourcePointIndex, implicit: false }))
+  const nodes = points.map((point, sourcePointIndex) => ({ x: point.x, y: point.y, sourcePointIndex, implicit: false, free: point.free }))
   const stats = measureNodes(nodes)
   stats.sourceLegCount = Math.max(0, points.length - 1)
   stats.directLegCount = stats.sourceLegCount

@@ -16,10 +16,10 @@ describe('passenger station statistics', () => {
   })
 
 
-  it('locks the Pinglan fixture to geometric 535 and passenger 534 stations', () => {
+  it('locks the Pinglan fixture to geometric 537 and passenger 535 stations', () => {
     const { project } = convertAarcToActualRouteProject(rawPinglan, '平岚.aarc (9).json')
-    expect(project.stations).toHaveLength(535)
-    expect(getPassengerStationCount(project)).toBe(534)
+    expect(project.stations).toHaveLength(537)
+    expect(getPassengerStationCount(project)).toBe(535)
     const line2 = project.lines.find(line => line.name === '2号线')!
     expect(getPassengerStationCountForLine(project, line2.id)).toBe(24)
   })

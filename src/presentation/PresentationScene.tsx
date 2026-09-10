@@ -8,6 +8,7 @@ import { compileElevatedRuns } from '../data/structure'
 import { getStationStyle } from '../renderer/stationStyles'
 import { StationLabel } from '../renderer/StationLabel'
 import { MapElementsLayer } from '../renderer/MapElements'
+import { AarcTextTagsLayer } from '../renderer/AarcTextTags'
 import { LineLegendLayer } from '../renderer/LineLegend'
 import { LineBadgesLayer } from '../renderer/LineBadges'
 import { VectorBasemapLayer } from '../renderer/VectorBasemap'
@@ -49,6 +50,7 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
       </g>
     })}</g>
     <LineBadgesLayer project={project} presentation visibleLineIds={visibleLineIds} />
+    <AarcTextTagsLayer project={project} presentation visibleLineIds={visibleLineIds} />
     <MapElementsLayer project={project} presentation />
     <LineLegendLayer project={project} presentation />
     {(() => { const beat=[...sequence.beats].reverse().find(item=>item.presentationStart<=time&&item.type!=='STATION_RENAME'&&item.type!=='LINE_REASSIGNMENT'&&!item.type.includes('CLOSURE'));if(!beat)return null;const line=lineMap.get(beat.lineId);if(!line)return null;const phase=beat.openingPhaseId?project.openingPhases.find(item=>item.id===beat.openingPhaseId):undefined;const x=state.camera.x+state.camera.width*.035,y=state.camera.y+state.camera.height*.045,w=state.camera.width*.23,h=phase?.name?state.camera.height*.105:state.camera.height*.07;return <g className="presentation-current-opening" data-current-line-id={line.id} data-current-phase-id={phase?.id??''}><rect x={x} y={y} width={w} height={h} rx={state.camera.height*.012} fill="#fffdf8" stroke="#d8d2c7" strokeWidth={state.camera.height*.002} opacity=".94"/><rect x={x+state.camera.width*.012} y={y+state.camera.height*.014} width={state.camera.height*.042} height={state.camera.height*.042} rx={state.camera.height*.008} fill={getEffectiveLineColor(project,line)}/><text x={x+state.camera.width*.033} y={y+state.camera.height*.044} textAnchor="middle" fill="#fff" fontSize={state.camera.height*.026} fontWeight="700">{getLineDisplayName(project,line)}</text><text x={x+state.camera.width*.064} y={y+state.camera.height*.044} fill="#252a27" fontSize={state.camera.height*.027} fontWeight="700">{getLineDisplayName(project,line)}</text>{phase?.name&&<text x={x+state.camera.width*.064} y={y+state.camera.height*.079} fill="#6a716c" fontSize={state.camera.height*.022}>{phase.name}</text>}</g> })()}

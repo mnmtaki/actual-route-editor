@@ -21,13 +21,16 @@ describe('常陵 AARC known line anchors', () => {
     expect(relationAnchor(project, '理场院', '19')).toEqual({ x: 4625, y: 5200 })
     expect(relationAnchor(project, '小麦市', '19')).toEqual({ x: 4625, y: 5400 })
     expect(relationAnchor(project, '如意桥', '19')).toEqual({ x: 4625, y: 5700 })
-    expect(relationAnchor(project, '稻香楼', '17')).toEqual({ x: 5175, y: 5550 })
+    // Point 662 is a nearby anonymous point on line 17, but the AARC
+    // cluster oracle does not link it to the named point 44 (distance exceeds
+    // the effective snap threshold and there is no cluster pointLink).
+    expect(relationAnchor(project, '稻香楼', '17')).toBeUndefined()
     expect(project.geometry.segments).toHaveLength(570)
     // Concrete heading continuity restores the real two-implicit bridges while preserving source coordinates and topology.
     expect(project.geometry.segments.flatMap(segment => segment.waypoints)).toHaveLength(100)
     const summary = importedResult().summary
     expect(summary.explicitWaypointCount).toBe(21)
     expect(summary.implicitCornerCount).toBe(79)
-    expect(project.stations).toHaveLength(436)
+    expect(project.stations).toHaveLength(437)
   })
 })

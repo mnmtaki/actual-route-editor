@@ -24,19 +24,19 @@ describe('AARC per-line station occurrence anchors', () => {
       }
     }
     expect(occurrences).toBe(589)
-    expect(project.stationLineRelations.filter(relation => relation.anchor).length).toBe(31)
-    expect(project.stations).toHaveLength(436)
+    expect(project.stationLineRelations.filter(relation => relation.anchor).length).toBe(30)
+    expect(project.stations).toHaveLength(437)
   })
 
-  it('rejects a transitive same-line helper bridge while retaining each source point', () => {
+  it('follows AARC pointLinks transitively without a same-line business veto', () => {
     const point = (id: number, x: number, y: number, sourceOrder = id): AarcStationPointInput => ({ id, x, y, sourceOrder })
     const result = buildAarcStationComponents(
       [point(1, 0, 0), point(2, 24, 0), point(3, 48, 0)],
       new Map([[1, [10]], [2, []], [3, [10]]]),
       [{ pts: [1, 2, 3] }],
     )
-    expect(result.components).toHaveLength(2)
-    expect(result.components.map(component => component.referencedPointIds)).toEqual([[1], [3]])
-    expect(result.warnings.some(warning => warning.includes('同一线路'))).toBe(true)
+    expect(result.components).toHaveLength(1)
+    expect(result.components[0].referencedPointIds).toEqual([1, 3])
+    expect(result.warnings).toEqual([])
   })
 })

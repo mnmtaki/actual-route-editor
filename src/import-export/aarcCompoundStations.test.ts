@@ -48,7 +48,7 @@ describe('AARC compound interchange detection', () => {
     expect(isCompoundStationCanonical(project, named)).toBe(true)
     expect(isCompoundStationCanonical(project, auxiliary)).toBe(false)
     expect(getPassengerStationIdentity(project, named)).toBe(getPassengerStationIdentity(project, auxiliary))
-    expect(new Set(project.stations.flatMap(station => station.compoundGroupId ? [station.compoundGroupId] : []))).toHaveLength(1)
+    expect(new Set(project.stations.flatMap(station => station.compoundGroupId ? [station.compoundGroupId] : []))).toEqual(new Set(['aarc-compound-297-925', 'aarc-compound-921-1239']))
     const passengerLines = getPassengerLinesAtStation(project, named.id, '9999-12-31')
     expect(passengerLines.map(line => line.name).sort()).toEqual(['12号线', '14号线', '2号线'])
     expect(sortTransferLinesForSpatialOrder(project, named.id, passengerLines, '9999-12-31').map(line => line.name)).toEqual(['14号线', '2号线', '12号线'])

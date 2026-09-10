@@ -39,7 +39,7 @@ export function resolveLineStyleLayers(style: LineStyle, lineColor: string, line
     const resolvedWidth = widthMode === 'absolute' ? Math.max(0, layer.width) : Math.max(0, lineWidth * layer.width)
     const baseColor = layer.colorMode === 'custom' ? (layer.color ?? lineColor) : lineColor
     const resolvedColor = layer.colorMixTarget && Number.isFinite(layer.colorMixAmount) ? mixHex(baseColor, layer.colorMixTarget, Math.max(0, Math.min(1, layer.colorMixAmount!))) : baseColor
-    const dash = layer.dash?.filter(value => Number.isFinite(value) && value >= 0)
+    const dash = layer.dash?.filter(value => Number.isFinite(value) && value >= 0).map(value => layer.dashMode === 'ratio' ? value * lineWidth : value)
     return { ...layer, resolvedColor, resolvedWidth, resolvedOpacity: Math.max(0, Math.min(1, layer.opacity ?? 1)), ...(dash?.length ? { resolvedDash: dash.join(' ') } : {}) }
   })
 }
@@ -58,7 +58,7 @@ function normalizeLayer(value: unknown, index: number): LineStyleLayer | null {
   const lineJoin = raw.lineJoin === 'miter' || raw.lineJoin === 'bevel' ? raw.lineJoin : 'round'
   const opacity = Number(raw.opacity)
   const colorMixAmount = Number(raw.colorMixAmount)
-  return { id: typeof raw.id === 'string' && raw.id ? raw.id : 'layer-' + (index + 1), colorMode, ...(typeof raw.color === 'string' ? { color: raw.color } : {}), ...(typeof raw.colorMixTarget === 'string' && Number.isFinite(colorMixAmount) ? { colorMixTarget: raw.colorMixTarget, colorMixAmount: Math.max(0, Math.min(1, colorMixAmount)) } : {}), width, widthMode: raw.widthMode === 'absolute' ? 'absolute' : 'ratio', ...(Number.isFinite(opacity) ? { opacity: Math.max(0, Math.min(1, opacity)) } : {}), ...(dash?.length ? { dash } : {}), lineCap, lineJoin }
+  return { id: typeof raw.id === 'string' && raw.id ? raw.id : 'layer-' + (index + 1), colorMode, ...(typeof raw.color === 'string' ? { color: raw.color } : {}), ...(typeof raw.colorMixTarget === 'string' && Number.isFinite(colorMixAmount) ? { colorMixTarget: raw.colorMixTarget, colorMixAmount: Math.max(0, Math.min(1, colorMixAmount)) } : {}), width, widthMode: raw.widthMode === 'absolute' ? 'absolute' : 'ratio', ...(Number.isFinite(opacity) ? { opacity: Math.max(0, Math.min(1, opacity)) } : {}), ...(dash?.length ? { dash } : {}), ...(raw.dashMode === 'ratio' ? { dashMode: 'ratio' as const } : {}), ...(typeof raw.sourcePatternId === 'string' && raw.sourcePatternId ? { sourcePatternId: raw.sourcePatternId } : {}), lineCap, lineJoin }
 }
 
 export function normalizeLineStyles(value: unknown): LineStyle[] | undefined {
@@ -69,7 +69,8 @@ export function normalizeLineStyles(value: unknown): LineStyle[] | undefined {
     const raw = item as Record<string, unknown>, id = typeof raw.id === 'string' ? raw.id : ''
     if (!id) continue
     const layers = Array.isArray(raw.layers) ? raw.layers.map(normalizeLayer).filter((layer): layer is LineStyleLayer => Boolean(layer)) : []
-    result.push({ id, name: typeof raw.name === 'string' && raw.name.trim() ? raw.name : id, ...(raw.hideBaseLine === true ? { hideBaseLine: true } : {}), layers, ...(BUILTIN_LINE_STYLES.some(style => style.id === id) ? { builtin: true } : {}) })
+    const source = raw.source && typeof raw.source === 'object' && (raw.source as Record<string, unknown>).format === 'aarc' ? structuredClone(raw.source as LineStyle['source']) : undefined
+    result.push({ id, name: typeof raw.name === 'string' && raw.name.trim() ? raw.name : id, ...(raw.hideBaseLine === true ? { hideBaseLine: true } : {}), layers, ...(source ? { source } : {}), ...(BUILTIN_LINE_STYLES.some(style => style.id === id) ? { builtin: true } : {}) })
   }
   return result.length ? result : undefined
 }

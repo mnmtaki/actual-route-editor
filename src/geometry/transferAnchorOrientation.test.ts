@@ -16,7 +16,7 @@ describe('transfer orientation from relation anchors', () => {
     ['中塔', 90],
     ['清樽路', 90],
     ['南城公园', 0],
-    ['稻香楼', 45],
+    ['稻香楼', 90],
   ])('%s uses the spatial anchor span (%s degrees)', (name, expected) => {
     const { project, station } = stationByName(name)
     expect(getTransferMarkerLayout(project, station.id, '2025-01-01').rotation).toBeCloseTo(expected, 5)

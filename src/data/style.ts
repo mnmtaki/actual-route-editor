@@ -33,7 +33,14 @@ const colorOverride=(value:string|undefined,fallback:string)=>normalizeHexColor(
 export function normalizeFontFamily(value:unknown):string|null{if(typeof value!=='string')return null;const normalized=value.trim();return normalized&&normalized.length<=500&&!/[;{}<>\r\n]/.test(normalized)&&!/^url\s*\(/i.test(normalized)?normalized:null}
 export function normalizeFontWeight(value:unknown):number|null{const normalized=typeof value==='number'?value:Number(value);return Number.isFinite(normalized)&&normalized>=100&&normalized<=900?normalized:null}
 export function normalizeHexColor(value:unknown):string|null{if(typeof value!=='string')return null;const normalized=value.trim();if(/^#[0-9a-f]{6}$/i.test(normalized))return normalized.toLowerCase();if(/^#[0-9a-f]{3}$/i.test(normalized)){const [r,g,b]=normalized.slice(1).toLowerCase();return `#${r}${r}${g}${g}${b}${b}`}return null}
-export function effectiveLineWidth(line:Line,settings:ProjectSettings){return positiveOverride(line.styleOverrides?.lineWidth,settings.lineWidth)}
+export function effectiveLineWidth(line:Line,settings:ProjectSettings){
+  const override = positiveOverride(line.styleOverrides?.lineWidth, settings.lineWidth)
+  if (line.styleOverrides?.lineWidth !== undefined) return override
+  const sourceRatio = line.source?.format === 'aarc' ? line.source.sourceWidthRatio : undefined
+  const referenceRatio = settings.aarcLineWidthReferenceRatio
+  if (Number.isFinite(sourceRatio) && sourceRatio! > 0 && Number.isFinite(referenceRatio) && referenceRatio! > 0) return settings.lineWidth * sourceRatio! / referenceRatio!
+  return override
+}
 export function effectiveStationStyle(station:Station,settings:ProjectSettings):Required<StationStyleOverrides>{return{
   stationSize:positiveOverride(station.styleOverrides?.stationSize,settings.stationSize),
   transferMinorAxis:positiveOverride(station.styleOverrides?.transferMinorAxis,settings.transferMinorAxis),

@@ -7,13 +7,16 @@ function detect(distance: number, memberships: number[][], names: [string?, stri
   return detectAarcCompoundGroups(points, lines, new Map([[1, [10, ...memberships[0]]], [2, [10, ...memberships[1]]]]))
 }
 
-describe('AARC compound false-positive guards', () => {
-  it('requires every strict grouping condition', () => {
-    expect(detect(20, [[], [30]]).groups).toHaveLength(0)
-    expect(detect(20, [[20], []]).groups).toHaveLength(0)
-    expect(detect(20, [[20], [30]], ['甲', '乙']).groups).toHaveLength(0)
+describe('AARC compound source-oracle semantics', () => {
+  it('uses geometric proximity and memberships, without speculative business gates', () => {
+    expect(detect(20, [[], [30]]).groups).toHaveLength(1)
+    expect(detect(20, [[20], []]).groups).toHaveLength(1)
+    expect(detect(20, [[20], [30]], ['甲', '乙']).groups).toHaveLength(1)
+    expect(detect(20, [[20], [30]], [], [1, 8, 2]).groups).toHaveLength(1)
+    expect(detect(20, [[20], [20]]).groups).toHaveLength(1)
+  })
+
+  it('does not cluster points outside the upstream clinging distance', () => {
     expect(detect(26, [[20], [30]]).groups).toHaveLength(0)
-    expect(detect(20, [[20], [30]], [], [1, 8, 2]).groups).toHaveLength(0)
-    expect(detect(20, [[20], [20]]).groups).toHaveLength(0)
   })
 })

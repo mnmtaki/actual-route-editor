@@ -13,6 +13,8 @@ describe('AARC 支线导入', () => {
     expect(main?.name).toBe('19号线')
     expect(branch?.name).toBe('')
     expect(branch?.parentLineId).toBe(main?.id)
+    expect(branch?.source?.sourceColor).toBeTruthy()
+    expect(branch?.source?.sourceWidthRatio).toBeGreaterThan(0)
     expect(branch && project.geometry.segments.some(segment => segment.lineId === branch.id)).toBe(true)
     expect(branch && project.stationLineRelations.some(relation => relation.lineId === branch.id)).toBe(true)
     const shared = project.stations.find(station => station.source?.pointIds?.includes(1297))

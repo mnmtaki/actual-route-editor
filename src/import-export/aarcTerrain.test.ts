@@ -4,7 +4,7 @@ import rawPinglan from './__fixtures__/平岚.aarc (9).json'
 import rawMinimal from './__fixtures__/测试.aarc (1).json'
 import { convertAarcToActualRouteProject } from './aarc'
 import { parseProjectJson, serializeProject } from './projectJson'
-import { isValidAarcTerrainColor, parseAarcTerrainWidth, resolveAarcTerrainAppearance, resolveAarcTerrainPreset, resolveAarcTerrainWidth, AARC_TERRAIN_WORLD_WIDTH_PER_SOURCE_UNIT } from './aarcTerrain'
+import { isValidAarcTerrainColor, parseAarcTerrainWidth, resolveAarcTerrainAppearance, resolveAarcTerrainPreset, resolveAarcTerrainSourceMetrics, resolveAarcTerrainWidth, AARC_TERRAIN_WORLD_WIDTH_PER_SOURCE_UNIT } from './aarcTerrain'
 
 describe('AARC terrain calibration', () => {
   it('resolves known presets before raw colors', () => {
@@ -27,6 +27,8 @@ describe('AARC terrain calibration', () => {
     expect(parseAarcTerrainWidth(undefined)).toEqual({ raw: 1, usedDefault: true })
     expect(resolveAarcTerrainWidth('9')).toBeCloseTo(125, 8)
     expect(resolveAarcTerrainWidth(undefined)).toBeCloseTo(125 / 9, 8)
+    expect(resolveAarcTerrainSourceMetrics(9)).toEqual({ widthRatio: 9, sourcePhysicalWidth: 126 })
+    expect(resolveAarcTerrainSourceMetrics(12)).toEqual({ widthRatio: 12, sourcePhysicalWidth: 168 })
   })
 })
 

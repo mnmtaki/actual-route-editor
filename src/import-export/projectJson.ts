@@ -1,4 +1,4 @@
-import type { ActualRouteProject, LabelDirection, LineBadge, LineStyleOverrides, MapElement, PresentationSettings, ProjectSettings, StationStyleOverrides } from '../data/model'
+import type { ActualRouteProject, AarcSourceMetadata, AarcTextTag, LabelDirection, LineBadge, LineStyleOverrides, MapElement, PresentationSettings, ProjectSettings, StationStyleOverrides } from '../data/model'
 import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from '../data/model'
 import { normalizeFontFamily, normalizeFontWeight, normalizeHexColor } from '../data/style'
 import { normalizeISODate, normalizeRequiredDate } from '../timeline/date'
@@ -52,6 +52,7 @@ export function parseProjectJson(text: string): ActualRouteProject {
     gridVisible: raw.gridVisible !== false,
     exportBackground: raw.exportBackground !== false,
     worldUnitsPerKm: positiveOr(raw.worldUnitsPerKm, DEFAULT_SETTINGS.worldUnitsPerKm),
+    ...(positiveOr(raw.aarcLineWidthReferenceRatio, 0) > 0 ? { aarcLineWidthReferenceRatio: positiveOr(raw.aarcLineWidthReferenceRatio, 0) } : {}),
   }
   if (distanceScale) settings.worldUnitsPerKm = 1000 / distanceScale.metersPerWorldUnit
   const source = (parsed.presentation ?? {}) as Partial<PresentationSettings>
@@ -95,8 +96,10 @@ export function parseProjectJson(text: string): ActualRouteProject {
     lines: parsed.lines.map((line, index) => { const { styleOverrides: _ignored, parentLineId: _parentLineId, ...rest }=line, styleOverrides=normalizeLineStyleOverrides(line.styleOverrides), parentLineId=typeof line.parentLineId === 'string' && line.parentLineId.trim() ? line.parentLineId.trim() : undefined; return ({ ...rest, ...(parentLineId ? { parentLineId } : {}), ...(styleOverrides?{styleOverrides}:{}), ...(typeof line.lineStyleId === 'string' && line.lineStyleId ? { lineStyleId: line.lineStyleId } : {}), ...normalizedDateFields(line), stationSequence: Array.isArray(line.stationSequence) ? line.stationSequence : [], ...(Array.isArray(line.lineBadges) ? {lineBadges:line.lineBadges.flatMap(value => normalizeLineBadge(value))} : {}), lineOrder: Number.isFinite(line.lineOrder) ? line.lineOrder : index, visible: line.visible !== false, locked: line.locked === true })}),
     stationLineRelations: Array.isArray(parsed.stationLineRelations) ? parsed.stationLineRelations.map(relation => { const { anchor: _ignoredAnchor, ...rest } = relation; const anchor = normalizeStationAnchor(relation.anchor, stationPositions.get(relation.stationId)); return ({ ...rest, ...normalizedDateFields(relation), ...(anchor ? { anchor } : {}) }) }) : [],
     openingPhases: Array.isArray(parsed.openingPhases) ? parsed.openingPhases.map(phase => ({ id: String(phase.id), lineId: String(phase.lineId), name: typeof phase.name === 'string' ? phase.name : undefined, openedAt: normalizeRequiredDate(phase.openedAt, today), segmentIds: Array.isArray(phase.segmentIds) ? phase.segmentIds.map(String) : [], stationRelationIds: Array.isArray(phase.stationRelationIds) ? phase.stationRelationIds.map(String) : [], revealStartStationId: typeof phase.revealStartStationId === 'string' ? phase.revealStartStationId : undefined, revealEndStationId: typeof phase.revealEndStationId === 'string' ? phase.revealEndStationId : undefined, showOverviewAfter: phase.showOverviewAfter === true, overriddenSegmentIds: Array.isArray(phase.overriddenSegmentIds) ? phase.overriddenSegmentIds.map(String) : [], overriddenStationRelationIds: Array.isArray(phase.overriddenStationRelationIds) ? phase.overriddenStationRelationIds.map(String) : [] })) : [],
-    geometry: { segments: parsed.geometry.segments.map(segment => ({ ...segment, ...normalizedDateFields(segment), ...(normalizeSegmentLineHistory(segment.lineHistory) ? { lineHistory: normalizeSegmentLineHistory(segment.lineHistory) } : {}), mode: segment.mode === 'smooth' || segment.mode === 'corner' || segment.mode === 'rounded' ? segment.mode : 'straight', ...(typeof segment.cornerRadius === 'number' && Number.isFinite(segment.cornerRadius) && segment.cornerRadius >= 0 ? {cornerRadius:segment.cornerRadius} : {}), structureType: segment.structureType === 'elevated' ? 'elevated' : 'underground', structureNodes: Array.isArray(segment.structureNodes) ? segment.structureNodes.filter(node => node && typeof node.id === 'string').map(node => ({ id: node.id, structureAfter: node.structureAfter === 'elevated' ? 'elevated' : 'underground', ...(typeof node.waypointId === 'string' ? { waypointId: node.waypointId } : {}), ...(typeof node.progress === 'number' && Number.isFinite(node.progress) ? { progress: Math.max(0, Math.min(1, node.progress)) } : {}) })) : [], waypoints: Array.isArray(segment.waypoints) ? segment.waypoints.map(waypoint => ({ ...waypoint, ...(typeof waypoint.cornerRadius === 'number' && Number.isFinite(waypoint.cornerRadius) && waypoint.cornerRadius >= 0 ? {cornerRadius:waypoint.cornerRadius} : {}) })) : [] })) },
+    geometry: { segments: parsed.geometry.segments.map(segment => ({ ...segment, ...normalizedDateFields(segment), ...(normalizeSegmentLineHistory(segment.lineHistory) ? { lineHistory: normalizeSegmentLineHistory(segment.lineHistory) } : {}), mode: segment.mode === 'smooth' || segment.mode === 'corner' || segment.mode === 'rounded' ? segment.mode : 'straight', ...(typeof segment.cornerRadius === 'number' && Number.isFinite(segment.cornerRadius) && segment.cornerRadius >= 0 ? {cornerRadius:segment.cornerRadius} : {}), structureType: segment.structureType === 'elevated' ? 'elevated' : 'underground', structureNodes: Array.isArray(segment.structureNodes) ? segment.structureNodes.filter(node => node && typeof node.id === 'string').map(node => ({ id: node.id, structureAfter: node.structureAfter === 'elevated' ? 'elevated' : 'underground', ...(typeof node.waypointId === 'string' ? { waypointId: node.waypointId } : {}), ...(typeof node.progress === 'number' && Number.isFinite(node.progress) ? { progress: Math.max(0, Math.min(1, node.progress)) } : {}) })) : [], waypoints: Array.isArray(segment.waypoints) ? segment.waypoints.map(waypoint => ({ ...waypoint, ...(typeof waypoint.cornerRadius === 'number' && Number.isFinite(waypoint.cornerRadius) && waypoint.cornerRadius >= 0 ? {cornerRadius:waypoint.cornerRadius} : {}), ...(waypoint.free === true ? { free: true } : {}) })) : [] })) },
     mapElements: rawMapElements.flatMap(element => normalizeMapElement(element)),
+    ...(Array.isArray(parsed.textTags) ? { textTags: parsed.textTags.flatMap(value => normalizeAarcTextTag(value)) } : {}),
+    ...(parsed.aarc && typeof parsed.aarc === 'object' ? { aarc: parsed.aarc as AarcSourceMetadata } : {}),
     ...(normalizedLineLegend ? { lineLegend: normalizedLineLegend } : {}),
     ...(normalizedBasemapPaths ? { basemapPaths: normalizedBasemapPaths } : {}),
     ...(normalizedRoads ? { roads: normalizedRoads } : {}),
@@ -164,6 +167,14 @@ function legacyTypographyFallback(stations: ActualRouteProject['stations'] | und
   if(sourceWeight===undefined)return DEFAULT_SETTINGS
   const weight=sourceWeight==='bold'?700:sourceWeight==='normal'?400:normalizeFontWeight(sourceWeight)??400
   return {...DEFAULT_SETTINGS,stationLabelFontFamily:'sans-serif',stationLabelFontWeight:weight,stationForeignLabelFontFamily:'sans-serif',stationForeignLabelFontWeight:weight,stationForeignLabelColor:'#999999'}
+}
+function normalizeAarcTextTag(value: unknown): AarcTextTag[] {
+  if (!value || typeof value !== 'object') return []
+  const item = value as Record<string, unknown>, id = typeof item.id === 'string' ? item.id : ''
+  if (!id || (item.kind !== 'LineNameLabel' && item.kind !== 'TerrainNameLabel' && item.kind !== 'FreeMapText' && item.kind !== 'MapIcon')) return []
+  const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : undefined
+  if (finite(item.x) === undefined || finite(item.y) === undefined) return []
+  return [{ ...item, id, x: finite(item.x)!, y: finite(item.y)!, kind: item.kind, ...(typeof item.source === 'object' ? { source: item.source as AarcTextTag['source'] } : {}) } as AarcTextTag]
 }
 function normalizeMapElement(value: unknown): MapElement[] {
   if (!value || typeof value !== 'object') return []

@@ -17,6 +17,8 @@ export interface AarcVisualMultipliers {
   lineWidth: number
   stationSize: number
   stationNameSize: number
+  stationSnapSize: number
+  stationNameSnapSize: number
   selectedWidthKey: string
   distinctLineWidths: number[]
 }
@@ -25,14 +27,14 @@ export interface AarcVisualCalibration {
   settings: Pick<ProjectSettings,
     'lineWidth' | 'stationSize' | 'transferMinorAxis' | 'transferEndPadding' |
     'transferDotGap' | 'stationLabelSize' | 'stationLabelFontFamily' | 'stationLabelFontWeight' | 'stationLabelColor' |
-    'stationForeignLabelSize' | 'stationForeignLabelFontFamily' | 'stationForeignLabelFontWeight' | 'stationForeignLabelColor' | 'foreignLabelGap'>
+    'stationForeignLabelSize' | 'stationForeignLabelFontFamily' | 'stationForeignLabelFontWeight' | 'stationForeignLabelColor' | 'foreignLabelGap' | 'aarcLineWidthReferenceRatio'>
   multipliers: AarcVisualMultipliers
   chineseVisualHeight: number
   foreignVisualHeight: number
 }
 
 interface AarcVisualLine { width?: unknown }
-interface AarcLineWidthMapping { staSize?: unknown; staNameSize?: unknown }
+interface AarcLineWidthMapping { staSize?: unknown; staNameSize?: unknown; staSnapSize?: unknown; staNameSnapSize?: unknown }
 
 function positive(value: unknown): number | null {
   const number = typeof value === 'number' ? value : Number(value)
@@ -55,11 +57,13 @@ export function resolveAarcVisualMultipliers(lines: AarcVisualLine[], config: un
   const lineWidth = distinctLineWidths[0]
   if (!lineWidth) return null
   const resolved = readMapping(config, lineWidth)
-  if (!resolved) return null
-  const stationSize = positive(resolved.mapping.staSize)
-  const stationNameSize = positive(resolved.mapping.staNameSize)
-  if (!stationSize || !stationNameSize) return null
-  return { lineWidth, stationSize, stationNameSize, selectedWidthKey: resolved.key, distinctLineWidths }
+  // AARC's saveStore falls back to line.width when no lineWidthMapped entry
+  // exists. Keep that source behavior instead of rejecting valid geometry.
+  const stationSize = positive(resolved?.mapping.staSize) ?? lineWidth
+  const stationNameSize = positive(resolved?.mapping.staNameSize) ?? lineWidth
+  const stationSnapSize = positive(resolved?.mapping.staSnapSize) ?? stationSize
+  const stationNameSnapSize = positive(resolved?.mapping.staNameSnapSize) ?? stationSnapSize
+  return { lineWidth, stationSize, stationNameSize, stationSnapSize, stationNameSnapSize, selectedWidthKey: resolved?.key ?? String(lineWidth), distinctLineWidths }
 }
 
 export function convertAarcVisualStyle(lines: AarcVisualLine[], config: unknown): AarcVisualCalibration | null {
@@ -76,6 +80,7 @@ export function convertAarcVisualStyle(lines: AarcVisualLine[], config: unknown)
   return {
     settings: {
       lineWidth,
+      aarcLineWidthReferenceRatio: multipliers.lineWidth,
       stationSize,
       transferMinorAxis: lineWidth * (DEFAULT_SETTINGS.transferMinorAxis / DEFAULT_SETTINGS.lineWidth),
       transferEndPadding: lineWidth * (DEFAULT_SETTINGS.transferEndPadding / DEFAULT_SETTINGS.lineWidth),

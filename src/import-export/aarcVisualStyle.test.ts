@@ -34,8 +34,11 @@ describe('AARC visual calibration', () => {
     expect(settings.transferDotGap).toBe(5)
   })
 
-  it('returns no calibration when the AARC mapping is unavailable', () => {
-    expect(convertAarcVisualStyle([{ width: 1.5 }], {})).toBeNull()
+  it('falls back to line.width when the AARC mapping is unavailable', () => {
+    const calibration = convertAarcVisualStyle([{ width: 1.5 }], {})!
+    expect(calibration.multipliers.selectedWidthKey).toBe('1.5')
+    expect(calibration.multipliers.stationSize).toBe(1.5)
+    expect(calibration.settings.lineWidth).toBeCloseTo(22.035, 3)
   })
 })
 

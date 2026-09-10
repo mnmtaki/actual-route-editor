@@ -5,6 +5,8 @@ import { convertAarcVisualStyle } from './aarcVisualStyle'
 import { parseAarcTerrainWidth, resolveAarcTerrainAppearance, resolveAarcTerrainWidth } from './aarcTerrain'
 import { aggregateAarcInterval, decodeAarcTimestamp, resolveAarcAtomicDates, type AarcTemporalSlice } from './aarcTime'
 import { buildAarcStationComponents, type AarcStationPointInput } from './aarcStationClustering'
+import { detectAarcCompoundGroups } from './aarcCompoundStations'
+import { getAarcCompoundGroupId } from '../data/compoundStation'
 import { normalizeStationAnchor } from '../data/stationAnchor'
 
 interface AarcPoint { id?: unknown; pos?: unknown; sta?: unknown; dir?: unknown; name?: unknown; nameS?: unknown; nameP?: unknown }
@@ -82,6 +84,11 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC å
   }
   const stationClustering = buildAarcStationComponents(stationPointInputs, stationMemberships, source.pointLinks)
   warnings.push(...stationClustering.warnings)
+  const compoundDetection = detectAarcCompoundGroups(
+    stationPointInputs.map(point => ({ id: point.id, x: point.x, y: point.y, sta: 1, ...(point.name ? { name: point.name } : {}), sourceOrder: point.sourceOrder })),
+    realLines.flatMap((rawLine, lineOrder) => { const id = finiteId(rawLine.id) ?? lineOrder; return [{ id, pts: Array.isArray(rawLine.pts) ? rawLine.pts.flatMap(value => { const pointId = finiteId(value); return pointId === null ? [] : [pointId] }) : [], parent: finiteId(rawLine.parent), isFake: rawLine.isFake === true, type: Number(rawLine.type) }] }),
+    stationMemberships,
+  )
   const timeSlices = (Array.isArray(source.timeSlices) ? source.timeSlices : []) as AarcTemporalSlice[]
   const terrainLines = rawLines.filter(isAarcTerrainPath)
   const ignoredHelperCount = rawLines.length - realLines.length - terrainLines.length
@@ -138,6 +145,18 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC å
     }
     stations.push(station)
     for (const memberPointId of component.pointIds) stationByPoint.set(memberPointId, station)
+  }
+
+  // Compound interchanges group passenger identity only. Every source
+  // occurrence remains its own Station so the rail geometry stays intact.
+  for (const group of compoundDetection.groups) {
+    const memberStations = [...new Set(group.pointIds.map(pointId => stationByPoint.get(pointId)?.id).filter((id): id is string => Boolean(id)))]
+    if (memberStations.length < 2) continue
+    const groupId = getAarcCompoundGroupId(group.pointIds)
+    for (const stationId of memberStations) {
+      const station = stations.find(item => item.id === stationId)
+      if (station) station.compoundGroupId = groupId
+    }
   }
 
   const ensureStation = (rawPointId: number): Station | null => stationByPoint.get(rawPointId) ?? null

@@ -1,5 +1,6 @@
 import type { ActualRouteProject } from '../data/model'
 import { getStationAnchorForLine } from '../data/stationAnchor'
+import { getCompoundStationRelations } from '../data/compoundStation'
 import { sampleSegmentNearStation } from './path'
 import { getOrientationAnchorLine, isActiveAt } from '../timeline/active'
 
@@ -42,8 +43,7 @@ export function getTransferMarkerLayout(project: ActualRouteProject, stationId: 
   const station = project.stations.find(item => item.id === stationId)
   if (!station) return { rotation: 0, centerX: 0, centerY: 0, anchorSpan: 0 }
   const visibleIdSet = visibleRelationIds ? new Set(visibleRelationIds) : null
-  const relations = project.stationLineRelations
-    .filter(relation => relation.stationId === stationId)
+  const relations = getCompoundStationRelations(project, stationId)
     .filter(relation => visibleIdSet ? visibleIdSet.has(relation.id) : isActiveAt(relation.openedAt, relation.closedAt, time))
     .filter(relation => {
       const line = project.lines.find(item => item.id === relation.lineId)
@@ -51,7 +51,7 @@ export function getTransferMarkerLayout(project: ActualRouteProject, stationId: 
     })
   const anchors: ResolvedAnchor[] = relations
     .map(relation => {
-      const point = getStationAnchorForLine(project, stationId, relation.lineId)
+      const point = getStationAnchorForLine(project, relation.stationId, relation.lineId)
       return point ? { lineId: relation.lineId, x: point.x, y: point.y } : null
     })
     .filter((point): point is ResolvedAnchor => Boolean(point))

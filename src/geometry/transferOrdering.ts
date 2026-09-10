@@ -1,6 +1,7 @@
 import type { ActualRouteProject, Line } from '../data/model'
 import { getStationAnchorForLine } from '../data/stationAnchor'
-import { getStationLineTangent } from './tangent'
+import { getCompoundStationMembers } from '../data/compoundStation'
+import { getStationLineTangent, getTransferMarkerLayout } from './tangent'
 
 const PARALLEL_TOLERANCE_DEGREES = 15
 const GEOMETRY_EPSILON = 1e-7
@@ -74,9 +75,27 @@ export function analyzeTransferSpatialOrder(project: ActualRouteProject, station
   return { sortable: true, order: sorted.map(candidate => candidate.index), commonTangentDegrees, tangentSpread, normalSpread }
 }
 
-export function sortTransferLinesForSpatialOrder(project: ActualRouteProject, stationId: string, lines: Line[]): Line[] {
+export function sortTransferLinesForSpatialOrder(project: ActualRouteProject, stationId: string, lines: Line[], time?: string): Line[] {
+  const members = getCompoundStationMembers(project, stationId)
+  if (members.length > 1) return sortCompoundTransferLines(project, stationId, lines, time)
   const analysis = analyzeTransferSpatialOrder(project, stationId, lines)
   return analysis.sortable ? analysis.order.map(index => lines[index]) : lines
+}
+
+function sortCompoundTransferLines(project: ActualRouteProject, stationId: string, lines: Line[], time?: string): Line[] {
+  if (lines.length < 2) return lines
+  const members = getCompoundStationMembers(project, stationId)
+  const date = time ?? project.timeline.currentDate
+  const layout = getTransferMarkerLayout(project, stationId, date)
+  const axis = { x: Math.cos(layout.rotation * Math.PI / 180), y: Math.sin(layout.rotation * Math.PI / 180) }
+  const candidates = lines.map((line, index) => {
+    const anchors = members.flatMap(member => project.stationLineRelations.filter(relation => relation.stationId === member.id && relation.lineId === line.id).map(relation => getStationAnchorForLine(project, member.id, line.id))).filter((anchor): anchor is { x: number; y: number } => Boolean(anchor))
+    if (!anchors.length) return { line, index, projection: 0, valid: false }
+    const center = anchors.reduce((sum, point) => ({ x: sum.x + point.x / anchors.length, y: sum.y + point.y / anchors.length }), { x: 0, y: 0 })
+    return { line, index, projection: center.x * axis.x + center.y * axis.y, valid: true }
+  })
+  if (candidates.some(candidate => !candidate.valid) || layout.anchorSpan <= 0) return lines
+  return [...candidates].sort((left, right) => left.projection - right.projection || left.index - right.index).map(candidate => candidate.line)
 }
 
 function unwrapAxisDelta(degrees: number): number {

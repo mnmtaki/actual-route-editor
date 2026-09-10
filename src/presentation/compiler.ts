@@ -6,6 +6,7 @@ import { getBeatRevealFronts, ORIGIN_HOLD_DURATION, ORIGIN_REVEAL_DURATION } fro
 import { getStationNameAt, normalizeStationNameHistory } from '../data/stationNameHistory'
 import { resolveSegmentLineAt, normalizeSegmentLineHistory } from '../data/segmentLineHistory'
 import { resolveMetersPerWorldUnit } from '../data/distance'
+import { getCompoundStationMemberIds } from '../data/compoundStation'
 export { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import type { CameraView, DirectedSegment, HistoryEvent, PresentationBeat, PresentationCompileCache, PresentationSequence } from './types'
 
@@ -181,7 +182,7 @@ function directComponent(project: ActualRouteProject, component: Segment[], earl
 function withRatios(branch: Omit<DirectedSegment, 'startRatio' | 'endRatio'>[]) { const total = branch.reduce((sum, item) => sum + item.length, 0) || branch.length; let cursor = 0; return branch.map(item => { const startRatio = cursor / total; cursor += item.length || 1; return { ...item, startRatio, endRatio: cursor / total } }) }
 export function estimateSegmentLength(project: ActualRouteProject, segment: Segment) { return getSegmentCurveLength(project, segment) }
 function stationOpensAt(project: ActualRouteProject, stationId: string, lineId: string, date: string) { const relation = project.stationLineRelations.find(item => item.stationId === stationId && item.lineId === lineId); return (relation?.openedAt || project.stations.find(item => item.id === stationId)?.openedAt || date) === date }
-function activeLineIds(project: ActualRouteProject, stationId: string, date: string) { return project.stationLineRelations.filter(relation => relation.stationId === stationId && isOpenAt(relation.openedAt, relation.closedAt, date) && isOpenAt(project.lines.find(line => line.id === relation.lineId)?.openedAt, project.lines.find(line => line.id === relation.lineId)?.closedAt, date)).map(relation => relation.lineId) }
+function activeLineIds(project: ActualRouteProject, stationId: string, date: string) { const memberIds = new Set(getCompoundStationMemberIds(project, stationId)); return project.stationLineRelations.filter(relation => memberIds.has(relation.stationId) && isOpenAt(relation.openedAt, relation.closedAt, date) && isOpenAt(project.lines.find(line => line.id === relation.lineId)?.openedAt, project.lines.find(line => line.id === relation.lineId)?.closedAt, date)).map(relation => relation.lineId) }
 function previousDate(date: string) { const value = new Date(`${date}T00:00:00Z`); value.setUTCDate(value.getUTCDate() - 1); return value.toISOString().slice(0, 10) }
 function sharesStation(a: Segment, b: Segment) { return a.fromStationId === b.fromStationId || a.fromStationId === b.toStationId || a.toStationId === b.fromStationId || a.toStationId === b.toStationId }
 function lineOrder(project: ActualRouteProject, lineId: string) { return project.lines.find(line => line.id === lineId)?.lineOrder ?? 1e9 }

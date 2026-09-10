@@ -6,6 +6,7 @@ import { stationLineKey } from './compiler'
 import { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import { collapseLineIdsByServiceFamily } from '../data/lineIdentity'
 import { worldUnitsToKilometers } from '../data/distance'
+import { getCompoundStationMemberIds, getPassengerStationIdentity, isCompoundStationCanonical } from '../data/compoundStation'
 import type { PresentationBeat, PresentationSequence, PresentationState, StationPresentationState } from './types'
 
 export function getPresentationState(project: ActualRouteProject, sequence: PresentationSequence, presentationTime: number): PresentationState {
@@ -33,19 +34,24 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
 
   const stationStates: Record<string, StationPresentationState> = {}
   for (const station of project.stations) {
-    const beatIndices = sequence.cache.stationBeatIndices[station.id] ?? [], openingIndex = beatIndices[0]
+    const memberIds = getCompoundStationMemberIds(project, station.id)
+    const beatIndices = [...new Set(memberIds.flatMap(memberId => sequence.cache.stationBeatIndices[memberId] ?? []))].sort((a, b) => a - b), openingIndex = beatIndices[0]
     const opening = openingIndex === undefined ? undefined : sequence.beats[openingIndex]
     const transition = beatIndex >= 0 && beatIndices.includes(beatIndex) ? currentBeat : null
-    const isOriginStation = Boolean(opening?.needsOriginReveal && opening.originStationId === station.id)
+    const openingMemberIds = opening ? memberIds.filter(memberId => project.stationLineRelations.some(relation => relation.stationId === memberId && relation.lineId === opening.lineId)) : memberIds
+    const openingTargets = openingMemberIds.length ? openingMemberIds : memberIds
+    const isOriginStation = Boolean(opening?.needsOriginReveal && opening.originStationId && openingTargets.includes(opening.originStationId))
     const originAnimation = isOriginStation && opening ? getOpeningAnimationState(opening, time) : null
-    const openingArrival = opening ? getStationArrivalRatio(opening, station.id) : 0
+    const openingArrival = opening ? Math.min(...openingTargets.map(memberId => getStationArrivalRatio(opening, memberId))) : 0
     const openingArrivalTime = opening ? (isOriginStation ? opening.originRevealStart : opening.revealStart + inverseLineEasing(openingArrival) * opening.revealDuration) : 0
     const markerProgress = originAnimation ? originAnimation.originOpacity : opening ? easing.station(clamp((time - openingArrivalTime) / PRESENTATION_ANIMATION.stationFadeDuration)) : 1
     const labelProgress = originAnimation ? originAnimation.originLabelOpacity : opening ? easing.station(clamp((time - openingArrivalTime - PRESENTATION_ANIMATION.labelDelay) / PRESENTATION_ANIMATION.labelFadeDuration)) : 1
-    const arrival = transition ? getStationArrivalRatio(transition, station.id) : 0
-    const transitionIsOrigin = Boolean(transition?.needsOriginReveal && transition.originStationId === station.id)
+    const transitionMemberIds = transition ? memberIds.filter(memberId => project.stationLineRelations.some(relation => relation.stationId === memberId && relation.lineId === transition.lineId)) : memberIds
+    const transitionTargets = transitionMemberIds.length ? transitionMemberIds : memberIds
+    const arrival = transition ? Math.min(...transitionTargets.map(memberId => getStationArrivalRatio(transition, memberId))) : 0
+    const transitionIsOrigin = Boolean(transition?.needsOriginReveal && transition.originStationId && transitionTargets.includes(transition.originStationId))
     const transitionArrivalTime = transition ? (transitionIsOrigin ? transition.originRevealStart : transition.revealStart + inverseLineEasing(arrival) * transition.revealDuration) : 0
-    const targetLineIds = activeLineIds(sequence, station.id, transition?.historyDate ?? historyDate)
+    const targetLineIds = activeLineIds(project, sequence, station.id, transition?.historyDate ?? historyDate)
     const previousLineIds = transition ? presentationVisibleLineIds(project,sequence,station.id,historyDate,transitionArrivalTime-1e-6) : presentationVisibleLineIds(project,sequence,station.id,historyDate,time)
     const lineIds = presentationVisibleLineIds(project,sequence,station.id,historyDate,time)
     const previousPassengerLineIds = collapseLineIdsByServiceFamily(project, previousLineIds)
@@ -53,7 +59,7 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
     const relationSetChanged=previousPassengerLineIds.length!==passengerLineIds.length||previousPassengerLineIds.some((id,index)=>id!==passengerLineIds[index])
     const transferProgress = transition && relationSetChanged ? easing.transfer(clamp((time - transitionArrivalTime) / PRESENTATION_ANIMATION.transferMorphDuration)) : 1
     const openingHasStarted = !opening || time >= (isOriginStation ? opening.originRevealStart : opening.revealStart), historicallyEligible = targetLineIds.length > 0, isClosed = !historicallyEligible && openingHasStarted
-    const closingNow = Boolean(currentBeat?.type.includes('CLOSURE') && currentBeat.stationIds.includes(station.id) && previousLineIds.length > 0 && lineIds.length === 0)
+    const closingNow = Boolean(currentBeat?.type.includes('CLOSURE') && memberIds.some(memberId => currentBeat.stationIds.includes(memberId)) && previousLineIds.length > 0 && lineIds.length === 0)
     const closureOpacity = closingNow && currentBeat ? 1 - easing.transfer(clamp((time - currentBeat.revealStart) / Math.max(.000001, currentBeat.revealDuration))) : 0
     const transitionAnimating = Boolean(transition && time < transition.revealEnd)
     const historicalState: StationPresentationState['historicalState'] = opening && time < (isOriginStation ? opening.originRevealStart : opening.revealStart) ? 'future' : transitionAnimating ? 'current-partial' : historicallyEligible ? 'previous-stable' : 'future'
@@ -65,11 +71,12 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
   }
 
   const operatingLengthKm = project.geometry.segments.reduce((sum, segment) => { const state = segmentStates[segment.id]; return sum + worldUnitsToKilometers((sequence.cache.segmentLengths[segment.id] ?? 0) * state.revealProgress * state.opacity, project) }, 0)
-  const stationCount = Object.values(stationStates).filter(state => state.opacity > 0 && state.lineIds.length > 0).length
+  const countedStations = new Set<string>()
+  const stationCount = project.stations.reduce((count, station) => { const state = stationStates[station.id], identity = getPassengerStationIdentity(project, station.id); if (!state || state.opacity <= 0 || state.lineIds.length === 0 || countedStations.has(identity)) return count; countedStations.add(identity); return count + 1 }, 0)
   const lines = project.lines.filter(line => line.visible).map(line => ({
     lineId: line.id,
     operatingLengthKm: project.geometry.segments.filter(segment => (segmentStates[segment.id]?.lineId ?? segment.lineId) === line.id).reduce((sum, segment) => { const state = segmentStates[segment.id]; return sum + worldUnitsToKilometers((sequence.cache.segmentLengths[segment.id] ?? 0) * state.revealProgress * state.opacity, project) }, 0),
-    stationCount: project.stations.filter(station => { const state = stationStates[station.id]; return state?.opacity > 0 && state.lineIds.includes(line.id) }).length,
+    stationCount: project.stations.filter(station => isCompoundStationCanonical(project, station) && (() => { const state = stationStates[station.id]; return state?.opacity > 0 && state.lineIds.includes(line.id) })()).length,
   })).filter(statistic => statistic.operatingLengthKm > .001 || statistic.stationCount > 0)
   const camera = sequence.settings.cameraMode === 'fixed' || !currentBeat || beatIndex < 0 ? sequence.fixedCamera : evaluateCameraTrack(sequence.cameraTracks[beatIndex], currentBeat, time)
   return { presentationTime: time, historyDate, dateLabel: formatDateLabel(historyDate), currentBeat, currentEvent: currentBeat, globalRevealProgress, currentRevealedDistance, revealFronts, statistics: { operatingLengthKm, stationCount }, lineStatistics: lines, segmentStates, stationStates, camera }
@@ -78,11 +85,19 @@ export function getBeatLocalProgress(beat: PresentationBeat | null, time: number
 export function getBeatGlobalRevealProgress(beat: PresentationBeat, time: number) { return easing.line(getBeatLocalProgress(beat, time)) }
 function beatSegmentProgress(beat: PresentationBeat, segmentId: string, time: number) { if (time < beat.revealStart) return 0; if (time >= beat.revealEnd) return 1; return getBeatSegmentRevealProgress(beat, segmentId, getBeatGlobalRevealProgress(beat, time)) }
 function beatSegmentDirection(beat: PresentationBeat, segmentId: string, segmentFrom: string): 'from' | 'to' { const directed = beat.branches.flat().find(item => item.segmentId === segmentId); return !directed || directed.fromStationId === segmentFrom ? 'from' : 'to' }
-function activeLineIds(sequence: PresentationSequence, stationId: string, date: string) { return sequence.cache.activeLineIdsByDate[date]?.[stationId] ?? [] }
-function presentationVisibleLineIds(project:ActualRouteProject,sequence:PresentationSequence,stationId:string,date:string,time:number){return activeLineIds(sequence,stationId,date).filter(lineId=>{const beatIndex=sequence.cache.stationLineOpeningBeat[stationLineKey(stationId,lineId)];if(beatIndex===undefined)return true;const beat=sequence.beats[beatIndex],arrival=getStationArrivalRatio(beat,stationId),isOrigin=Boolean(beat.needsOriginReveal&&beat.originStationId===stationId),arrivalTime=isOrigin?beat.originRevealStart:beat.revealStart+inverseLineEasing(arrival)*beat.revealDuration;return time+1e-9>=arrivalTime&&Boolean(project.stationLineRelations.find(relation=>relation.stationId===stationId&&relation.lineId===lineId))})}
+function activeLineIds(project: ActualRouteProject, sequence: PresentationSequence, stationId: string, date: string) { return [...new Set(getCompoundStationMemberIds(project, stationId).flatMap(memberId => sequence.cache.activeLineIdsByDate[date]?.[memberId] ?? []))] }
+function presentationVisibleLineIds(project:ActualRouteProject,sequence:PresentationSequence,stationId:string,date:string,time:number){
+  const memberIds = getCompoundStationMemberIds(project, stationId)
+  return activeLineIds(project, sequence, stationId, date).filter(lineId => memberIds.filter(memberId => project.stationLineRelations.some(relation => relation.stationId === memberId && relation.lineId === lineId)).some(memberId => {
+    const beatIndex = sequence.cache.stationLineOpeningBeat[stationLineKey(memberId,lineId)]
+    if (beatIndex === undefined) return true
+    const beat = sequence.beats[beatIndex], arrival = getStationArrivalRatio(beat, memberId), isOrigin = Boolean(beat.needsOriginReveal && beat.originStationId === memberId), arrivalTime = isOrigin ? beat.originRevealStart : beat.revealStart + inverseLineEasing(arrival) * beat.revealDuration
+    return time + 1e-9 >= arrivalTime
+  }))
+}
 function presentationVisibleRelationIds(project: ActualRouteProject, stationId: string, date: string, lineIds: string[]) {
   const representativeLineIds = collapseLineIdsByServiceFamily(project, lineIds)
-  return project.stationLineRelations.filter(relation => relation.stationId === stationId && representativeLineIds.includes(relation.lineId) && active(relation.openedAt, relation.closedAt, date)).map(relation => relation.id)
+  return getCompoundStationMemberIds(project, stationId).flatMap(memberId => project.stationLineRelations.filter(relation => relation.stationId === memberId && representativeLineIds.includes(relation.lineId) && active(relation.openedAt, relation.closedAt, date)).map(relation => relation.id))
 }
 function active(openedAt: string | null | undefined, closedAt: string | null | undefined, date: string) { return (!openedAt || openedAt <= date) && (!closedAt || date < closedAt) }
 function historicallyVisible(openedAt: string | null | undefined, closedAt: string | null | undefined, date: string) { return active(openedAt, closedAt, date) }

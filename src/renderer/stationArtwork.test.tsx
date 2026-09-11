@@ -2,6 +2,7 @@ import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { demoProject } from '../data/demo'
 import { createDefaultStationStyle } from '../data/stationStyles'
+import { getBuiltInStationStyle } from '../data/presetRegistry'
 import { exportSvg } from '../import-export/svgExport'
 import { StationMarker } from './StationMarker'
 import { getStationStyle, renderStationArtwork } from './stationStyles'
@@ -103,5 +104,18 @@ describe('shared ordinary StationArtwork', () => {
     const { container } = render(<svg>{getStationStyle('default').renderPresentation({ station, previousLines: [], lines: [], size: 11, minorAxis: 19.5, dotGap: 2.25, endPadding: 5.15, rotation: 0, morphProgress: 0, opacity: 1, scale: 1, ordinaryStyle: current })}</svg>)
     expect(container.querySelector('[data-station-shape="diamond"]')).toBeTruthy()
     expect(exportSvg(container.querySelector('svg')!, true)).toContain('data-station-shape="diamond"')
+  })
+
+  it('renders built-in Shanghai side markers and Guangzhou number pills through the shared artwork', () => {
+    const shanghai = getBuiltInStationStyle('station.shanghai.basic')!
+    const side = render(<svg>{renderStationArtwork({ station, style: shanghai, lineColor: '#d34b44', centerX: 116, centerY: 64 })}</svg>)
+    expect(side.container.querySelector('[data-station-style-id="station.shanghai.basic"]')).toBeTruthy()
+    expect(side.container.querySelector('[data-station-shape="square"]')).toHaveAttribute('fill', '#d34b44')
+    expect(side.container.querySelector('[data-station-shape="square"]')).toHaveAttribute('x', '107')
+    side.unmount()
+    const guangzhou = getBuiltInStationStyle('station.guangzhou.basic')!
+    const pill = render(<svg>{renderStationArtwork({ station, style: guangzhou, lineColor: '#d34b44', lineCode: '1', stationCode: '01' })}</svg>)
+    expect(pill.container.querySelector('[data-station-shape="capsule"]')).toBeTruthy()
+    expect(pill.container.querySelector('.station-number-pill-label')).toHaveTextContent('1 | 01')
   })
 })

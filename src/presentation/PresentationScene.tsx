@@ -7,6 +7,9 @@ import { SegmentArtwork, StructureRunArtwork } from '../renderer/segmentStyles'
 import { compileElevatedRuns } from '../data/structure'
 import { getStationStyle } from '../renderer/stationStyles'
 import { resolveStationStyle } from '../data/stationStyles'
+import { resolveTransferStyle } from '../data/transferStyles'
+import { getLineDisplayCode, getStationCodeForLine, renderTransferArtwork } from '../renderer/transferArtwork'
+import { resolveSideMarkerPlacement } from '../geometry/sideMarker'
 import { StationLabel } from '../renderer/StationLabel'
 import { MapElementsLayer } from '../renderer/MapElements'
 import { AarcTextTagsLayer } from '../renderer/AarcTextTags'
@@ -25,7 +28,7 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
   const state = useMemo(() => getPresentationState(project, sequence, time), [project, sequence, time])
   // Presentation uses the same transfer renderer and ordinary station style
   // resolver as the editor/export scene.
-  const transferStyle = getStationStyle('default')
+  const defaultTransferDefinition = getStationStyle('default')
   const lineMap = useMemo(() => new Map(project.lines.map(line => [line.id, line])), [project.lines])
   const historicalProject = useMemo(() => ({ ...project, geometry: { ...project.geometry, segments: project.geometry.segments.map(segment => ({ ...segment, lineId: state.segmentStates[segment.id]?.lineId ?? segment.lineId })) } }), [project, state.segmentStates])
   const segmentArtwork = useMemo(() => project.geometry.segments.map(segment => { const lineId = state.segmentStates[segment.id]?.lineId ?? segment.lineId; const historicalSegment = historicalProject.geometry.segments.find(item => item.id === segment.id) ?? segment; const line = lineMap.get(lineId); return { segment, line: line ? lineWithEffectiveColor(project, line) : undefined, path: getSegmentPath(historicalProject, historicalSegment) } }), [project, state.segmentStates, historicalProject, lineMap])
@@ -47,8 +50,18 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
       const stationState = state.stationStates[station.id]
       if (!stationState || stationState.opacity <= 0) return null
       const lines = collapseLinesByServiceFamily(project, findLines(stationState.lineIds)), previousLines = collapseLinesByServiceFamily(project, findLines(stationState.previousLineIds)), renderLines = lines.length > 1 ? sortTransferLinesForSpatialOrder(project, station.id, lines, state.historyDate).map(line => lineWithEffectiveColor(project, line)) : lines.map(line => lineWithEffectiveColor(project, line)), renderPreviousLines = previousLines.length > 1 ? sortTransferLinesForSpatialOrder(project, station.id, previousLines, state.historyDate).map(line => lineWithEffectiveColor(project, line)) : previousLines.map(line => lineWithEffectiveColor(project, line)), stationStyle = effectiveStationStyle(station, project.settings)
+      const resolvedTransferStyle = resolveTransferStyle(project, station)
+      const renderStyle = resolveStationStyle(project, station)
+      const primaryLine = renderLines[0]
+      const side = primaryLine && (renderStyle.template === 'sideMarker' || renderStyle.placement === 'side') ? resolveSideMarkerPlacement(project, station.id, primaryLine.id, renderStyle.sideOffset ?? 14, renderStyle.preferredSide ?? 'auto') : undefined
+      const ordinaryArtwork = defaultTransferDefinition.renderOrdinary({ station, size: renderStyle.width, style: renderStyle, lineColor: primaryLine?.color, centerX: side?.x, centerY: side?.y, lineCode: primaryLine ? getLineDisplayCode(primaryLine) : '', stationCode: primaryLine ? getStationCodeForLine(project, station.id, primaryLine.id) : '' })
+      const transferArtwork = resolvedTransferStyle.id === 'transfer.actualroute.default'
+        ? defaultTransferDefinition.renderPresentation({ station, lines: renderLines, previousLines: renderPreviousLines, size: stationStyle.stationSize, minorAxis: stationStyle.transferMinorAxis, dotGap: stationStyle.transferDotGap, endPadding: stationStyle.transferEndPadding, rotation: transferLayouts.get(station.id)?.rotation ?? 0, centerX: transferLayouts.get(station.id)?.centerX, centerY: transferLayouts.get(station.id)?.centerY, minMajorAxis: transferLayouts.get(station.id)?.anchorSpan, morphProgress: stationState.transferProgress, opacity: stationState.opacity, scale: stationState.scale, ordinaryStyle: renderStyle })
+        : lines.length > 1
+          ? <g opacity={stationState.opacity} transform={`translate(${station.x} ${station.y}) scale(${stationState.scale}) translate(${-station.x} ${-station.y})`}>{renderTransferArtwork({ project, station, lines: renderLines, style: resolvedTransferStyle, size: stationStyle.stationSize, minorAxis: stationStyle.transferMinorAxis, dotGap: stationStyle.transferDotGap, endPadding: stationStyle.transferEndPadding, rotation: transferLayouts.get(station.id)?.rotation ?? 0, centerX: transferLayouts.get(station.id)?.centerX, centerY: transferLayouts.get(station.id)?.centerY, minMajorAxis: transferLayouts.get(station.id)?.anchorSpan })}</g>
+          : <g opacity={stationState.opacity} transform={`translate(${station.x} ${station.y}) scale(${stationState.scale}) translate(${-station.x} ${-station.y})`}>{ordinaryArtwork}</g>
       return <g key={station.id} data-station-id={station.id} data-station-opacity={stationState.opacity.toFixed(4)} data-label-opacity={stationState.labelOpacity.toFixed(4)} data-transfer-progress={stationState.transferProgress.toFixed(4)} data-historical-state={stationState.historicalState} data-visible-line-ids={stationState.lineIds.join(',')} data-visible-relation-ids={stationState.visibleRelationIds.join(',')}>
-        {transferStyle.renderPresentation({ station, lines: renderLines, previousLines: renderPreviousLines, size: stationStyle.stationSize, minorAxis: stationStyle.transferMinorAxis, dotGap: stationStyle.transferDotGap, endPadding: stationStyle.transferEndPadding, rotation: transferLayouts.get(station.id)?.rotation ?? 0, centerX: transferLayouts.get(station.id)?.centerX, centerY: transferLayouts.get(station.id)?.centerY, minMajorAxis: transferLayouts.get(station.id)?.anchorSpan, morphProgress: stationState.transferProgress, opacity: stationState.opacity, scale: stationState.scale, ordinaryStyle: resolveStationStyle(project, station) })}
+        {transferArtwork}
         {sequence.settings.showLabels && project.settings.labelsVisible && !station.labelHidden && <StationLabel station={station} settings={project.settings} showForeign={sequence.settings.showForeignStationNames && project.settings.showForeignStationNames} presentation opacity={stationState.labelOpacity} {...getStationNameAt(station,state.historyDate)} />}
       </g>
     })}</g>

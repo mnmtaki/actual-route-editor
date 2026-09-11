@@ -24,6 +24,7 @@ export function createEmptyProject(): ActualRouteProject {
     settings: { ...DEFAULT_SETTINGS },
     stationStyles: [createDefaultStationStyle(DEFAULT_SETTINGS.stationSize)],
     defaultStationStyleId: 'default',
+    defaultTransferStyleId: 'transfer.actualroute.default',
   }
 }
 

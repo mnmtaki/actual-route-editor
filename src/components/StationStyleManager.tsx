@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react'
-import type { ActualRouteProject, StationStyle, StationStyleColorMode, StationStyleShape } from '../data/model'
+import type { ActualRouteProject, StationStyle, StationStyleColorMode, StationStyleMarkerColorMode, StationStylePlacement, StationStyleShape, StationStyleTemplate } from '../data/model'
 import { assignStationStyle, createStationStyle, deleteStationStyle, getStationStyles, setProjectDefaultStationStyle } from '../data/stationStyles'
 import { StationArtwork } from '../renderer/stationStyles'
 import { ColorControl } from './TypographyControls'
 
 const SHAPES: Array<[StationStyleShape, string]> = [['circle', '圆形'], ['square', '方形'], ['roundedRect', '圆角矩形'], ['capsule', '胶囊形'], ['diamond', '菱形']]
 const MODES: Array<[StationStyleColorMode, string]> = [['fixed', '固定颜色'], ['background', '跟随画布背景'], ['none', '不显示']]
+const TEMPLATES: Array<[StationStyleTemplate, string]> = [['standard', '标准图形'], ['sideMarker', '线路旁标记'], ['numberPill', '线路编号药丸']]
+const PLACEMENTS: Array<[StationStylePlacement, string]> = [['center', '车站中心'], ['side', '线路旁']]
+const MARKER_COLOR_MODES: Array<[StationStyleMarkerColorMode, string]> = [['fixed', '固定颜色'], ['service', '跟随线路颜色']]
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => <label className="field"><span>{label}</span>{children}</label>
 
 function NumberField({ label, value, min, max, step, onChange }: { label: string; value: number; min: number; max?: number; step: number; onChange: (value: number) => void }) {
@@ -61,6 +64,16 @@ export function StationStyleManager({ project, onChange, compact = false, select
         <label className="toggle-row">锁定宽高比<input type="checkbox" checked={selected.lockAspect} onChange={event => update(style => { style.lockAspect = event.target.checked; if (style.lockAspect) style.height = style.width })} /></label>
         <NumberField label="圆角" value={selected.cornerRadius} min={0} step={0.5} onChange={value => update(style => { style.cornerRadius = value })} />
         <NumberField label="旋转" value={selected.rotation} min={-360} max={360} step={1} onChange={value => update(style => { style.rotation = value })} />
+        <Field label="绘制模板"><select value={selected.template ?? 'standard'} onChange={event => update(style => { style.template = event.target.value as StationStyleTemplate })}>{TEMPLATES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field>
+        <Field label="标记位置"><select value={selected.placement ?? 'center'} onChange={event => update(style => { style.placement = event.target.value as StationStylePlacement })}>{PLACEMENTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field>
+        {(selected.placement === 'side' || selected.template === 'sideMarker') && <>
+          <NumberField label="线路旁偏移" value={selected.sideOffset ?? 14} min={0} step={0.5} onChange={value => update(style => { style.sideOffset = value })} />
+          <Field label="优先侧"><select value={selected.preferredSide ?? 'auto'} onChange={event => update(style => { style.preferredSide = event.target.value as StationStyle['preferredSide'] })}><option value="auto">自动</option><option value="left">左侧</option><option value="right">右侧</option></select></Field>
+        </>}
+        <Field label="标记颜色"><select value={selected.markerColorMode ?? 'fixed'} onChange={event => update(style => { style.markerColorMode = event.target.value as StationStyleMarkerColorMode })}>{MARKER_COLOR_MODES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field>
+        {(selected.markerColorMode ?? 'fixed') === 'fixed' && <ColorControl label="标记固定颜色" value={selected.markerColor ?? selected.fillColor} onChange={value => update(style => { style.markerColor = value })} />}
+        <label className="toggle-row">显示线路编号<input type="checkbox" checked={selected.showLineCode === true} onChange={event => update(style => { style.showLineCode = event.target.checked })} /></label>
+        <label className="toggle-row">显示车站编号<input type="checkbox" checked={selected.showStationCode === true} onChange={event => update(style => { style.showStationCode = event.target.checked })} /></label>
       </section>
       <section className="style-section"><h3>填充</h3>
         <label className="toggle-row">启用填充<input type="checkbox" checked={selected.fillEnabled} onChange={event => update(style => { style.fillEnabled = event.target.checked })} /></label>

@@ -1,5 +1,6 @@
 import { uid } from './model'
-import type { ActualRouteProject, Station, StationStyle, StationStyleColorMode, StationStyleShape } from './model'
+import type { ActualRouteProject, Station, StationStyle, StationStyleColorMode, StationStyleMarkerColorMode, StationStylePlacement, StationStyleTemplate, StationStyleShape } from './model'
+import { getBuiltInStationStyle } from './presetRegistry'
 
 export const DEFAULT_STATION_STYLE_ID = 'default'
 
@@ -28,6 +29,15 @@ export function createDefaultStationStyle(size = 11): StationStyle {
     haloWidth: 0,
     haloGap: 0,
     haloOpacity: 1,
+    template: 'standard',
+    placement: 'center',
+    sideOffset: 14,
+    preferredSide: 'auto',
+    markerColorMode: 'fixed',
+    markerColor: 'white',
+    markerPadding: 4,
+    showLineCode: false,
+    showStationCode: false,
     builtin: true,
   }
 }
@@ -40,6 +50,9 @@ const nonNegative = (value: unknown, fallback: number) => Math.max(0, finite(val
 const opacity = (value: unknown, fallback: number) => Math.max(0, Math.min(1, finite(value, fallback)))
 const color = (value: unknown, fallback: string) => typeof value === 'string' && (value.trim().toLowerCase() === 'white' || /^#[0-9a-f]{6}$/i.test(value.trim())) ? value.trim().toLowerCase() : fallback
 const mode = (value: unknown, fallback: StationStyleColorMode): StationStyleColorMode => typeof value === 'string' && colorModes.includes(value as StationStyleColorMode) ? value as StationStyleColorMode : fallback
+const templates: StationStyleTemplate[] = ['standard', 'sideMarker', 'numberPill']
+const placements: StationStylePlacement[] = ['center', 'side']
+const markerModes: StationStyleMarkerColorMode[] = ['fixed', 'service']
 
 export function normalizeStationStyle(value: unknown, fallback?: StationStyle): StationStyle | null {
   if (!value || typeof value !== 'object') return fallback ? { ...fallback } : null
@@ -50,6 +63,10 @@ export function normalizeStationStyle(value: unknown, fallback?: StationStyle): 
   const shape = typeof raw.shape === 'string' && shapes.includes(raw.shape as StationStyleShape) ? raw.shape as StationStyleShape : base.shape
   const lockAspect = raw.lockAspect !== false
   const width = positive(raw.width, base.width)
+  const template = typeof raw.template === 'string' && templates.includes(raw.template as StationStyleTemplate) ? raw.template as StationStyleTemplate : (base.template ?? 'standard')
+  const placement = typeof raw.placement === 'string' && placements.includes(raw.placement as StationStylePlacement) ? raw.placement as StationStylePlacement : (base.placement ?? 'center')
+  const markerColorMode = typeof raw.markerColorMode === 'string' && markerModes.includes(raw.markerColorMode as StationStyleMarkerColorMode) ? raw.markerColorMode as StationStyleMarkerColorMode : (base.markerColorMode ?? 'fixed')
+  const preferredSide = raw.preferredSide === 'left' || raw.preferredSide === 'right' ? raw.preferredSide : (base.preferredSide ?? 'auto')
   return {
     id,
     name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : base.name,
@@ -73,6 +90,15 @@ export function normalizeStationStyle(value: unknown, fallback?: StationStyle): 
     haloWidth: nonNegative(raw.haloWidth, base.haloWidth),
     haloGap: nonNegative(raw.haloGap, base.haloGap),
     haloOpacity: opacity(raw.haloOpacity, base.haloOpacity),
+    template,
+    placement,
+    sideOffset: nonNegative(raw.sideOffset, base.sideOffset ?? 14),
+    preferredSide,
+    markerColorMode,
+    markerColor: color(raw.markerColor, base.markerColor ?? 'white'),
+    markerPadding: nonNegative(raw.markerPadding, base.markerPadding ?? 4),
+    showLineCode: raw.showLineCode === true || (raw.showLineCode === undefined && base.showLineCode === true),
+    showStationCode: raw.showStationCode === true || (raw.showStationCode === undefined && base.showStationCode === true),
     ...(id === DEFAULT_STATION_STYLE_ID ? { builtin: true } : {}),
   }
 }
@@ -114,8 +140,9 @@ export function ensureProjectStationStyles(project: ActualRouteProject): Station
 export function resolveStationStyle(project: ActualRouteProject, station: Station): StationStyle {
   const styles = getStationStyles(project)
   const fallback = styles.find(style => style.id === DEFAULT_STATION_STYLE_ID) ?? createDefaultStationStyle(project.settings?.stationSize)
-  const projectDefault = styles.find(style => style.id === (project.defaultStationStyleId ?? DEFAULT_STATION_STYLE_ID)) ?? fallback
-  const selected = station.stationStyleId === undefined ? projectDefault : styles.find(style => style.id === station.stationStyleId) ?? projectDefault
+  const projectDefaultId = project.defaultStationStyleId ?? DEFAULT_STATION_STYLE_ID
+  const projectDefault = styles.find(style => style.id === projectDefaultId) ?? getBuiltInStationStyle(projectDefaultId) ?? fallback
+  const selected = station.stationStyleId === undefined ? projectDefault : styles.find(style => style.id === station.stationStyleId) ?? getBuiltInStationStyle(station.stationStyleId) ?? projectDefault
   // Build 16/legacy projects may still carry a sparse stationSize override. Keep
   // that old visual contract until the station receives a StationStyle reference.
   const legacySize = station.stationStyleId === undefined ? station.styleOverrides?.stationSize : undefined
@@ -127,7 +154,7 @@ export function resolveStationStyle(project: ActualRouteProject, station: Statio
 
 export function setProjectDefaultStationStyle(project: ActualRouteProject, styleId: string): ActualRouteProject {
   const next = structuredClone(project)
-  if (getStationStyles(next).some(style => style.id === styleId)) next.defaultStationStyleId = styleId
+  if (getStationStyles(next).some(style => style.id === styleId) || getBuiltInStationStyle(styleId)) next.defaultStationStyleId = styleId
   return next
 }
 
@@ -135,7 +162,7 @@ export const setDefaultStationStyle = setProjectDefaultStationStyle
 
 export function assignStationStyle(project: ActualRouteProject, stationIds: string[], styleId?: string): ActualRouteProject {
   const next = structuredClone(project)
-  const validId = styleId && getStationStyles(next).some(style => style.id === styleId) ? styleId : undefined
+  const validId = styleId && (getStationStyles(next).some(style => style.id === styleId) || getBuiltInStationStyle(styleId)) ? styleId : undefined
   const ids = new Set(stationIds)
   for (const station of next.stations) {
     if (!ids.has(station.id)) continue
@@ -160,7 +187,7 @@ export function deleteStationStyle(project: ActualRouteProject, styleId: string)
 /** Create a user-owned style from an existing library entry. */
 export function createStationStyle(project: ActualRouteProject, sourceId?: string, name?: string): { project: ActualRouteProject; styleId: string } {
   const styles = getStationStyles(project)
-  const source = styles.find(style => style.id === sourceId) ?? styles[0]
+  const source = styles.find(style => style.id === sourceId) ?? getBuiltInStationStyle(sourceId) ?? styles[0]
   const existingIds = new Set(styles.map(style => style.id))
   let styleId = uid('station_style')
   while (existingIds.has(styleId)) styleId = uid('station_style')

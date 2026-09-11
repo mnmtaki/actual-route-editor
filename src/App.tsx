@@ -1232,6 +1232,7 @@ export default function App() {
         {styleOpen && (
           <StyleDrawer
             project={history.project}
+            selectedStationIds={selectedStationIds}
             onChange={history.commit}
             onPreviewChange={history.replace}
             onCommitChange={history.commitFrom}

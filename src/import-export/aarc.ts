@@ -3,7 +3,7 @@ import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from '../data/model'
 import { reconstructAarcLineGeometry, type AarcGeometryPoint } from './aarcGeometry'
 import { convertAarcVisualStyle } from './aarcVisualStyle'
 import { convertAarcLineStyles } from './aarcStyle'
-import { parseAarcTerrainWidth, resolveAarcTerrainAppearance, resolveAarcTerrainSourceMetrics, resolveAarcTerrainRenderWidth } from './aarcTerrain'
+import { parseAarcTerrainWidth, resolveAarcTerrainAppearance, resolveAarcTerrainSourceMetrics } from './aarcTerrain'
 import { aggregateAarcInterval, decodeAarcTimestamp, resolveAarcAtomicDates, resolveAarcStyleSliceForInterval, resolveAarcTimeSliceForInterval, type AarcStyleSlice, type AarcTemporalSlice } from './aarcTime'
 import { buildAarcStationComponents, createAarcFreeSnapCandidateResolver, type AarcStationPointInput } from './aarcStationClustering'
 import { detectAarcCompoundGroups, type AarcCompoundPoint } from './aarcCompoundStations'
@@ -131,7 +131,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
     if (rawLine.zIndex !== undefined && rawLine.zIndex !== null && !Number.isFinite(rawZIndex)) warnings.push(`AARC 地形路径 ${sourceLineId} 的 zIndex 无效，已使用默认层级 0`)
     const closed = rawLine.isFilled === true || repeated
     const terrainMetrics = resolveAarcTerrainSourceMetrics(width.raw, source.config.lineWidth)
-    const path: BasemapPath = { id: `aarc-basemap-${sourceLineId}`, ...(typeof rawLine.name === 'string' && rawLine.name ? { name: rawLine.name } : {}), category: appearance.category, points, color: appearance.color, width: resolveAarcTerrainRenderWidth(width.raw), opacity: 1, closed, isFilled: rawLine.isFilled === true, zIndex, visible: true, locked: false, source: { format: 'aarc', sourceLineId, sourceWidthRatio: terrainMetrics.widthRatio, sourcePhysicalWidth: terrainMetrics.sourcePhysicalWidth, sourceColor: typeof rawLine.color === 'string' ? rawLine.color : undefined, sourceColorPre: finiteNumber(rawLine.colorPre), sourceStyleId: finiteNumber(rawLine.style), sourceZIndex: zIndex, kind: 'terrain', raw: cloneRecord(rawLine) } }
+    const path: BasemapPath = { id: `aarc-basemap-${sourceLineId}`, ...(typeof rawLine.name === 'string' && rawLine.name ? { name: rawLine.name } : {}), category: appearance.category, points, color: appearance.color, width: terrainMetrics.sourcePhysicalWidth, opacity: 1, closed, isFilled: rawLine.isFilled === true, zIndex, visible: true, locked: false, source: { format: 'aarc', sourceLineId, sourceWidthRatio: terrainMetrics.widthRatio, sourcePhysicalWidth: terrainMetrics.sourcePhysicalWidth, sourceColor: typeof rawLine.color === 'string' ? rawLine.color : undefined, sourceColorPre: finiteNumber(rawLine.colorPre), sourceStyleId: finiteNumber(rawLine.style), sourceZIndex: zIndex, kind: 'terrain', raw: cloneRecord(rawLine) } }
     return [path]
   })
   const stations: Station[] = []

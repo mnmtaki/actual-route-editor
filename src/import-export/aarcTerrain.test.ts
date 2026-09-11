@@ -4,7 +4,7 @@ import rawPinglan from './__fixtures__/平岚.aarc (9).json'
 import rawMinimal from './__fixtures__/测试.aarc (1).json'
 import { convertAarcToActualRouteProject } from './aarc'
 import { parseProjectJson, serializeProject } from './projectJson'
-import { isValidAarcTerrainColor, parseAarcTerrainWidth, resolveAarcTerrainAppearance, resolveAarcTerrainPreset, resolveAarcTerrainSourceMetrics, resolveAarcTerrainWidth, AARC_TERRAIN_WORLD_WIDTH_PER_SOURCE_UNIT } from './aarcTerrain'
+import { isValidAarcTerrainColor, parseAarcTerrainWidth, resolveAarcTerrainAppearance, resolveAarcTerrainPreset, resolveAarcTerrainSourceMetrics } from './aarcTerrain'
 
 describe('AARC terrain calibration', () => {
   it('resolves known presets before raw colors', () => {
@@ -21,14 +21,14 @@ describe('AARC terrain calibration', () => {
     expect(isValidAarcTerrainColor('#abc')).toBe(false)
   })
 
-  it('converts source width to world width and defaults missing width to one', () => {
-    expect(AARC_TERRAIN_WORLD_WIDTH_PER_SOURCE_UNIT).toBeCloseTo(125 / 9, 10)
+  it('resolves source semantic width using normalized config.lineWidth', () => {
     expect(parseAarcTerrainWidth('9')).toEqual({ raw: 9, usedDefault: false })
     expect(parseAarcTerrainWidth(undefined)).toEqual({ raw: 1, usedDefault: true })
-    expect(resolveAarcTerrainWidth('9')).toBeCloseTo(125, 8)
-    expect(resolveAarcTerrainWidth(undefined)).toBeCloseTo(125 / 9, 8)
-    expect(resolveAarcTerrainSourceMetrics(9)).toEqual({ widthRatio: 9, sourcePhysicalWidth: 126 })
-    expect(resolveAarcTerrainSourceMetrics(12)).toEqual({ widthRatio: 12, sourcePhysicalWidth: 168 })
+    expect(resolveAarcTerrainSourceMetrics(9, 14)).toEqual({ widthRatio: 9, sourcePhysicalWidth: 126 })
+    expect(resolveAarcTerrainSourceMetrics('9', 14)).toEqual({ widthRatio: 9, sourcePhysicalWidth: 126 })
+    expect(resolveAarcTerrainSourceMetrics(12, 14)).toEqual({ widthRatio: 12, sourcePhysicalWidth: 168 })
+    expect(resolveAarcTerrainSourceMetrics(undefined, 14)).toEqual({ widthRatio: 1, sourcePhysicalWidth: 14 })
+    expect(resolveAarcTerrainSourceMetrics(2, 10)).toEqual({ widthRatio: 2, sourcePhysicalWidth: 20 })
   })
 })
 
@@ -50,7 +50,7 @@ describe('AARC type=1 terrain importer', () => {
     expect(project.stations).toHaveLength(0)
     expect(project.geometry.segments).toHaveLength(0)
     expect(project.basemapPaths).toHaveLength(1)
-    expect(project.basemapPaths?.[0]).toMatchObject({ category: 'water', color: '#C3E5EB', width: 125, closed: false, isFilled: false, zIndex: 4 })
+    expect(project.basemapPaths?.[0]).toMatchObject({ category: 'water', color: '#C3E5EB', width: 126, closed: false, isFilled: false, zIndex: 4 })
     expect(project.basemapPaths?.[0]?.points.map(point => [point.x, point.y])).toEqual([[0, 0], [10, 0], [20, 0]])
   })
 
@@ -64,19 +64,21 @@ describe('AARC type=1 terrain importer', () => {
       const path = paths.find(item => item.source?.sourceLineId === source.id)!
       expect(path.points).toHaveLength(source.pts.length)
       expect(path.points.map(point => [point.x, point.y])).toEqual(source.pts.map(id => sourcePoints.get(id)))
-      expect(path.width).toBeCloseTo((source.width ?? 1) * (125 / 9), 8)
+      expect(path.width).toBeCloseTo(Number(source.width ?? 1) * 14, 8)
+      expect(path.source?.sourceWidthRatio).toBeCloseTo(Number(source.width ?? 1), 8)
+      expect(path.source?.sourcePhysicalWidth).toBeCloseTo(path.width, 8)
     }
-    expect(paths.find(path => path.source?.sourceLineId === 5)).toMatchObject({ name: '岚江', category: 'water', color: '#C3E5EB', width: 125, zIndex: 0, isFilled: false })
-    expect(paths.find(path => path.source?.sourceLineId === 8)).toMatchObject({ name: '平河', category: 'water', color: '#C3E5EB', width: 125, zIndex: 1, isFilled: false })
-    expect(paths.find(path => path.source?.sourceLineId === 57)).toMatchObject({ name: '里安山', category: 'other', color: '#ABE81E', zIndex: -1, isFilled: false }); expect(paths.find(path => path.source?.sourceLineId === 57)?.width).toBeCloseTo(125 * 12 / 9, 8)
+    expect(paths.find(path => path.source?.sourceLineId === 5)).toMatchObject({ name: '岚江', category: 'water', color: '#C3E5EB', width: 126, zIndex: 0, isFilled: false })
+    expect(paths.find(path => path.source?.sourceLineId === 8)).toMatchObject({ name: '平河', category: 'water', color: '#C3E5EB', width: 126, zIndex: 1, isFilled: false })
+    expect(paths.find(path => path.source?.sourceLineId === 57)).toMatchObject({ name: '里安山', category: 'other', color: '#ABE81E', zIndex: -1, isFilled: false }); expect(paths.find(path => path.source?.sourceLineId === 57)?.width).toBeCloseTo(168, 8)
   })
 
   it('imports colorPre=3 stroke and filled terrain without inferring fill from color or closure', () => {
     const { project } = convertAarcToActualRouteProject(rawMinimal, '测试.aarc (1).json')
     const paths = project.basemapPaths ?? []
     expect(paths).toHaveLength(2)
-    expect(paths[0]).toMatchObject({ category: 'terrain', color: '#CEEDA4', width: 125 / 9, closed: false, isFilled: false, zIndex: 0 })
-    expect(paths[1]).toMatchObject({ category: 'terrain', color: '#CEEDA4', width: 125 / 9, closed: true, isFilled: true, zIndex: 0 })
+    expect(paths[0]).toMatchObject({ category: 'terrain', color: '#CEEDA4', width: 14, closed: false, isFilled: false, zIndex: 0 })
+    expect(paths[1]).toMatchObject({ category: 'terrain', color: '#CEEDA4', width: 14, closed: true, isFilled: true, zIndex: 0 })
     expect(paths[1].points).toHaveLength(5)
   })
 
@@ -85,7 +87,7 @@ describe('AARC type=1 terrain importer', () => {
     const source = (rawChangling.lines as Array<{ id: number; type?: number; pts: number[]; colorPre?: number; width?: number }>).find(line => line.id === 8)!
     const path = project.basemapPaths?.find(item => item.source?.sourceLineId === 8)!
     const points = new Map((rawChangling.points as unknown as Array<{ id: number; pos: [number, number] }>).map(point => [point.id, point.pos]))
-    expect(path).toMatchObject({ color: '#C3E5EB', width: 125, closed: false, isFilled: false })
+    expect(path).toMatchObject({ color: '#C3E5EB', width: 126, closed: false, isFilled: false })
     expect(path.points).toHaveLength(source.pts.length)
     expect(path.points.map(point => [point.x, point.y])).toEqual(source.pts.map(id => points.get(id)))
   })

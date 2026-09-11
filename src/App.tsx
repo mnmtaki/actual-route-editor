@@ -33,6 +33,7 @@ import {
 } from "./data/operations";
 import { selectLineInList, selectLinesByMarquee } from "./data/lineSelection";
 import { LineMultiInspector } from "./components/LineMultiInspector";
+import { StationMultiInspector } from "./components/StationMultiInspector";
 import { getLineDisplayName } from "./data/lineIdentity";
 import { PresentationPreview } from "./presentation/PresentationPreview";
 import {
@@ -88,6 +89,7 @@ export default function App() {
       initial.lines[0]?.id ?? null,
     ),
     [selectedLineIds, setSelectedLineIds] = useState<string[]>([]),
+    [selectedStationIds, setSelectedStationIds] = useState<string[]>([]),
     [selectionAnchorLineId, setSelectionAnchorLineId] = useState<string | null>(null),
     [view, setView] = useState({ x: 40, y: 40, width: 920, height: 680 }),
     [notice, setNotice] = useState("直接点选和拖动对象；拖空白平移"),
@@ -119,6 +121,7 @@ export default function App() {
     const close = () => {
       setSelection(null);
       setSelectedLineIds([]);
+      setSelectedStationIds([]);
       setSelectionAnchorLineId(null);
       setActiveLineId(null);
     };
@@ -137,6 +140,11 @@ export default function App() {
       setSelectedLineIds([]);
       setSelectionAnchorLineId(null);
     }
+  }, [selection?.type, selection && "id" in selection ? selection.id : undefined]);
+  useEffect(() => {
+    if (selection?.type === "station") {
+      if (!selectedStationIds.includes(selection.id)) setSelectedStationIds([selection.id]);
+    } else if (selectedStationIds.length) setSelectedStationIds([]);
   }, [selection?.type, selection && "id" in selection ? selection.id : undefined]);
   const applyLineSelection = (state: { selectedLineIds: string[]; activeLineId: string | null; selectionAnchorLineId: string | null }) => {
     setSelectedLineIds(state.selectedLineIds);
@@ -174,14 +182,25 @@ export default function App() {
     setSelectionAnchorLineId(null);
     setActiveLineId(project.lines[0]?.id ?? null);
     setSelection(null);
+    setSelectedStationIds([]);
   };
   const handleCanvasSelect = (next: Selection) => {
     if (next?.type === "line") applyLineSelection({ selectedLineIds: [next.id], activeLineId: next.id, selectionAnchorLineId: next.id });
     else {
       setSelectedLineIds([]);
       setSelectionAnchorLineId(null);
+      setSelectedStationIds(next?.type === "station" ? [next.id] : []);
       setSelection(next);
     }
+  };
+  const toggleStationSelection = (stationId: string) => {
+    setSelectedLineIds([]);
+    setSelectionAnchorLineId(null);
+    setSelectedStationIds(current => {
+      const next = current.includes(stationId) ? current.filter(id => id !== stationId) : [...current, stationId];
+      setSelection(next.length ? { type: "station", id: next.at(-1)! } : null);
+      return next;
+    });
   };
   const batchSetLineValue = (field: "visible" | "locked", value: boolean) => {
     if (selectedLineIds.length < 2) return;
@@ -579,7 +598,7 @@ export default function App() {
     }
     history.commit(n);
     if (selection.type === "line") clearLineSelection();
-    else setSelection(null);
+    else { setSelectedStationIds([]); setSelection(null); }
   };
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -1013,9 +1032,11 @@ export default function App() {
         onRoadStyleChange={setRoadStyleId}
         activeLineId={activeLineId}
         selectedLineIds={selectedLineIds}
+        selectedStationIds={selectedStationIds}
         onSelectLine={(id) => handleLineSelect(id)}
         onStartLineMultiSelect={(id) => handleLineSelect(id)}
         onToggleLineSelection={(id) => handleLineSelect(id, { ctrlKey: true })}
+        onToggleStationSelection={toggleStationSelection}
         onClearLineSelection={clearLineSelection}
         onBatchSetLinesVisible={value => batchSetLineValue("visible", value)}
         onBatchSetLinesLocked={value => batchSetLineValue("locked", value)}
@@ -1042,6 +1063,7 @@ export default function App() {
         onZoomSelection={zoomSelection}
         onDeleteSelection={deleteSelection}
         onAddLineBadge={addLineBadge}
+        onOpenStationStyles={() => setStyleOpen(true)}
         onAddLineLegend={addLineLegend}
         onSelectLineLegend={() => { if (history.project.lineLegend) setSelection({ type: 'lineLegend', id: history.project.lineLegend.id }) }}
         onPhasePreview={setPhasePreview}
@@ -1156,6 +1178,8 @@ export default function App() {
             <NetworkCanvas
               project={history.project}
               selection={selection}
+              selectedStationIds={selectedStationIds}
+              onToggleStationSelection={toggleStationSelection}
               drawing={drawing}
               roadDraft={roadDraft}
               phasePreview={phasePreview}
@@ -1194,12 +1218,13 @@ export default function App() {
             onDelete={batchDeleteSelectedLines}
             onSetVisible={value => batchSetLineValue("visible", value)}
             onSetLocked={value => batchSetLineValue("locked", value)}
-          /> : <Inspector
+          /> : selectedStationIds.length > 1 ? <StationMultiInspector project={history.project} selectedStationIds={selectedStationIds} onChange={history.commit} /> : <Inspector
             project={history.project}
             selection={selection}
             onChange={history.commit}
             onDelete={deleteSelection}
             onAddLineBadge={addLineBadge}
+            onOpenStationStyles={() => setStyleOpen(true)}
             onPhasePreview={setPhasePreview}
             onStartPhaseDrawing={startPhaseDrawing}
           />}

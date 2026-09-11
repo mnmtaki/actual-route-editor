@@ -3,6 +3,7 @@ import { getPassengerLinesAtStation, getPassengerVisibleRelationIds } from '../t
 import { getTransferMarkerLayout } from '../geometry/tangent'
 import { sortTransferLinesForSpatialOrder } from '../geometry/transferOrdering'
 import { getStationStyle } from './stationStyles'
+import { resolveStationStyle } from '../data/stationStyles'
 import { StationLabel } from './StationLabel'
 import { effectiveStationStyle } from '../data/style'
 import { lineWithEffectiveColor } from '../data/lineIdentity'
@@ -22,16 +23,19 @@ export function StationMarker({ project, station, time, selected, hitRadius = 24
     ? sortTransferLinesForSpatialOrder(project, renderStation.id, lines, time).map(line => lineWithEffectiveColor(project, line))
     : lines.map(line => lineWithEffectiveColor(project, line))
   const { stationSize, transferMinorAxis, transferDotGap, transferEndPadding } = effectiveStationStyle(renderStation, project.settings)
-  const style = getStationStyle(project.settings.stationStyleId)
+  // Transfer stations keep the established capsule renderer. Ordinary stations
+  // resolve their project/station style through the shared style registry.
+  const transferStyle = getStationStyle('default')
+  const stationStyle = resolveStationStyle(project, renderStation)
   const selectionColor = renderLines[0]?.color ?? '#596161'
   const visibleRelationIds = lines.length > 1 ? getPassengerVisibleRelationIds(project, renderStation.id, time, lines.map(line => line.id)) : undefined
   const transferLayout = lines.length > 1 ? getTransferMarkerLayout(project, renderStation.id, time, visibleRelationIds, transferEndPadding) : null
   const marker = lines.length > 1
-    ? style.renderTransfer({ station: renderStation, lines: renderLines, size: stationSize, minorAxis: transferMinorAxis, dotGap: transferDotGap, endPadding: transferEndPadding, rotation: transferLayout?.rotation ?? 0, centerX: transferLayout?.centerX, centerY: transferLayout?.centerY, minMajorAxis: transferLayout?.anchorSpan })
-    : style.renderOrdinary({ station: renderStation, size: stationSize })
-  const selectionRadius = stationSize / 2 + 4
+    ? transferStyle.renderTransfer({ station: renderStation, lines: renderLines, size: stationSize, minorAxis: transferMinorAxis, dotGap: transferDotGap, endPadding: transferEndPadding, rotation: transferLayout?.rotation ?? 0, centerX: transferLayout?.centerX, centerY: transferLayout?.centerY, minMajorAxis: transferLayout?.anchorSpan })
+    : transferStyle.renderOrdinary({ station: renderStation, size: stationStyle.width, style: stationStyle, lineColor: selectionColor })
+  const selectionRadius = (lines.length > 1 ? stationSize : Math.max(stationStyle.width, stationStyle.height)) / 2 + 4
   return <g>
-    <g onPointerDown={onPointerDown} className="station-hit" data-station-id={station.id} data-station-style={style.id} style={{ pointerEvents: 'all' }}>
+    <g onPointerDown={onPointerDown} className="station-hit" data-station-id={station.id} data-station-style={lines.length > 1 ? transferStyle.id : stationStyle.id} style={{ pointerEvents: 'all' }}>
       {marker}
       {selected && <circle className="station-selection-ring" cx={station.x} cy={station.y} r={selectionRadius} fill="none" stroke={selectionColor} strokeWidth={1.5} opacity={.58} vectorEffect="non-scaling-stroke" pointerEvents="none" />}
       <circle className="station-hit-target" cx={station.x} cy={station.y} r={hitRadius} fill="transparent" pointerEvents="all" />

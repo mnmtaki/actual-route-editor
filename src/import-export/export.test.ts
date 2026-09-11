@@ -9,7 +9,11 @@ import { StationMarker } from '../renderer/StationMarker'
 describe('project and SVG export', () => {
   it('round-trips the complete project schema', () => {
     const restored = parseProjectJson(serializeProject(demoProject))
-    expect(restored).toEqual(demoProject)
+    const { stationStyles: _stationStyles, defaultStationStyleId: _defaultStationStyleId, ...legacyShape } = restored
+    expect(legacyShape).toEqual(demoProject)
+    expect(restored.stationStyles).toHaveLength(1)
+    expect(restored.stationStyles?.[0]).toMatchObject({ id: 'default', width: demoProject.settings.stationSize, height: demoProject.settings.stationSize })
+    expect(restored.defaultStationStyleId).toBe('default')
     expect(restored.stationLineRelations[0].openedAt).toBe('2000-01-01')
     expect(restored.geometry.segments[0].waypoints).toHaveLength(1)
   })

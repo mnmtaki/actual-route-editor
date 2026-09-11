@@ -4,6 +4,8 @@ import { demoProject } from '../data/demo'
 import { createRoadStyle } from '../data/roads'
 import { RoadStyleManager } from './RoadStyleManager'
 import { StyleDrawer } from './StyleDrawer'
+import { StationStyleManager } from './StationStyleManager'
+import { createStationStyle } from '../data/stationStyles'
 
 describe('Style center navigation and road style editing', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -49,5 +51,16 @@ describe('Style center navigation and road style editing', () => {
     render(<StyleDrawer project={project} onChange={onChange} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: '恢复默认样式' }))
     expect(onChange.mock.calls.at(-1)?.[0].distanceScale).toEqual({ metersPerWorldUnit: 25 })
+  })
+
+  it('sets a selected station style as the project default without touching stations', () => {
+    const created = createStationStyle(structuredClone(demoProject), undefined, '重点站')
+    const onChange = vi.fn()
+    render(<StationStyleManager project={created.project} onChange={onChange} />)
+    fireEvent.change(screen.getByLabelText('车站样式管理'), { target: { value: created.styleId } })
+    fireEvent.click(screen.getByRole('button', { name: '设为默认' }))
+    const next = onChange.mock.calls.at(-1)?.[0]
+    expect(next.defaultStationStyleId).toBe(created.styleId)
+    expect(next.stations).toEqual(created.project.stations)
   })
 })

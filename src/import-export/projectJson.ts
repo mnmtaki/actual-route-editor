@@ -10,6 +10,7 @@ import { normalizeRoadStyles, normalizeRoads } from '../data/roads'
 import { normalizeLineLegend } from '../data/lineLegend'
 import { normalizeDistanceScale } from '../data/distance'
 import { normalizeStationAnchor } from '../data/stationAnchor'
+import { createDefaultStationStyle, normalizeStationStyles } from '../data/stationStyles'
 
 type LegacySettings = Partial<ProjectSettings> & { stationDiameterRatio?: number }
 
@@ -23,6 +24,13 @@ export function parseProjectJson(text: string): ActualRouteProject {
   const typographyFallback = legacyTypographyFallback(parsed.stations)
   const lineWidth = positiveOr(raw.lineWidth, DEFAULT_SETTINGS.lineWidth)
   const stationSize = positiveOr(raw.stationSize, DEFAULT_SETTINGS.stationSize)
+  // StationStyle was introduced after the original project schema. Always
+  // materialize a single default style at the import boundary so old projects
+  // retain their configured stationSize without copying style values to every
+  // station.
+  const normalizedStationStyles = normalizeStationStyles((parsed as Record<string, unknown>).stationStyles, stationSize) ?? [createDefaultStationStyle(stationSize)]
+  const requestedDefaultStationStyleId = typeof (parsed as Record<string, unknown>).defaultStationStyleId === 'string' && (parsed as Record<string, unknown>).defaultStationStyleId ? String((parsed as Record<string, unknown>).defaultStationStyleId) : 'default'
+  const defaultStationStyleId = normalizedStationStyles.some(style => style.id === requestedDefaultStationStyleId) ? requestedDefaultStationStyleId : 'default'
   const hasLegacyTransferSettings = [raw.transferHeightRatio,raw.transferGapRatio,raw.transferPaddingRatio].some(value=>typeof value==='number'&&Number.isFinite(value))
   const isBuild11Default = !hasLegacyTransferSettings || (approximately(raw.transferHeightRatio, 1.0833333333333333) && approximately(raw.transferGapRatio, 0.1944) && approximately(raw.transferPaddingRatio, 0.25))
   const settings: ProjectSettings = {
@@ -92,7 +100,7 @@ export function parseProjectJson(text: string): ActualRouteProject {
     name: typeof parsed.name === 'string' ? parsed.name : '恢复的实际走向工程',
     ...(typeof parsed.projectName === 'string' && parsed.projectName.trim() ? { projectName: parsed.projectName.trim() } : {}),
     ...(distanceScale ? { distanceScale } : {}),
-    stations: parsed.stations.map(station => { const { styleOverrides: _ignored, ...rest }=station, styleOverrides=normalizeStationStyleOverrides(station.styleOverrides), nameHistory=normalizeStationNameHistory(station); const normalized=({ ...rest, ...(styleOverrides?{styleOverrides}:{}), ...(nameHistory?{nameHistory}:{}), ...(typeof station.nameS === 'string' && station.nameS.length ? {nameS:station.nameS} : {}), ...normalizedDateFields(station), labelOffsetX: Number.isFinite(station.labelOffsetX) ? station.labelOffsetX : 14, labelOffsetY: Number.isFinite(station.labelOffsetY) ? station.labelOffsetY : -14, ...(typeof station.labelRotation === 'number' && Number.isFinite(station.labelRotation) ? {labelRotation:station.labelRotation} : {}) }); if(nameHistory)syncStationNameFromHistory(normalized); return normalized }),
+    stations: parsed.stations.map(station => { const { styleOverrides: _ignored, stationStyleId: _rawStationStyleId, ...rest }=station, styleOverrides=normalizeStationStyleOverrides(station.styleOverrides), nameHistory=normalizeStationNameHistory(station), stationStyleId=typeof station.stationStyleId === 'string' && station.stationStyleId.trim() ? station.stationStyleId.trim() : undefined; const normalized=({ ...rest, ...(stationStyleId?{stationStyleId}:{}), ...(styleOverrides?{styleOverrides}:{}), ...(nameHistory?{nameHistory}:{}), ...(typeof station.nameS === 'string' && station.nameS.length ? {nameS:station.nameS} : {}), ...normalizedDateFields(station), labelOffsetX: Number.isFinite(station.labelOffsetX) ? station.labelOffsetX : 14, labelOffsetY: Number.isFinite(station.labelOffsetY) ? station.labelOffsetY : -14, ...(typeof station.labelRotation === 'number' && Number.isFinite(station.labelRotation) ? {labelRotation:station.labelRotation} : {}) }); if(nameHistory)syncStationNameFromHistory(normalized); return normalized }),
     lines: parsed.lines.map((line, index) => { const { styleOverrides: _ignored, parentLineId: _parentLineId, ...rest }=line, styleOverrides=normalizeLineStyleOverrides(line.styleOverrides), parentLineId=typeof line.parentLineId === 'string' && line.parentLineId.trim() ? line.parentLineId.trim() : undefined; return ({ ...rest, ...(parentLineId ? { parentLineId } : {}), ...(styleOverrides?{styleOverrides}:{}), ...(typeof line.lineStyleId === 'string' && line.lineStyleId ? { lineStyleId: line.lineStyleId } : {}), ...normalizedDateFields(line), stationSequence: Array.isArray(line.stationSequence) ? line.stationSequence : [], ...(Array.isArray(line.lineBadges) ? {lineBadges:line.lineBadges.flatMap(value => normalizeLineBadge(value))} : {}), lineOrder: Number.isFinite(line.lineOrder) ? line.lineOrder : index, visible: line.visible !== false, locked: line.locked === true })}),
     stationLineRelations: Array.isArray(parsed.stationLineRelations) ? parsed.stationLineRelations.map(relation => { const { anchor: _ignoredAnchor, ...rest } = relation; const anchor = normalizeStationAnchor(relation.anchor, stationPositions.get(relation.stationId)); return ({ ...rest, ...normalizedDateFields(relation), ...(anchor ? { anchor } : {}) }) }) : [],
     openingPhases: Array.isArray(parsed.openingPhases) ? parsed.openingPhases.map(phase => ({ id: String(phase.id), lineId: String(phase.lineId), name: typeof phase.name === 'string' ? phase.name : undefined, openedAt: normalizeRequiredDate(phase.openedAt, today), segmentIds: Array.isArray(phase.segmentIds) ? phase.segmentIds.map(String) : [], stationRelationIds: Array.isArray(phase.stationRelationIds) ? phase.stationRelationIds.map(String) : [], revealStartStationId: typeof phase.revealStartStationId === 'string' ? phase.revealStartStationId : undefined, revealEndStationId: typeof phase.revealEndStationId === 'string' ? phase.revealEndStationId : undefined, showOverviewAfter: phase.showOverviewAfter === true, overriddenSegmentIds: Array.isArray(phase.overriddenSegmentIds) ? phase.overriddenSegmentIds.map(String) : [], overriddenStationRelationIds: Array.isArray(phase.overriddenStationRelationIds) ? phase.overriddenStationRelationIds.map(String) : [] })) : [],
@@ -109,6 +117,8 @@ export function parseProjectJson(text: string): ActualRouteProject {
     presentation,
     settings,
     ...(normalizedStyles ? { styles: normalizedStyles } : {}),
+    stationStyles: normalizedStationStyles,
+    defaultStationStyleId,
   }
   for (const phase of project.openingPhases) {
     if (!phase.revealStartStationId) delete phase.revealStartStationId

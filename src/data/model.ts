@@ -36,9 +36,36 @@ export interface LineStyle {
   builtin?: boolean
   source?: SourceMetadata
 }
+export type StationStyleShape = 'circle' | 'square' | 'roundedRect' | 'capsule' | 'diamond'
+export type StationStyleColorMode = 'fixed' | 'background' | 'none'
+export interface StationStyle {
+  id: string
+  name: string
+  shape: StationStyleShape
+  width: number
+  height: number
+  lockAspect: boolean
+  rotation: number
+  cornerRadius: number
+  fillEnabled: boolean
+  fillColor: string
+  fillOpacity: number
+  fillColorMode: StationStyleColorMode
+  strokeEnabled: boolean
+  strokeColor: string
+  strokeWidth: number
+  strokeOpacity: number
+  strokeColorMode: StationStyleColorMode
+  haloEnabled: boolean
+  haloColor: string
+  haloWidth: number
+  haloGap: number
+  haloOpacity: number
+  builtin?: boolean
+}
 export interface StationStyleOverrides { stationSize?: number; transferMinorAxis?: number; transferEndPadding?: number; transferDotGap?: number; labelSize?: number; labelFontFamily?: string; labelFontWeight?: number; labelColor?: string; foreignLabelSize?: number; foreignLabelFontFamily?: string; foreignLabelFontWeight?: number; foreignLabelColor?: string; foreignLabelGap?: number }
 export interface StationNameHistoryEntry { id: string; effectiveAt: string | null; name: string; nameS?: string }
-export interface Station { id: string; name: string; nameS?: string; nameHistory?: StationNameHistoryEntry[]; compoundGroupId?: string; x: number; y: number; openedAt?: ISODate; closedAt?: ISODate; stationSize?: number; transferMinorAxis?: number; transferEndPadding?: number; transferDotGap?: number; labelSize?: number; foreignLabelSize?: number; foreignLabelGap?: number; styleOverrides?: StationStyleOverrides; labelOffsetX: number; labelOffsetY: number; labelHidden?: boolean; labelRotation?: number; orientationAnchorLineId?: string; source?: SourceMetadata }
+export interface Station { id: string; name: string; nameS?: string; nameHistory?: StationNameHistoryEntry[]; compoundGroupId?: string; x: number; y: number; openedAt?: ISODate; closedAt?: ISODate; stationStyleId?: string; stationSize?: number; transferMinorAxis?: number; transferEndPadding?: number; transferDotGap?: number; labelSize?: number; foreignLabelSize?: number; foreignLabelGap?: number; styleOverrides?: StationStyleOverrides; labelOffsetX: number; labelOffsetY: number; labelHidden?: boolean; labelRotation?: number; orientationAnchorLineId?: string; source?: SourceMetadata }
 export interface LineBadge { id: string; x: number; y: number; size: number; rotation: number; visible: boolean }
 export interface Line { id: string; name: string; nameSub?: string; color: string; parentLineId?: string; lineWidth?: number; styleOverrides?: LineStyleOverrides; lineStyleId?: string; stationSequence: string[]; lineBadges?: LineBadge[]; lineOrder: number; openedAt?: ISODate; closedAt?: ISODate; visible: boolean; locked: boolean; source?: SourceMetadata }
 export interface StationLineRelation { id: string; stationId: string; lineId: string; openedAt?: ISODate; closedAt?: ISODate; anchor?: { x: number; y: number } }
@@ -103,7 +130,7 @@ export interface RoadStyle { id: string; name: string; builtin?: boolean; layers
 export interface RoadPoint { id: string; x: number; y: number }
 export interface Road { id: string; name?: string; points: RoadPoint[]; styleId: string; zIndex: number; visible: boolean; locked: boolean; createdOrder: number }
 export interface DistanceScale { metersPerWorldUnit: number }
-export interface ActualRouteProject { version: 1; name: string; projectName?: string; distanceScale?: DistanceScale; stations: Station[]; lines: Line[]; stationLineRelations: StationLineRelation[]; openingPhases: OpeningPhase[]; geometry: { segments: Segment[] }; mapElements?: MapElement[]; textTags?: AarcTextTag[]; aarc?: AarcSourceMetadata; lineLegend?: LineLegend; basemapPaths?: BasemapPath[]; roads?: Road[]; roadStyles?: RoadStyle[]; background: BackgroundImage | null; timeline: TimelineSettings; presentation: PresentationSettings; settings: ProjectSettings; styles?: LineStyle[] }
+export interface ActualRouteProject { version: 1; name: string; projectName?: string; distanceScale?: DistanceScale; stations: Station[]; lines: Line[]; stationLineRelations: StationLineRelation[]; openingPhases: OpeningPhase[]; geometry: { segments: Segment[] }; mapElements?: MapElement[]; textTags?: AarcTextTag[]; aarc?: AarcSourceMetadata; lineLegend?: LineLegend; basemapPaths?: BasemapPath[]; roads?: Road[]; roadStyles?: RoadStyle[]; background: BackgroundImage | null; timeline: TimelineSettings; presentation: PresentationSettings; settings: ProjectSettings; styles?: LineStyle[]; stationStyles?: StationStyle[]; defaultStationStyleId?: string }
 export type Selection = { type: 'station'; id: string } | { type: 'line'; id: string } | { type: 'lineBadge'; id: string; lineId: string } | { type: 'segment'; id: string } | { type: 'waypoint'; id: string; segmentId: string } | { type: 'structureNode'; id: string; segmentId: string } | { type: 'mapElement'; id: string } | { type: 'lineLegend'; id: string } | { type: 'basemapPath'; id: string } | { type: 'road'; id: string } | { type: 'roadPoint'; id: string; roadId: string } | { type: 'background' } | null
 
 export const DEFAULT_STATION_LABEL_FONT_FAMILY = 'Inter, "Noto Sans SC", "Microsoft YaHei", sans-serif'

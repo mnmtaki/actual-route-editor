@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chooseAarcStyleId, convertAarcLineStyles, resolveAarcLayerGeometry, resolveAarcStyle, resolveAarcStyleLayers } from './aarcStyle'
+import { chooseAarcStyleId, convertAarcLineStyles, resolveAarcLayerGeometry, resolveAarcSegmentStyleId, resolveAarcStyle, resolveAarcStyleLayers } from './aarcStyle'
 import type { AarcLineStyle } from '../data/model'
 
 const styles: AarcLineStyle[] = [
@@ -26,6 +26,11 @@ describe('AARC line style semantic resolver', () => {
     expect(chooseAarcStyleId(-1)).toBe('-1')
     expect(chooseAarcStyleId('2')).toBe('2')
     expect(chooseAarcStyleId(undefined)).toBeUndefined()
+  })
+  it('keeps AARC style-slice sentinels distinct in the shared Segment model', () => {
+    expect(resolveAarcSegmentStyleId(0)).toBeNull()
+    expect(resolveAarcSegmentStyleId(-1)).toBeUndefined()
+    expect(resolveAarcSegmentStyleId(11)).toBe('11')
   })
   it('converts the source registry into shared ratio-based render layers', () => {
     const converted = convertAarcLineStyles(styles)

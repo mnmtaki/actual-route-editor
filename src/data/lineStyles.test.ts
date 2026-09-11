@@ -27,8 +27,8 @@ describe('LineStyle V1', () => {
     const project = structuredClone(demoProject), line = project.lines[0], ordinary = project.geometry.segments[0], elevated = { ...ordinary, structureType: 'elevated' as const }
     project.styles = [{ id: 'custom', name: '自定义', layers: [{ id: 'main', colorMode: 'followLine', width: 1.2 }] }]
     line.lineStyleId = 'custom'
-    expect(resolveLineStyle(project, line, ordinary).id).toBe('custom')
-    expect(resolveLineStyle(project, line, elevated).id).toBe(BUILTIN_ELEVATED_STYLE_ID)
+    expect(resolveLineStyle(project, line, ordinary)!.id).toBe('custom')
+    expect(resolveLineStyle(project, line, elevated)!.id).toBe(BUILTIN_ELEVATED_STYLE_ID)
     const elevatedLayer = resolveLineStyleLayers(getLineStyle(project, BUILTIN_ELEVATED_STYLE_ID), line.color, 18)
     expect(elevatedLayer).toHaveLength(3)
     expect(elevatedLayer[0].resolvedWidth).toBeCloseTo(24.84)

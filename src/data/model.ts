@@ -30,6 +30,7 @@ export interface LineStyleLayer {
 export interface LineStyle {
   id: string
   name: string
+  /** A false/omitted value keeps the ordinary base line beneath the layers; true hides it. */
   hideBaseLine?: boolean
   layers: LineStyleLayer[]
   builtin?: boolean
@@ -45,7 +46,7 @@ export interface OpeningPhase { id: string; lineId: string; name?: string; opene
 export interface Waypoint { id: string; x: number; y: number; type: WaypointType; cornerRadius?: number; free?: boolean; source?: SourceMetadata }
 export interface StructureNode { id: string; structureAfter: StructureType; waypointId?: string; progress?: number }
 export interface SegmentLineHistoryEntry { id: string; effectiveAt: string | null; lineId: string }
-export interface Segment { id: string; lineId: string; lineHistory?: SegmentLineHistoryEntry[]; fromStationId: string; toStationId: string; mode: SegmentMode; cornerRadius?: number; structureType: StructureType; structureNodes?: StructureNode[]; waypoints: Waypoint[]; openedAt?: ISODate; closedAt?: ISODate; source?: SourceMetadata }
+export interface Segment { id: string; lineId: string; /** Undefined inherits Line.lineStyleId; null is an explicit AARC style=0 (base line only). */ lineStyleId?: string | null; lineHistory?: SegmentLineHistoryEntry[]; fromStationId: string; toStationId: string; mode: SegmentMode; cornerRadius?: number; structureType: StructureType; structureNodes?: StructureNode[]; waypoints: Waypoint[]; openedAt?: ISODate; closedAt?: ISODate; source?: SourceMetadata }
 export interface BackgroundImage { dataUrl: string; name: string; x: number; y: number; width: number; height: number; opacity: number; visible: boolean; locked: boolean; source?: SourceMetadata }
 export type MapTextAlign = 'start' | 'middle' | 'end'
 export interface TextMapElement { id: string; type: 'text'; x: number; y: number; text: string; fontSize: number; fontWeight: 'normal' | 'bold'; textAlign: MapTextAlign; rotation: number; visible: boolean }

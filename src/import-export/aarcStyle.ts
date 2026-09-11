@@ -31,7 +31,10 @@ export function resolveAarcStyleLayers(
 ): ResolvedAarcStyleLayer[] {
   const style = resolveAarcStyle(styleId, styles, parentStyleId)
   if (!style) return []
-  return style.layers.map(layer => ({ ...structuredClone(layer), sourceStyleId: style.id, inherited: styleId === -1 || styleId === '-1' }))
+  // AARC's layer array is authored in reverse paint order.  Keep the
+  // resolved presentation order deterministic while leaving the source
+  // registry untouched.
+  return style.layers.slice().reverse().map(layer => ({ ...structuredClone(layer), sourceStyleId: style.id, inherited: styleId === -1 || styleId === '-1' }))
 }
 
 /** AARC layer widths/dashes are multipliers of the line body width. */
@@ -47,6 +50,17 @@ export function resolveAarcLayerGeometry(layer: AarcLineStyleLayer, bodyWidth: n
 export function chooseAarcStyleId(rawStyle: unknown): string | undefined {
   const n = typeof rawStyle === 'number' ? rawStyle : Number(rawStyle)
   return Number.isFinite(n) ? String(n) : undefined
+}
+
+/** Map an AARC style-slice reference into the shared Segment style override.
+ *  The three sentinel meanings are intentionally distinct: 0 is an explicit
+ *  no-style/base-line-only override, -1 inherits the already resolved Line
+ *  style, and positive ids select a concrete imported style.
+ */
+export function resolveAarcSegmentStyleId(styleId: number | null | undefined): string | null | undefined {
+  if (styleId === undefined || styleId === null || styleId === -1) return undefined
+  if (styleId === 0) return null
+  return String(styleId)
 }
 
 import type { LineStyle, LineStyleLayer } from '../data/model'
@@ -72,7 +86,9 @@ export function convertAarcLineStyles(styles: AarcLineStyle[] | undefined): Line
   return (styles ?? []).flatMap(style => {
     const id = String(style.id || '').trim()
     if (!id) return []
-    const layers = style.layers.flatMap((layer, index) => {
+    // The shared renderer paints layers in array order; AARC paints its
+    // registry layers in reverse order, so convert a derived reversed array.
+    const layers = style.layers.slice().reverse().flatMap((layer, index) => {
       const width = Number(layer.width)
       if (!Number.isFinite(width) || width < 0) return []
       const dash = parseAarcDash(layer.dash)
@@ -92,6 +108,6 @@ export function convertAarcLineStyles(styles: AarcLineStyle[] | undefined): Line
       }
       return [converted]
     })
-    return [{ id, name: style.name?.trim() || `AARC 样式 ${id}`, ...(style.noBase ? { hideBaseLine: true } : {}), layers, source: style.source }]
+    return [{ id, name: style.name?.trim() || `AARC 样式 ${id}`, hideBaseLine: style.noBase === true, layers, source: style.source }]
   })
 }

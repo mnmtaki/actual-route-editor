@@ -38,7 +38,7 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
     <g data-presentation-layer="segments">{segmentArtwork.map(({ segment, line, path }) => {
       const segmentState = state.segmentStates[segment.id]
       if (!line?.visible || !segmentState || segmentState.revealProgress <= 0 || segmentState.opacity <= 0) return null
-      return <SegmentArtwork key={segment.id} segment={segment} line={line} path={path} lineWidth={effectiveLineWidth(line, project.settings)} revealProgress={segmentState.revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} style={resolveLineStyle(project, line)} />
+      return <SegmentArtwork key={segment.id} segment={segment} line={line} path={path} lineWidth={effectiveLineWidth(line, project.settings)} revealProgress={segmentState.revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} style={resolveLineStyle(project, line, segment.lineStyleId === undefined ? undefined : segment)} />
     })}</g>
     <g data-presentation-layer="structure-runs">{elevatedRuns.map(run => { const line = lineMap.get(run.lineId); return line ? <StructureRunArtwork key={run.id} run={run} line={lineWithEffectiveColor(project, line)} lineWidth={effectiveLineWidth(line, project.settings)} style={getLineStyle(project, 'elevated')} /> : null })}</g>    <g data-presentation-layer="stations">{project.stations.filter(station => isCompoundStationCanonical(project, station)).map(station => {
       const stationState = state.stationStates[station.id]

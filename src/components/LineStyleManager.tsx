@@ -60,7 +60,7 @@ export function LineStyleManager({ project, onChange, compact = false, selectedI
     {summary}
     {!compact && <>
       <label className="field"><span>样式名称</span><input value={selected.name} disabled={selected.builtin} onChange={event => updateSelected(style => { style.name = event.target.value })} /></label>
-      <label className="toggle-row">隐藏基础线路<input type="checkbox" checked={selected.hideBaseLine === true} disabled={selected.builtin} onChange={event => updateSelected(style => { style.hideBaseLine = event.target.checked || undefined })} /></label>
+      <label className="toggle-row">隐藏基础线路<input type="checkbox" checked={selected.hideBaseLine === true} disabled={selected.builtin} onChange={event => updateSelected(style => { style.hideBaseLine = event.target.checked })} /></label>
       <span className="eyebrow">线路图层</span>
       <LayeredStrokeStyleEditor kind="line" layers={selected.layers} disabled={selected.builtin} onChange={layers => updateSelected(style => { style.layers = layers as LineStyleLayer[] })} />
       {selected.builtin && <button type="button" onClick={resetBuiltin}>恢复内置</button>}

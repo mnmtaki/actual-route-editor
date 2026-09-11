@@ -5,7 +5,7 @@ export const BUILTIN_NORMAL_STYLE_ID = 'normal'
 export const BUILTIN_ELEVATED_STYLE_ID = 'elevated'
 
 export const BUILTIN_LINE_STYLES: readonly LineStyle[] = [
-  { id: BUILTIN_NORMAL_STYLE_ID, name: '普通', builtin: true, layers: [{ id: 'normal-main', colorMode: 'followLine', width: 1, widthMode: 'ratio', opacity: 1, lineCap: 'round', lineJoin: 'round' }] },
+  { id: BUILTIN_NORMAL_STYLE_ID, name: '普通', builtin: true, hideBaseLine: true, layers: [{ id: 'normal-main', colorMode: 'followLine', width: 1, widthMode: 'ratio', opacity: 1, lineCap: 'round', lineJoin: 'round' }] },
   { id: BUILTIN_ELEVATED_STYLE_ID, name: '高架', builtin: true, hideBaseLine: true, layers: [
     { id: 'elevated-outer', colorMode: 'followLine', colorMixTarget: '#283033', colorMixAmount: .55, width: 1.38, widthMode: 'ratio', opacity: 1, lineCap: 'butt', lineJoin: 'round' },
     { id: 'elevated-separator', colorMode: 'followLine', colorMixTarget: '#f7f4ec', colorMixAmount: .82, width: 1.18, widthMode: 'ratio', opacity: 1, lineCap: 'butt', lineJoin: 'round' },
@@ -19,7 +19,7 @@ export function getLineStyles(project: ActualRouteProject): LineStyle[] {
   const saved = project.styles ?? []
   const result = BUILTIN_LINE_STYLES.map(style => clone(saved.find(item => item.id === style.id) ?? style))
   for (const style of saved) if (!result.some(item => item.id === style.id) && style.id !== BUILTIN_NORMAL_STYLE_ID && style.id !== BUILTIN_ELEVATED_STYLE_ID) result.push(clone(style))
-  return result.map(style => ({ ...style, builtin: BUILTIN_LINE_STYLES.some(item => item.id === style.id) }))
+  return result.map(style => ({ ...style, ...(style.id === BUILTIN_NORMAL_STYLE_ID && style.hideBaseLine === undefined ? { hideBaseLine: true } : {}), builtin: BUILTIN_LINE_STYLES.some(item => item.id === style.id) }))
 }
 
 export function getLineStyle(project: ActualRouteProject, styleId: string | undefined): LineStyle {
@@ -27,8 +27,15 @@ export function getLineStyle(project: ActualRouteProject, styleId: string | unde
   return styles.find(style => style.id === (styleId ?? BUILTIN_NORMAL_STYLE_ID)) ?? styles[0]
 }
 
-/** Segment.structureType remains the source of truth for existing elevated pieces. */
-export function resolveLineStyle(project: ActualRouteProject, line: Line, segment?: Segment): LineStyle {
+/**
+ * Resolve one segment's shared style.  A null segment override is intentional:
+ * AARC style=0 means "no style", so the renderer should draw only the ordinary
+ * line rather than falling back to the Line style.  Undefined continues to
+ * inherit the Line style (with the existing elevated structure fallback).
+ */
+export function resolveLineStyle(project: ActualRouteProject, line: Line, segment?: Segment): LineStyle | null {
+  if (segment?.lineStyleId === null) return null
+  if (segment?.lineStyleId !== undefined) return getLineStyle(project, segment.lineStyleId)
   return segment?.structureType === 'elevated' ? getLineStyle(project, BUILTIN_ELEVATED_STYLE_ID) : getLineStyle(project, line.lineStyleId)
 }
 
@@ -70,7 +77,7 @@ export function normalizeLineStyles(value: unknown): LineStyle[] | undefined {
     if (!id) continue
     const layers = Array.isArray(raw.layers) ? raw.layers.map(normalizeLayer).filter((layer): layer is LineStyleLayer => Boolean(layer)) : []
     const source = raw.source && typeof raw.source === 'object' && (raw.source as Record<string, unknown>).format === 'aarc' ? structuredClone(raw.source as LineStyle['source']) : undefined
-    result.push({ id, name: typeof raw.name === 'string' && raw.name.trim() ? raw.name : id, ...(raw.hideBaseLine === true ? { hideBaseLine: true } : {}), layers, ...(source ? { source } : {}), ...(BUILTIN_LINE_STYLES.some(style => style.id === id) ? { builtin: true } : {}) })
+    result.push({ id, name: typeof raw.name === 'string' && raw.name.trim() ? raw.name : id, ...(typeof raw.hideBaseLine === 'boolean' ? { hideBaseLine: raw.hideBaseLine } : {}), layers, ...(source ? { source } : {}), ...(BUILTIN_LINE_STYLES.some(style => style.id === id) ? { builtin: true } : {}) })
   }
   return result.length ? result : undefined
 }

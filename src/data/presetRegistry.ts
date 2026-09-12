@@ -37,8 +37,8 @@ const sideStation = (id: string, name: string, colorMode: 'service' | 'fixed', f
   lockAspect: false, cornerRadius: 1.5,
 })
 const numberStation = (id: string, name: string): StationStyle => station({
-  ...baseStation(id, name, 'capsule', 40, 15),
-  template: 'numberPill', placement: 'center', lockAspect: false, cornerRadius: 7.5, markerColorMode: 'service', markerColor: 'white', markerPadding: 4,
+  ...baseStation(id, name, 'capsule', 40, 18),
+  template: 'numberPill', placement: 'center', lockAspect: false, cornerRadius: 9, markerColorMode: 'fixed', markerColor: 'white', markerPadding: 4,
   showLineCode: true, showStationCode: true,
 })
 

@@ -25,7 +25,8 @@ const previewLines: Line[] = [
 function previewProject(project: ActualRouteProject, count: number): ActualRouteProject {
   const lines = previewLines.slice(0, Math.max(1, Math.min(previewLines.length, count)))
   const stations = [{ ...stationPreview, compoundGroupId: lines.length > 1 ? 'preset-preview-compound' : undefined }]
-  return { ...project, stations, lines, stationLineRelations: lines.map((line, index) => ({ id: `preset-preview-relation-${index}`, stationId: stationPreview.id, lineId: line.id, stationCode: String(index + 1).padStart(2, '0'), openedAt: '2000-01-01' })) }
+  const anchors = count === 2 ? [Math.PI, 0] : Array.from({ length: lines.length }, (_, index) => -Math.PI / 2 + index * 2 * Math.PI / Math.max(1, lines.length))
+  return { ...project, stations, lines, stationLineRelations: lines.map((line, index) => ({ id: `preset-preview-relation-${index}`, stationId: stationPreview.id, lineId: line.id, stationCode: String(index + 1).padStart(2, '0'), openedAt: '2000-01-01', anchor: { x: Math.cos(anchors[index] ?? 0) * 48, y: Math.sin(anchors[index] ?? 0) * 48 } })) }
 }
 
 export function PresetPreview({ project, presetId, serviceCount }: { project: ActualRouteProject; presetId: string; serviceCount?: number }) {
@@ -49,6 +50,7 @@ export function PresetPreview({ project, presetId, serviceCount }: { project: Ac
 
 export function BuiltInPresetPanel({ project, onChange, selectedStationIds = [] }: { project: ActualRouteProject; onChange: (project: ActualRouteProject) => void; selectedStationIds?: string[] }) {
   const [error, setError] = useState<string | null>(null)
+  const [previewCounts, setPreviewCounts] = useState<Record<string, number>>({})
   const groups = useMemo(() => {
     const map = new Map<string, ReturnType<typeof getBuiltInPresets>>()
     for (const preset of getBuiltInPresets()) map.set(preset.category, [...(map.get(preset.category) ?? []), preset])
@@ -80,7 +82,8 @@ export function BuiltInPresetPanel({ project, onChange, selectedStationIds = [] 
       <h3>{category}</h3>
       <div className="preset-grid">{presets.map(preset => <article className="preset-card" key={preset.id} data-testid={`preset-card-${preset.id}`} data-preset-type={preset.applicableType}>
         <h4>{preset.displayName}</h4>
-        <PresetPreview project={project} presetId={preset.id} />
+        {preset.id === 'transfer.guangzhou.classic' || preset.id === 'transfer.guangzhou.2024' ? <div className="preset-preview-counts" role="group" aria-label="预览线路数">{[2, 3, 4].map(count => <button key={count} type="button" aria-pressed={(previewCounts[preset.id] ?? preset.preview.serviceCount) === count} onClick={() => setPreviewCounts(current => ({ ...current, [preset.id]: count }))}>{count}线</button>)}</div> : null}
+        <PresetPreview project={project} presetId={preset.id} serviceCount={previewCounts[preset.id]} />
         <p className="meta-note">{preset.applicableType === 'station' ? '普通站' : '换乘站'}{preset.compatibility.recommendedServiceCount ? ` · 推荐 ${preset.compatibility.recommendedServiceCount} 线` : ''}{preset.compatibility.maxServiceCount ? ` · 适用于 ${preset.compatibility.minServiceCount}–${preset.compatibility.maxServiceCount} 线` : ''}</p>
         <div className="preset-actions"><button type="button" onClick={() => apply(preset.id)}>应用</button><button type="button" onClick={() => copy(preset.id)}>复制为自定义样式</button></div>
       </article>)}</div>

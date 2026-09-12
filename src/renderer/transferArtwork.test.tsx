@@ -18,6 +18,29 @@ function sample(count: number) {
 
 const props = (count: number, styleId: string) => { const value = sample(count), style = getBuiltInTransferStyle(styleId)!; return { ...value, style } }
 
+function spatialProps(count: number, orientation: 'horizontal' | 'vertical' | 'radial' = 'radial') {
+  const value = sample(count)
+  const angles = orientation === 'horizontal'
+    ? [Math.PI, 0]
+    : orientation === 'vertical'
+      ? [-Math.PI / 2, Math.PI / 2]
+      : Array.from({ length: count }, (_, index) => -Math.PI / 2 + index * 2 * Math.PI / Math.max(1, count))
+  value.project.stationLineRelations.forEach((relation, index) => {
+    const angle = angles[index] ?? angles[index % angles.length]
+    relation.anchor = { x: value.station.x + Math.cos(angle) * 60, y: value.station.y + Math.sin(angle) * 60 }
+  })
+  return { ...value, style: getBuiltInTransferStyle('transfer.guangzhou.2024')! }
+}
+
+function pillPositions(container: HTMLElement) {
+  return [...container.querySelectorAll<SVGGElement>('[data-transfer-cell="true"]')].map(cell => ({
+    x: Number(cell.getAttribute('data-guangzhou-pill-position-x')),
+    y: Number(cell.getAttribute('data-guangzhou-pill-position-y')),
+    rect: cell.querySelector('[data-guangzhou-pill-background="true"]') as SVGRectElement,
+    lineId: cell.getAttribute('data-line-id'),
+  }))
+}
+
 describe('shared TransferArtwork preset templates', () => {
   it('keeps ActualRoute default dots and supports Shanghai white adaptive capsules without dots', () => {
     const actual = props(2, 'transfer.actualroute.default'), actualView = render(<svg>{renderTransferArtwork({ project: actual.project, station: actual.station, lines: actual.lines, style: actual.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
@@ -34,6 +57,11 @@ describe('shared TransferArtwork preset templates', () => {
       const value = props(count, 'transfer.guangzhou.classic'), view = render(<svg>{renderTransferArtwork({ project: value.project, station: value.station, lines: value.lines, style: value.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
       expect(view.container.querySelectorAll('[data-transfer-cell="true"]')).toHaveLength(count)
       expect(view.container.querySelectorAll('[data-transfer-arrow="true"]')).toHaveLength(count)
+      expect(view.container.querySelectorAll('[data-guangzhou-pill="true"]')).toHaveLength(count)
+      expect(view.container.querySelectorAll('[data-guangzhou-pill-background="true"]')).toHaveLength(count)
+      expect([...view.container.querySelectorAll('[data-guangzhou-pill-background="true"]')].every(node => node.getAttribute('fill') === 'white')).toBe(true)
+      expect([...view.container.querySelectorAll('[data-guangzhou-pill-line="true"], [data-guangzhou-pill-station="true"]')].every(node => node.getAttribute('fill') === '#202526')).toBe(true)
+      expect([...view.container.querySelectorAll('[data-guangzhou-arrow] path')].some(node => node.getAttribute('d')?.includes('Q'))).toBe(true)
       view.unmount()
     }
     const incompatible = props(5, 'transfer.guangzhou.classic'), view = render(<svg>{renderTransferArtwork({ project: incompatible.project, station: incompatible.station, lines: incompatible.lines, style: incompatible.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
@@ -44,8 +72,56 @@ describe('shared TransferArtwork preset templates', () => {
     for (const count of [2, 3, 4, 5, 6]) {
       const value = props(count, 'transfer.guangzhou.2024'), view = render(<svg>{renderTransferArtwork({ project: value.project, station: value.station, lines: value.lines, style: value.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
       expect(view.container.querySelectorAll('[data-transfer-cell="true"]')).toHaveLength(count)
+      expect(view.container.querySelectorAll('[data-guangzhou-pill="true"]')).toHaveLength(count)
+      expect(view.container.querySelector('[data-guangzhou-shell="true"]')).toBeTruthy()
+      expect(view.container.querySelectorAll('[data-transfer-arrow="true"]')).toHaveLength(0)
       view.unmount()
     }
+  })
+
+  it('uses spatial anchors for horizontal and vertical Guangzhou 2024 pairs', () => {
+    const horizontal = spatialProps(2, 'horizontal'), horizontalView = render(<svg>{renderTransferArtwork({ project: horizontal.project, station: horizontal.station, lines: horizontal.lines, style: horizontal.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
+    const horizontalPositions = pillPositions(horizontalView.container)
+    expect(Math.abs(horizontalPositions[0].x - horizontalPositions[1].x)).toBeGreaterThan(Math.abs(horizontalPositions[0].y - horizontalPositions[1].y))
+    horizontalView.unmount()
+    const vertical = spatialProps(2, 'vertical'), verticalView = render(<svg>{renderTransferArtwork({ project: vertical.project, station: vertical.station, lines: vertical.lines, style: vertical.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
+    const verticalPositions = pillPositions(verticalView.container)
+    expect(Math.abs(verticalPositions[0].y - verticalPositions[1].y)).toBeGreaterThan(Math.abs(verticalPositions[0].x - verticalPositions[1].x))
+  })
+
+  it('packs 5/6 spatial pills without overlap and keeps a deterministic shell', () => {
+    for (const count of [5, 6]) {
+      const first = spatialProps(count), firstView = render(<svg>{renderTransferArtwork({ project: first.project, station: first.station, lines: first.lines, style: first.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
+      const firstPositions = pillPositions(firstView.container)
+      expect(firstPositions).toHaveLength(count)
+      for (let i = 0; i < firstPositions.length; i += 1) for (let j = i + 1; j < firstPositions.length; j += 1) {
+        const left = firstPositions[i], right = firstPositions[j]
+        const leftWidth = Number(left.rect.getAttribute('width')), rightWidth = Number(right.rect.getAttribute('width'))
+        expect(Math.hypot(left.x - right.x, left.y - right.y)).toBeGreaterThanOrEqual((leftWidth + rightWidth) / 2)
+      }
+      const shell = firstView.container.querySelector('[data-guangzhou-shell="true"]') as SVGRectElement
+      const shellLeft = Number(shell.getAttribute('x')), shellTop = Number(shell.getAttribute('y')), shellRight = shellLeft + Number(shell.getAttribute('width')), shellBottom = shellTop + Number(shell.getAttribute('height'))
+      for (const item of firstPositions) {
+        const left = Number(item.rect.getAttribute('x')), top = Number(item.rect.getAttribute('y'))
+        expect(left).toBeGreaterThanOrEqual(shellLeft)
+        expect(top).toBeGreaterThanOrEqual(shellTop)
+        expect(left + Number(item.rect.getAttribute('width'))).toBeLessThanOrEqual(shellRight)
+        expect(top + Number(item.rect.getAttribute('height'))).toBeLessThanOrEqual(shellBottom)
+      }
+      firstView.unmount()
+      const second = spatialProps(count), secondView = render(<svg>{renderTransferArtwork({ project: second.project, station: second.station, lines: second.lines, style: second.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
+      expect(pillPositions(secondView.container).map(item => [item.x, item.y])).toEqual(firstPositions.map(item => [item.x, item.y]))
+    }
+  })
+
+  it('keeps Guangzhou pill service mapping and leaves missing station codes blank', () => {
+    const value = spatialProps(2)
+    const relation = value.project.stationLineRelations.find(item => item.lineId === value.lines[1].id)!
+    delete relation.stationCode
+    const view = render(<svg>{renderTransferArtwork({ project: value.project, station: value.station, lines: value.lines, style: value.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
+    const cells = [...view.container.querySelectorAll('[data-transfer-cell="true"]')]
+    expect(cells.map(cell => cell.getAttribute('data-line-id'))).toEqual(value.lines.map(line => line.id))
+    expect(cells[1].querySelector('[data-guangzhou-pill-station="true"]')).toHaveTextContent('')
   })
 
   it('uses fixed two arrows for Beijing and N arrows for Kunming 2/3+', () => {

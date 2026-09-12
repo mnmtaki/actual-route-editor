@@ -45,7 +45,8 @@ export function PresetPreview({ project, presetId, serviceCount }: { project: Ac
   const count = serviceCount ?? preset.preview.serviceCount ?? preset.compatibility.recommendedServiceCount ?? preset.compatibility.minServiceCount
   const sampleProject = previewProject(project, count)
   const lines = sortTransferLinesForSpatialOrder(sampleProject, stationPreview.id, collapseLinesByServiceFamily(sampleProject, sampleProject.lines.map(line => lineWithEffectiveColor(sampleProject, line))), '2099-01-01')
-  return <svg className="preset-preview-svg" viewBox="-100 -75 200 150" role="img" aria-label={`${preset.displayName}预览`}><line x1="-100" y1="0" x2="100" y2="0" stroke="#d7d1c7" strokeWidth="3" />{renderTransferArtwork({ project: sampleProject, station: stationPreview, lines, style: preset.transferStyle, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8, centerX: 0, centerY: 0, minMajorAxis: 0 })}</svg>
+  const viewBox = preset.transferStyle.template === 'kunming' ? (count === 2 ? '-70 -48 140 96' : '-65 -65 130 130') : '-100 -75 200 150'
+  return <svg className="preset-preview-svg" viewBox={viewBox} role="img" aria-label={`${preset.displayName}预览`}><line x1="-100" y1="0" x2="100" y2="0" stroke="#d7d1c7" strokeWidth="3" />{renderTransferArtwork({ project: sampleProject, station: stationPreview, lines, style: preset.transferStyle, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8, centerX: 0, centerY: 0, minMajorAxis: 0 })}</svg>
 }
 
 export function BuiltInPresetPanel({ project, onChange, selectedStationIds = [] }: { project: ActualRouteProject; onChange: (project: ActualRouteProject) => void; selectedStationIds?: string[] }) {
@@ -82,7 +83,7 @@ export function BuiltInPresetPanel({ project, onChange, selectedStationIds = [] 
       <h3>{category}</h3>
       <div className="preset-grid">{presets.map(preset => <article className="preset-card" key={preset.id} data-testid={`preset-card-${preset.id}`} data-preset-type={preset.applicableType}>
         <h4>{preset.displayName}</h4>
-        {preset.id === 'transfer.guangzhou.classic' || preset.id === 'transfer.guangzhou.2024' ? <div className="preset-preview-counts" role="group" aria-label="预览线路数">{[2, 3, 4].map(count => <button key={count} type="button" aria-pressed={(previewCounts[preset.id] ?? preset.preview.serviceCount) === count} onClick={() => setPreviewCounts(current => ({ ...current, [preset.id]: count }))}>{count}线</button>)}</div> : null}
+        {preset.id === 'transfer.guangzhou.classic' || preset.id === 'transfer.guangzhou.2024' || preset.id === 'transfer.kunming' ? <div className="preset-preview-counts" role="group" aria-label="预览线路数">{[2, 3, 4].map(count => <button key={count} type="button" aria-pressed={(previewCounts[preset.id] ?? preset.preview.serviceCount) === count} onClick={() => setPreviewCounts(current => ({ ...current, [preset.id]: count }))}>{count}线</button>)}</div> : null}
         <PresetPreview project={project} presetId={preset.id} serviceCount={previewCounts[preset.id]} />
         <p className="meta-note">{preset.applicableType === 'station' ? '普通站' : '换乘站'}{preset.compatibility.recommendedServiceCount ? ` · 推荐 ${preset.compatibility.recommendedServiceCount} 线` : ''}{preset.compatibility.maxServiceCount ? ` · 适用于 ${preset.compatibility.minServiceCount}–${preset.compatibility.maxServiceCount} 线` : ''}</p>
         <div className="preset-actions"><button type="button" onClick={() => apply(preset.id)}>应用</button><button type="button" onClick={() => copy(preset.id)}>复制为自定义样式</button></div>

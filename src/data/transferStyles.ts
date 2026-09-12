@@ -1,5 +1,5 @@
 import type { ActualRouteProject, Station, TransferStyle, TransferStyleTemplate } from './model'
-import { getBuiltInTransferStyle } from './presetRegistry'
+import { canonicalizeTransferPresetId, getBuiltInTransferStyle } from './presetRegistry'
 import { getCompoundStationCanonical, getCompoundStationMembers } from './compoundStation'
 import { uid } from './model'
 
@@ -53,13 +53,14 @@ export function resolveTransferStyle(project: ActualRouteProject, stationOrId: S
   const memberOverride = station
     ? getCompoundStationMembers(project, station).find(member => typeof member.transferStyleId === 'string')?.transferStyleId
     : undefined
-  const selectedId = canonical?.transferStyleId ?? memberOverride ?? station?.transferStyleId ?? project.defaultTransferStyleId ?? DEFAULT_TRANSFER_STYLE_ID
+  const selectedId = canonicalizeTransferPresetId(canonical?.transferStyleId ?? memberOverride ?? station?.transferStyleId ?? project.defaultTransferStyleId) ?? DEFAULT_TRANSFER_STYLE_ID
   const saved = getTransferStyles(project).find(style => style.id === selectedId)
   return saved ?? getBuiltInTransferStyle(selectedId) ?? getBuiltInTransferStyle(DEFAULT_TRANSFER_STYLE_ID)!
 }
 
 export function assignTransferStyle(project: ActualRouteProject, stationIds: string[], styleId?: string): ActualRouteProject {
-  const validId = styleId && (getTransferStyles(project).some(style => style.id === styleId) || getBuiltInTransferStyle(styleId)) ? styleId : undefined
+  const canonicalId = canonicalizeTransferPresetId(styleId)
+  const validId = canonicalId && (getTransferStyles(project).some(style => style.id === canonicalId) || getBuiltInTransferStyle(canonicalId)) ? canonicalId : undefined
   const next = structuredClone(project), selected = new Set(stationIds), logicalIds = new Set(next.stations.filter(item => selected.has(item.id)).flatMap(item => getCompoundStationMembers(next, item).map(member => member.id)))
   for (const station of next.stations) if (logicalIds.has(station.id)) {
     if (validId) station.transferStyleId = validId
@@ -69,8 +70,9 @@ export function assignTransferStyle(project: ActualRouteProject, stationIds: str
 }
 
 export function setProjectDefaultTransferStyle(project: ActualRouteProject, styleId: string): ActualRouteProject {
-  if (!getTransferStyles(project).some(style => style.id === styleId) && !getBuiltInTransferStyle(styleId)) return project
-  const next = structuredClone(project); next.defaultTransferStyleId = styleId; return next
+  const canonicalId = canonicalizeTransferPresetId(styleId)
+  if (!canonicalId || (!getTransferStyles(project).some(style => style.id === canonicalId) && !getBuiltInTransferStyle(canonicalId))) return project
+  const next = structuredClone(project); next.defaultTransferStyleId = canonicalId; return next
 }
 
 export function createTransferStyle(project: ActualRouteProject, sourceId?: string, name?: string): { project: ActualRouteProject; styleId: string } {

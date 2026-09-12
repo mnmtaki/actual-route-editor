@@ -27,4 +27,11 @@ describe('TransferStyle project and logical identity', () => {
     expect(updateTransferStyle(updated, 'transfer.kunming.two', { shellStrokeWidth: 5 })).toBe(updated)
     expect(deleteTransferStyle(updated, 'transfer.kunming.two')).toEqual(updated)
   })
+
+  it('copies Kunming as one dynamic template rather than a service-count snapshot', () => {
+    const copied = createTransferStyle(structuredClone(demoProject), 'transfer.kunming.three', '昆明动态自定义')
+    const style = copied.project.transferStyles?.find(item => item.id === copied.styleId)
+    expect(style).toMatchObject({ name: '昆明动态自定义', template: 'kunming', minServiceCount: 2 })
+    expect(style?.maxServiceCount).toBeUndefined()
+  })
 })

@@ -22,6 +22,19 @@ export interface BuiltInPreset {
   transferStyle?: TransferStyle
 }
 
+export const KUNMING_TRANSFER_PRESET_ID = 'transfer.kunming'
+const LEGACY_TRANSFER_PRESET_ALIASES: Record<string, string> = {
+  'transfer.kunming.two': KUNMING_TRANSFER_PRESET_ID,
+  'transfer.kunming.three': KUNMING_TRANSFER_PRESET_ID,
+}
+
+/** Resolve preset references saved by the pre-dynamic Kunming registry. */
+export function canonicalizeTransferPresetId(id: string | undefined): string | undefined {
+  if (typeof id !== 'string' || !id.trim()) return undefined
+  const normalized = id.trim()
+  return LEGACY_TRANSFER_PRESET_ALIASES[normalized] ?? normalized
+}
+
 const station = (input: Omit<StationStyle, 'builtin'>): StationStyle => ({ ...input, builtin: true })
 const transfer = (input: Omit<TransferStyle, 'builtin'>): TransferStyle => ({ ...input, builtin: true })
 const baseStation = (id: string, name: string, shape: StationStyle['shape'], width: number, height: number): StationStyle => station({
@@ -54,8 +67,7 @@ const PRESETS: BuiltInPreset[] = [
   { id: 'transfer.guangzhou.classic', displayName: '广州地铁换乘车站（经典）', category: '广州', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 2, maxServiceCount: 4, recommendedServiceCount: 2 }, preview: { serviceCount: 2, lineCodes: ['1', '2'], stationCodes: ['01', '02'] }, renderer: 'transfer-artwork', transferStyle: transfer({ id: 'transfer.guangzhou.classic', name: '广州地铁换乘车站（经典）', template: 'guangzhouClassic', shellFill: 'white', shellStroke: '#3f454a', shellStrokeWidth: 1.25, dotsVisible: false, minServiceCount: 2, maxServiceCount: 4, recommendedServiceCount: 2 }) },
   { id: 'transfer.guangzhou.2024', displayName: '广州地铁换乘车站（2024）', category: '广州', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 2 }, preview: { serviceCount: 4, lineCodes: ['1', '3', '7', '8'], stationCodes: ['01', '03', '05', '02'] }, renderer: 'transfer-artwork', transferStyle: transfer({ id: 'transfer.guangzhou.2024', name: '广州地铁换乘车站（2024）', template: 'guangzhou2024', shellFill: 'white', shellStroke: '#3f454a', shellStrokeWidth: 1.25, dotsVisible: false, minServiceCount: 2 }) },
   { id: 'transfer.beijing.default', displayName: '北京地铁换乘车站', category: '北京', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 2 }, preview: { serviceCount: 2 }, renderer: 'transfer-artwork', transferStyle: whiteCapsuleTransfer('transfer.beijing.default', '北京地铁换乘车站', 'beijing') },
-  { id: 'transfer.kunming.two', displayName: '昆明地铁两线换乘站', category: '昆明', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 2, recommendedServiceCount: 2 }, preview: { serviceCount: 2 }, renderer: 'transfer-artwork', transferStyle: transfer({ id: 'transfer.kunming.two', name: '昆明地铁两线换乘站', template: 'kunming', shellFill: 'white', shellStroke: '#3f454a', shellStrokeWidth: 1.25, dotsVisible: false, minServiceCount: 2, recommendedServiceCount: 2 }) },
-  { id: 'transfer.kunming.three', displayName: '昆明地铁三线换乘站', category: '昆明', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 3, recommendedServiceCount: 3 }, preview: { serviceCount: 3 }, renderer: 'transfer-artwork', transferStyle: transfer({ id: 'transfer.kunming.three', name: '昆明地铁三线换乘站', template: 'kunming', shellFill: 'white', shellStroke: '#3f454a', shellStrokeWidth: 1.25, dotsVisible: false, minServiceCount: 2, recommendedServiceCount: 3 }) },
+  { id: KUNMING_TRANSFER_PRESET_ID, displayName: '昆明地铁换乘站', category: '昆明', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 2 }, preview: { serviceCount: 2 }, renderer: 'transfer-artwork', transferStyle: transfer({ id: KUNMING_TRANSFER_PRESET_ID, name: '昆明地铁换乘站', template: 'kunming', shellFill: 'white', shellStroke: '#3f454a', shellStrokeWidth: 1.75, dotsVisible: false, minServiceCount: 2 }) },
   { id: 'station.metroman.basic', displayName: '地铁通基本车站', category: '地铁通', applicableType: 'station', immutable: true, compatibility: { minServiceCount: 1 }, preview: {}, renderer: 'station-artwork', stationStyle: sideStation('station.metroman.basic', '地铁通基本车站', 'fixed', 'white', 'inward', .5, .36) },
   { id: 'transfer.metroman.default', displayName: '地铁通换乘车站', category: '地铁通', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 2 }, preview: { serviceCount: 2 }, renderer: 'transfer-artwork', transferStyle: whiteCapsuleTransfer('transfer.metroman.default', '地铁通换乘车站', 'metroman') },
 ]
@@ -76,7 +88,7 @@ export function getBuiltInPresets(type?: BuiltInPresetType): BuiltInPreset[] {
 export const getPresetRegistry = getBuiltInPresets
 
 export function getBuiltInPreset(id: string): BuiltInPreset | undefined {
-  const preset = BUILTIN_PRESET_REGISTRY.find(item => item.id === id)
+  const preset = BUILTIN_PRESET_REGISTRY.find(item => item.id === canonicalizeTransferPresetId(id))
   return preset ? structuredClone(preset) : undefined
 }
 
@@ -86,25 +98,25 @@ export function getBuiltInStationStyle(id: string | undefined): StationStyle | u
 }
 
 export function getBuiltInTransferStyle(id: string | undefined): TransferStyle | undefined {
-  const preset = BUILTIN_PRESET_REGISTRY.find(item => item.id === id && item.applicableType === 'transfer')
+  const preset = BUILTIN_PRESET_REGISTRY.find(item => item.id === canonicalizeTransferPresetId(id) && item.applicableType === 'transfer')
   return preset?.transferStyle ? structuredClone(preset.transferStyle) : undefined
 }
 
 export function isPresetCompatible(presetOrId: BuiltInPreset | string, serviceCount: number): boolean {
-  const preset = typeof presetOrId === 'string' ? BUILTIN_PRESET_REGISTRY.find(item => item.id === presetOrId) : presetOrId
+  const preset = typeof presetOrId === 'string' ? getBuiltInPreset(presetOrId) : presetOrId
   if (!preset || !Number.isFinite(serviceCount)) return false
   return serviceCount >= preset.compatibility.minServiceCount && (preset.compatibility.maxServiceCount === undefined || serviceCount <= preset.compatibility.maxServiceCount)
 }
 
 export function presetCompatibilityMessage(presetOrId: BuiltInPreset | string, serviceCount: number): string | null {
-  const preset = typeof presetOrId === 'string' ? BUILTIN_PRESET_REGISTRY.find(item => item.id === presetOrId) : presetOrId
+  const preset = typeof presetOrId === 'string' ? getBuiltInPreset(presetOrId) : presetOrId
   if (!preset || isPresetCompatible(preset, serviceCount)) return null
   if (preset.compatibility.maxServiceCount !== undefined) return `${preset.displayName}仅适用于${preset.compatibility.minServiceCount}–${preset.compatibility.maxServiceCount}线换乘。`
   return `${preset.displayName}至少需要${preset.compatibility.minServiceCount}线换乘。`
 }
 
 export function copyPresetToCustom(project: ActualRouteProject, presetId: string, name?: string): { project: ActualRouteProject; styleId: string } {
-  const preset = BUILTIN_PRESET_REGISTRY.find(item => item.id === presetId)
+  const preset = getBuiltInPreset(presetId)
   if (!preset) return { project, styleId: '' }
   const next = structuredClone(project)
   const id = uid(preset.applicableType === 'station' ? 'station_style' : 'transfer_style')
@@ -121,7 +133,7 @@ export function copyPresetToCustom(project: ActualRouteProject, presetId: string
 }
 
 export function applyPresetToStations(project: ActualRouteProject, stationIds: string[], presetId: string): ActualRouteProject {
-  const preset = BUILTIN_PRESET_REGISTRY.find(item => item.id === presetId)
+  const preset = getBuiltInPreset(presetId)
   if (!preset) return project
   if (preset.applicableType === 'transfer') {
     const selected = new Set(stationIds)
@@ -147,11 +159,12 @@ export function applyPresetToStations(project: ActualRouteProject, stationIds: s
 }
 
 export function setDefaultPreset(project: ActualRouteProject, type: BuiltInPresetType, presetId: string): ActualRouteProject {
-  const preset = BUILTIN_PRESET_REGISTRY.find(item => item.id === presetId && item.applicableType === type)
+  const canonicalId = canonicalizeTransferPresetId(presetId)
+  const preset = BUILTIN_PRESET_REGISTRY.find(item => item.id === canonicalId && item.applicableType === type)
   if (!preset) return project
   const next = structuredClone(project)
-  if (type === 'station') next.defaultStationStyleId = presetId
-  else next.defaultTransferStyleId = presetId
+  if (type === 'station') next.defaultStationStyleId = preset.id
+  else next.defaultTransferStyleId = preset.id
   return next
 }
 

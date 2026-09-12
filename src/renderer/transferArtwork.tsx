@@ -56,17 +56,6 @@ function adaptiveCapsule({ x, y, lines, size, minorAxis, dotGap, endPadding, min
   return <g data-transfer-template={template} data-service-count={lines.length} data-dots-visible="false">{shell({ x, y, width, height, style })}</g>
 }
 
-function transferArrow(from: { x: number; y: number }, to: { x: number; y: number }, color: string, index: number, curvature = 8) {
-  const dx = to.x - from.x, dy = to.y - from.y, length = Math.hypot(dx, dy) || 1
-  const nx = -dy / length, ny = dx / length, mx = (from.x + to.x) / 2 + nx * curvature, my = (from.y + to.y) / 2 + ny * curvature
-  const tx = to.x - dx / length * 5, ty = to.y - dy / length * 5
-  const angle = Math.atan2(dy, dx) * 180 / Math.PI
-  return <g key={index} data-transfer-arrow="true" data-arrow-index={index} fill={color}>
-    <path d={`M ${from.x} ${from.y} Q ${mx} ${my} ${tx} ${ty}`} fill="none" stroke={color} strokeWidth="2.6" strokeLinecap="round" />
-    <path d="M -4 -3 L 4 0 L -4 3 Z" transform={`translate(${to.x} ${to.y}) rotate(${angle})`} />
-  </g>
-}
-
 type GuangzhouServicePair = ReturnType<typeof serviceCodePairs>[number]
 interface GuangzhouPillPosition { pair: GuangzhouServicePair; x: number; y: number; width: number; height: number; angle: number }
 
@@ -179,15 +168,64 @@ function beijing({ x, y, pairs, style, size }: { x: number; y: number; pairs: Re
   return <g data-transfer-template="beijing" data-service-count={pairs.length}><circle cx={x} cy={y} r={radius} fill={style.shellFill} stroke={style.shellStroke} strokeWidth={style.shellStrokeWidth} vectorEffect="non-scaling-stroke" />{arc(-Math.PI * .78, Math.PI * .12, pairs[0]?.line.color ?? '#64748b', 0)}{arc(Math.PI * .22, Math.PI * 1.12, pairs[1]?.line.color ?? pairs[0]?.line.color ?? '#64748b', 1)}</g>
 }
 
-function kunming({ x, y, pairs, style, size, minorAxis, minMajorAxis }: { x: number; y: number; pairs: ReturnType<typeof serviceCodePairs>; style: TransferStyle; size: number; minorAxis: number; minMajorAxis?: number }) {
-  if (pairs.length === 2) {
-    const width = Math.max(size * 4.2, minMajorAxis ?? 0), height = Math.max(minorAxis, size * 1.25)
-    return <g data-transfer-template="kunming" data-service-count="2" data-kunming-shape="capsule">{shell({ x, y, width, height, style })}{transferArrow({ x: x - width * .28, y: y - height * .12 }, { x: x + width * .28, y: y - height * .12 }, pairs[0].line.color, 0, 9)}{transferArrow({ x: x + width * .28, y: y + height * .12 }, { x: x - width * .28, y: y + height * .12 }, pairs[1].line.color, 1, -9)}</g>
-  }
-  const radius = Math.max(size * 1.8, minorAxis / 2), arrowRadius = radius * .62
-  const arrows = pairs.map((pair, index) => { const start = -Math.PI / 2 + index * 2 * Math.PI / pairs.length, end = start + Math.PI * 1.18; const from = { x: x + Math.cos(start) * arrowRadius, y: y + Math.sin(start) * arrowRadius }, to = { x: x + Math.cos(end) * arrowRadius, y: y + Math.sin(end) * arrowRadius }; const large = Math.abs(end - start) > Math.PI ? 1 : 0; return <g key={pair.line.id} data-transfer-arrow="true" data-arrow-index={index}><path d={`M ${from.x} ${from.y} A ${arrowRadius} ${arrowRadius} 0 ${large} 1 ${to.x} ${to.y}`} fill="none" stroke={pair.line.color} strokeWidth="3" strokeLinecap="round" /><path d="M -4 -3 L 4 0 L -4 3 Z" transform={`translate(${to.x} ${to.y}) rotate(${end * 180 / Math.PI + 90})`} fill={pair.line.color}/></g> })
-  return <g data-transfer-template="kunming" data-service-count={pairs.length} data-kunming-shape="circle"><circle cx={x} cy={y} r={radius} fill={style.shellFill} stroke={style.shellStroke} strokeWidth={style.shellStrokeWidth} vectorEffect="non-scaling-stroke" />{arrows}</g>
+export interface KunmingTransferMetrics {
+  width: number
+  height: number
+  radius?: number
+  arrowRadius?: number
+  strokeWidth: number
+  arrowHeadSize: number
 }
+
+export function resolveKunmingTwoLineMetrics(size: number, minorAxis: number, minMajorAxis = 0): KunmingTransferMetrics {
+  const height = Math.max(minorAxis, size * 2.6)
+  const width = Math.max(minMajorAxis, size * 6.6, height * 2.25)
+  return { width, height, strokeWidth: Math.max(3.8, size * .26), arrowHeadSize: Math.max(5.5, size * .38) }
+}
+
+export function resolveKunmingCircularMetrics(size: number, minorAxis: number, minMajorAxis: number | undefined, count: number): KunmingTransferMetrics {
+  const radius = Math.max(minorAxis / 2 + size * .55, (minMajorAxis ?? 0) / 2 + size * .55, size * (2.15 + Math.min(14, count) * .1))
+  const arrowRadius = radius - Math.max(size * .65, 10)
+  return { width: radius * 2, height: radius * 2, radius, arrowRadius, strokeWidth: Math.max(3.1, size * (count >= 6 ? .18 : .22)), arrowHeadSize: Math.max(5, size * .34) }
+}
+
+function kunmingArrow({ path, tip, angle, color, index, mode, strokeWidth, arrowHeadSize }: { path: string; tip: { x: number; y: number }; angle: number; color: string; index: number; mode: 'two-line-left' | 'two-line-right' | 'circular'; strokeWidth: number; arrowHeadSize: number }) {
+  return <g key={index} data-transfer-arrow="true" data-kunming-arrow="true" data-arrow-index={index} data-kunming-arrow-mode={mode} fill={color}>
+    <path d={path} fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+    <path data-kunming-arrow-head="true" d={`M ${-arrowHeadSize} ${-arrowHeadSize * .55} L 0 0 L ${-arrowHeadSize} ${arrowHeadSize * .55} Z`} transform={`translate(${tip.x} ${tip.y}) rotate(${angle * 180 / Math.PI})`} />
+  </g>
+}
+
+function KunmingTransferSymbol({ x, y, pairs, style, size, minorAxis, minMajorAxis }: { x: number; y: number; pairs: ReturnType<typeof serviceCodePairs>; style: TransferStyle; size: number; minorAxis: number; minMajorAxis?: number }) {
+  if (pairs.length < 2) return <g data-transfer-template="kunming" data-transfer-incompatible="true" data-service-count={pairs.length} />
+  if (pairs.length === 2) {
+    const metrics = resolveKunmingTwoLineMetrics(size, minorAxis, minMajorAxis)
+    const leftPath = `M ${x - metrics.width * .28} ${y + metrics.height * .23} C ${x - metrics.width * .46} ${y + metrics.height * .23}, ${x - metrics.width * .46} ${y - metrics.height * .23}, ${x - metrics.width * .1} ${y - metrics.height * .23}`
+    const rightPath = `M ${x + metrics.width * .28} ${y - metrics.height * .23} C ${x + metrics.width * .46} ${y - metrics.height * .23}, ${x + metrics.width * .46} ${y + metrics.height * .23}, ${x + metrics.width * .1} ${y + metrics.height * .23}`
+    return <g data-transfer-template="kunming" data-service-count="2" data-kunming-shape="capsule" data-kunming-mode="two-line-capsule" data-kunming-width={metrics.width} data-kunming-height={metrics.height}>
+      <rect data-kunming-shell="true" className="kunming-shell" x={x - metrics.width / 2} y={y - metrics.height / 2} width={metrics.width} height={metrics.height} rx={metrics.height / 2} fill={style.shellFill || 'white'} stroke={style.shellStroke || '#3f454a'} strokeWidth={style.shellStrokeWidth} vectorEffect="non-scaling-stroke" />
+      {kunmingArrow({ path: leftPath, tip: { x: x - metrics.width * .1, y: y - metrics.height * .23 }, angle: 0, color: pairs[0].line.color, index: 0, mode: 'two-line-left', strokeWidth: metrics.strokeWidth, arrowHeadSize: metrics.arrowHeadSize })}
+      {kunmingArrow({ path: rightPath, tip: { x: x + metrics.width * .1, y: y + metrics.height * .23 }, angle: Math.PI, color: pairs[1].line.color, index: 1, mode: 'two-line-right', strokeWidth: metrics.strokeWidth, arrowHeadSize: metrics.arrowHeadSize })}
+    </g>
+  }
+  const count = pairs.length
+  const metrics = resolveKunmingCircularMetrics(size, minorAxis, minMajorAxis, count)
+  const step = 2 * Math.PI / count
+  const arcSpan = Math.min(step * .76, Math.PI * .72)
+  const arrows = pairs.map((pair, index) => {
+    const start = -Math.PI / 2 + index * step
+    const end = start + arcSpan
+    const from = { x: x + Math.cos(start) * metrics.arrowRadius!, y: y + Math.sin(start) * metrics.arrowRadius! }
+    const tip = { x: x + Math.cos(end) * metrics.arrowRadius!, y: y + Math.sin(end) * metrics.arrowRadius! }
+    return kunmingArrow({ path: `M ${from.x} ${from.y} A ${metrics.arrowRadius} ${metrics.arrowRadius} 0 0 1 ${tip.x} ${tip.y}`, tip, angle: end + Math.PI / 2, color: pair.line.color, index, mode: 'circular', strokeWidth: metrics.strokeWidth, arrowHeadSize: metrics.arrowHeadSize })
+  })
+  return <g data-transfer-template="kunming" data-service-count={count} data-kunming-shape="circle" data-kunming-mode="circular-n-arrow" data-kunming-radius={metrics.radius}>
+    <circle data-kunming-shell="true" cx={x} cy={y} r={metrics.radius} fill={style.shellFill || 'white'} stroke={style.shellStroke || '#3f454a'} strokeWidth={style.shellStrokeWidth} vectorEffect="non-scaling-stroke" />
+    {arrows}
+  </g>
+}
+
+export { KunmingTransferSymbol }
 
 export function renderTransferArtwork(props: TransferArtworkProps) {
   const { project, station, lines, style, rotation = 0, centerX = station.x, centerY = station.y } = props
@@ -198,7 +236,7 @@ export function renderTransferArtwork(props: TransferArtworkProps) {
   else if (style.template === 'guangzhouClassic') content = guangzhouClassic({ x: centerX, y: centerY, pairs, style })
   else if (style.template === 'guangzhou2024') content = guangzhou2024({ project, station, x: centerX, y: centerY, pairs, style })
   else if (style.template === 'beijing') content = beijing({ x: centerX, y: centerY, pairs, style, size: props.size })
-  else content = kunming({ x: centerX, y: centerY, pairs, style, size: props.size, minorAxis: props.minorAxis, minMajorAxis: props.minMajorAxis })
+  else content = KunmingTransferSymbol({ x: centerX, y: centerY, pairs, style, size: props.size, minorAxis: props.minorAxis, minMajorAxis: props.minMajorAxis })
   return <g transform={rotation ? `rotate(${rotation} ${centerX} ${centerY})` : undefined} data-transfer-style-id={style.id}>{content}</g>
 }
 

@@ -124,13 +124,42 @@ describe('shared TransferArtwork preset templates', () => {
     expect(cells[1].querySelector('[data-guangzhou-pill-station="true"]')).toHaveTextContent('')
   })
 
-  it('uses fixed two arrows for Beijing and N arrows for Kunming 2/3+', () => {
+  it('uses fixed two arrows for Beijing and one dynamic N-arrow Kunming symbol', () => {
     const beijing = props(4, 'transfer.beijing.default'), b = render(<svg>{renderTransferArtwork({ project: beijing.project, station: beijing.station, lines: beijing.lines, style: beijing.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
     expect(b.container.querySelectorAll('[data-transfer-arrow="true"]')).toHaveLength(2)
     b.unmount()
-    for (const count of [2, 3, 4, 6]) {
-      const value = props(count, count === 2 ? 'transfer.kunming.two' : 'transfer.kunming.three'), view = render(<svg>{renderTransferArtwork({ project: value.project, station: value.station, lines: value.lines, style: value.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
+    for (const count of [2, 3, 4, 5, 6]) {
+      const value = props(count, 'transfer.kunming'), view = render(<svg>{renderTransferArtwork({ project: value.project, station: value.station, lines: value.lines, style: value.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
       expect(view.container.querySelectorAll('[data-transfer-arrow="true"]')).toHaveLength(count)
+      expect(view.container.querySelectorAll('[data-kunming-arrow-head="true"]')).toHaveLength(count)
+      view.unmount()
+    }
+  })
+
+  it('renders a substantial two-line Kunming capsule with mirrored U-turn arrows', () => {
+    const value = props(2, 'transfer.kunming')
+    const view = render(<svg>{renderTransferArtwork({ project: value.project, station: value.station, lines: value.lines, style: value.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
+    const symbol = view.container.querySelector('[data-transfer-template="kunming"]')!
+    const shell = symbol.querySelector('[data-kunming-shell="true"]')!
+    expect(shell).toHaveAttribute('fill', 'white')
+    expect(shell).toHaveAttribute('stroke', '#3f454a')
+    expect(Number(shell.getAttribute('height'))).toBeGreaterThanOrEqual(16 * 2.6)
+    expect(symbol.querySelectorAll('[data-kunming-arrow-mode="two-line-left"]')).toHaveLength(1)
+    expect(symbol.querySelectorAll('[data-kunming-arrow-mode="two-line-right"]')).toHaveLength(1)
+    expect([...symbol.querySelectorAll('[data-kunming-arrow="true"] path')].some(path => path.getAttribute('d')?.includes('C'))).toBe(true)
+    expect([...symbol.querySelectorAll('[data-kunming-arrow="true"]')].map(node => node.getAttribute('fill'))).toEqual(value.lines.map(line => line.color))
+    view.unmount()
+  })
+
+  it('uses a circular arrow mode for three or more services without dropping services', () => {
+    for (const count of [3, 4, 5, 6]) {
+      const value = props(count, 'transfer.kunming')
+      const view = render(<svg>{renderTransferArtwork({ project: value.project, station: value.station, lines: value.lines, style: value.style, size: 16, minorAxis: 20, dotGap: 5, endPadding: 8 })}</svg>)
+      const symbol = view.container.querySelector('[data-transfer-template="kunming"]')!
+      expect(symbol).toHaveAttribute('data-kunming-shape', 'circle')
+      expect(symbol.querySelectorAll('[data-kunming-arrow-mode="circular"]')).toHaveLength(count)
+      expect(symbol.querySelectorAll('[data-kunming-arrow-head="true"]')).toHaveLength(count)
+      expect(symbol.querySelectorAll('[data-kunming-arrow-mode="circular"] path[d*=" A "]')).toHaveLength(count)
       view.unmount()
     }
   })

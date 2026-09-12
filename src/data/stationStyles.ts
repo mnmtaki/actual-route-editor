@@ -1,5 +1,5 @@
 import { uid } from './model'
-import type { ActualRouteProject, Station, StationStyle, StationStyleColorMode, StationStyleMarkerColorMode, StationStylePlacement, StationStyleTemplate, StationStyleShape } from './model'
+import type { ActualRouteProject, Station, StationStyle, StationStyleColorMode, StationStyleMarkerColorMode, StationStylePlacement, StationStyleSidePlacementMode, StationStyleTemplate, StationStyleShape } from './model'
 import { getBuiltInStationStyle } from './presetRegistry'
 
 export const DEFAULT_STATION_STYLE_ID = 'default'
@@ -31,6 +31,9 @@ export function createDefaultStationStyle(size = 11): StationStyle {
     haloOpacity: 1,
     template: 'standard',
     placement: 'center',
+    sidePlacementMode: 'outward',
+    sideDepthRatio: 1,
+    sideThicknessRatio: .6,
     sideOffset: 14,
     preferredSide: 'auto',
     markerColorMode: 'fixed',
@@ -53,6 +56,7 @@ const mode = (value: unknown, fallback: StationStyleColorMode): StationStyleColo
 const templates: StationStyleTemplate[] = ['standard', 'sideMarker', 'numberPill']
 const placements: StationStylePlacement[] = ['center', 'side']
 const markerModes: StationStyleMarkerColorMode[] = ['fixed', 'service']
+const sidePlacementModes: StationStyleSidePlacementMode[] = ['outward', 'inward']
 
 export function normalizeStationStyle(value: unknown, fallback?: StationStyle): StationStyle | null {
   if (!value || typeof value !== 'object') return fallback ? { ...fallback } : null
@@ -65,6 +69,7 @@ export function normalizeStationStyle(value: unknown, fallback?: StationStyle): 
   const width = positive(raw.width, base.width)
   const template = typeof raw.template === 'string' && templates.includes(raw.template as StationStyleTemplate) ? raw.template as StationStyleTemplate : (base.template ?? 'standard')
   const placement = typeof raw.placement === 'string' && placements.includes(raw.placement as StationStylePlacement) ? raw.placement as StationStylePlacement : (base.placement ?? 'center')
+  const sidePlacementMode = typeof raw.sidePlacementMode === 'string' && sidePlacementModes.includes(raw.sidePlacementMode as StationStyleSidePlacementMode) ? raw.sidePlacementMode as StationStyleSidePlacementMode : (base.sidePlacementMode ?? 'outward')
   const markerColorMode = typeof raw.markerColorMode === 'string' && markerModes.includes(raw.markerColorMode as StationStyleMarkerColorMode) ? raw.markerColorMode as StationStyleMarkerColorMode : (base.markerColorMode ?? 'fixed')
   const preferredSide = raw.preferredSide === 'left' || raw.preferredSide === 'right' ? raw.preferredSide : (base.preferredSide ?? 'auto')
   return {
@@ -92,6 +97,9 @@ export function normalizeStationStyle(value: unknown, fallback?: StationStyle): 
     haloOpacity: opacity(raw.haloOpacity, base.haloOpacity),
     template,
     placement,
+    sidePlacementMode,
+    sideDepthRatio: positive(raw.sideDepthRatio, base.sideDepthRatio ?? 1),
+    sideThicknessRatio: positive(raw.sideThicknessRatio, base.sideThicknessRatio ?? .6),
     sideOffset: nonNegative(raw.sideOffset, base.sideOffset ?? 14),
     preferredSide,
     markerColorMode,

@@ -11,5 +11,7 @@ describe('built-in preset visual showcase fixture', () => {
     expect(container.querySelectorAll('[data-preset-id="transfer.kunming.three"]')).toHaveLength(3)
     expect(container.querySelector('[data-preset-id="station.shanghai.basic"]')).toBeTruthy()
     expect(container.querySelector('[data-preset-id="station.metroman.basic"]')).toBeTruthy()
+    expect(container.querySelector('[data-preset-id="station.shanghai.basic"] [data-side-marker-mode="outward"]')).toBeTruthy()
+    expect(container.querySelector('[data-preset-id="station.metroman.basic"] [data-side-marker-mode="inward"]')).toBeTruthy()
   })
 })

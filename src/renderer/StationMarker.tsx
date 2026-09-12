@@ -40,9 +40,9 @@ export function StationMarker({ project, station, time, selected, hitRadius = 24
     : (() => {
       const line = renderLines[0]
       const side = stationStyle.template === 'sideMarker' || stationStyle.placement === 'side'
-        ? (line ? resolveSideMarkerPlacement(project, renderStation.id, line.id, stationStyle.sideOffset ?? 14, stationStyle.preferredSide ?? 'auto') : undefined)
+        ? (line ? resolveSideMarkerPlacement(project, renderStation.id, line.id, { placementMode: stationStyle.sidePlacementMode ?? 'outward', depthRatio: stationStyle.sideDepthRatio, thicknessRatio: stationStyle.sideThicknessRatio, preferredSide: stationStyle.preferredSide ?? 'auto' }) : undefined)
         : undefined
-      return getStationStyle('default').renderOrdinary({ station: renderStation, size: stationStyle.width, style: stationStyle, lineColor: selectionColor, centerX: side?.x, centerY: side?.y, lineCode: line ? getLineDisplayCode(line) : '', stationCode: line ? getStationCodeForLine(project, renderStation.id, line.id) : '' })
+      return getStationStyle('default').renderOrdinary({ station: renderStation, size: stationStyle.width, style: stationStyle, lineColor: selectionColor, centerX: side?.x, centerY: side?.y, lineCode: line ? getLineDisplayCode(line) : '', stationCode: line ? getStationCodeForLine(project, renderStation.id, line.id) : '', sideMarker: side })
     })()
   const selectionRadius = (lines.length > 1 ? stationSize : Math.max(stationStyle.width, stationStyle.height)) / 2 + 4
   return <g>

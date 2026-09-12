@@ -3,6 +3,8 @@ import type { ActualRouteProject, StationStyle, StationStyleColorMode, StationSt
 import { assignStationStyle, createStationStyle, deleteStationStyle, getStationStyles, setProjectDefaultStationStyle } from '../data/stationStyles'
 import { StationArtwork } from '../renderer/stationStyles'
 import { ColorControl } from './TypographyControls'
+import { resolveSideMarkerPlacement } from '../geometry/sideMarker'
+import { effectiveLineWidth } from '../data/style'
 
 const SHAPES: Array<[StationStyleShape, string]> = [['circle', '圆形'], ['square', '方形'], ['roundedRect', '圆角矩形'], ['capsule', '胶囊形'], ['diamond', '菱形']]
 const MODES: Array<[StationStyleColorMode, string]> = [['fixed', '固定颜色'], ['background', '跟随画布背景'], ['none', '不显示']]
@@ -47,6 +49,12 @@ export function StationStyleManager({ project, onChange, compact = false, select
   const applyBatch = () => { if (selectedStationIds.length > 1) onChange(assignStationStyle(project, selectedStationIds, selected.id)) }
   const setDimension = (key: 'width' | 'height', value: number) => update(style => { style[key] = value; if (style.lockAspect) style[key === 'width' ? 'height' : 'width'] = value })
   const previewStation = { id: 'station-style-preview', name: '预览', x: 0, y: 0, labelOffsetX: 0, labelOffsetY: 0 }
+  const previewLine = { id: 'station-style-preview-line', name: '1号线', color: '#596161', stationSequence: [previewStation.id], lineOrder: 0, visible: true, locked: false }
+  const previewProject = { ...project, stations: [previewStation], lines: [previewLine], stationLineRelations: [{ id: 'station-style-preview-relation', stationId: previewStation.id, lineId: previewLine.id, openedAt: '2000-01-01' }], geometry: { segments: [] } }
+  const previewSide = selected.template === 'sideMarker' || selected.placement === 'side'
+    ? resolveSideMarkerPlacement(previewProject, previewStation.id, previewLine.id, { placementMode: selected.sidePlacementMode ?? 'outward', depthRatio: selected.sideDepthRatio, thicknessRatio: selected.sideThicknessRatio, preferredSide: selected.preferredSide ?? 'auto' })
+    : undefined
+  const previewLineWidth = effectiveLineWidth(previewLine, previewProject.settings)
   const summary = <>
     <Field label="默认车站样式"><select aria-label="车站样式管理" value={selected.id} onChange={event => selectStyle(event.target.value)}>{styles.map(style => <option key={style.id} value={style.id}>{style.name}{style.builtin ? '（内置）' : ''}</option>)}</select></Field>
     <div className="line-style-actions"><button type="button" onClick={add}>新建</button><button type="button" onClick={copy}>复制</button>{selected.id === (project.defaultStationStyleId ?? 'default') ? <span className="meta-note">当前默认</span> : <button type="button" onClick={setDefault}>设为默认</button>}{compact && <button type="button" onClick={onEditStyle}>编辑当前样式</button>}{!compact && (selected.builtin ? <button type="button" onClick={resetBuiltin}>恢复内置</button> : <button type="button" className="danger" onClick={remove}>删除</button>)}</div>
@@ -55,7 +63,7 @@ export function StationStyleManager({ project, onChange, compact = false, select
   return <section className="station-style-manager" data-testid="station-style-manager">
     {summary}
     {!compact && <>
-      <div className="station-style-preview"><span className="eyebrow">实时预览</span><svg viewBox="-90 -45 180 90" role="img" aria-label="车站样式预览"><line x1="-90" y1="0" x2="90" y2="0" stroke="#596161" strokeWidth="11" strokeLinecap="round" /><StationArtwork station={previewStation} style={selected} /></svg></div>
+      <div className="station-style-preview"><span className="eyebrow">实时预览</span><svg viewBox="-90 -45 180 90" role="img" aria-label="车站样式预览"><line x1="-90" y1="0" x2="90" y2="0" stroke={previewLine.color} strokeWidth={previewLineWidth} strokeLinecap="round" /><StationArtwork station={previewStation} style={selected} lineColor={previewLine.color} centerX={previewSide?.x} centerY={previewSide?.y} sideMarker={previewSide} lineCode="1" stationCode="01" /></svg></div>
       <section className="style-section"><h3>几何</h3>
         <Field label="样式名称"><input value={selected.name} onChange={event => update(style => { style.name = event.target.value })} /></Field>
         <Field label="形状"><select value={selected.shape} onChange={event => update(style => { style.shape = event.target.value as StationStyleShape })}>{SHAPES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></Field>

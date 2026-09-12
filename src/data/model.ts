@@ -41,6 +41,7 @@ export type StationStyleColorMode = 'fixed' | 'background' | 'none'
 export type StationStyleTemplate = 'standard' | 'sideMarker' | 'numberPill'
 export type StationStylePlacement = 'center' | 'side'
 export type StationStyleMarkerColorMode = 'fixed' | 'service'
+export type StationStyleSidePlacementMode = 'outward' | 'inward'
 export interface StationStyle {
   id: string
   name: string
@@ -67,6 +68,11 @@ export interface StationStyle {
   /** Generic artwork primitive used by built-in station presets. */
   template?: StationStyleTemplate
   placement?: StationStylePlacement
+  /** How a side marker is attached to the rendered line body. */
+  sidePlacementMode?: StationStyleSidePlacementMode
+  /** Side marker depth/thickness as ratios of the effective rendered line width. */
+  sideDepthRatio?: number
+  sideThicknessRatio?: number
   sideOffset?: number
   preferredSide?: 'auto' | 'left' | 'right'
   markerColorMode?: StationStyleMarkerColorMode

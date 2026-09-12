@@ -1,4 +1,4 @@
-import type { ActualRouteProject, StationStyle, StationStylePlacement, StationStyleTemplate, TransferStyle, TransferStyleTemplate } from './model'
+import type { ActualRouteProject, StationStyle, StationStylePlacement, StationStyleSidePlacementMode, StationStyleTemplate, TransferStyle, TransferStyleTemplate } from './model'
 import { uid } from './model'
 import { getCompoundStationMembers } from './compoundStation'
 import { collapseLinesByServiceFamily } from './lineIdentity'
@@ -31,9 +31,9 @@ const baseStation = (id: string, name: string, shape: StationStyle['shape'], wid
   haloEnabled: false, haloColor: '#ffffff', haloWidth: 0, haloGap: 0, haloOpacity: 1,
   template: 'standard', placement: 'center', sideOffset: 14, preferredSide: 'auto', markerColorMode: 'fixed', markerColor: 'white', markerPadding: 4,
 })
-const sideStation = (id: string, name: string, colorMode: 'service' | 'fixed', fillColor: string): StationStyle => station({
+const sideStation = (id: string, name: string, colorMode: 'service' | 'fixed', fillColor: string, sidePlacementMode: StationStyleSidePlacementMode, sideDepthRatio: number, sideThicknessRatio: number): StationStyle => station({
   ...baseStation(id, name, 'square', 18, 11),
-  template: 'sideMarker', placement: 'side', sideOffset: 16, preferredSide: 'auto', markerColorMode: colorMode, markerColor: fillColor,
+  template: 'sideMarker', placement: 'side', sidePlacementMode, sideDepthRatio, sideThicknessRatio, sideOffset: 16, preferredSide: 'auto', markerColorMode: colorMode, markerColor: fillColor,
   lockAspect: false, cornerRadius: 1.5,
 })
 const numberStation = (id: string, name: string): StationStyle => station({
@@ -48,7 +48,7 @@ const whiteCapsuleTransfer = (id: string, name: string, template: TransferStyleT
 const PRESETS: BuiltInPreset[] = [
   { id: 'station.actualroute.default', displayName: 'ActualRoute 默认普通站', category: 'ActualRoute', applicableType: 'station', immutable: true, compatibility: { minServiceCount: 1 }, preview: {}, renderer: 'station-artwork', stationStyle: { ...baseStation('station.actualroute.default', 'ActualRoute 默认普通站', 'circle', 11, 11) } },
   { id: 'transfer.actualroute.default', displayName: 'ActualRoute 默认换乘站', category: 'ActualRoute', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 2 }, preview: { serviceCount: 2 }, renderer: 'transfer-artwork', transferStyle: actualRouteTransfer('transfer.actualroute.default', 'ActualRoute 默认换乘站') },
-  { id: 'station.shanghai.basic', displayName: '上海普通站', category: '上海', applicableType: 'station', immutable: true, compatibility: { minServiceCount: 1 }, preview: {}, renderer: 'station-artwork', stationStyle: sideStation('station.shanghai.basic', '上海普通站', 'service', 'white') },
+  { id: 'station.shanghai.basic', displayName: '上海普通站', category: '上海', applicableType: 'station', immutable: true, compatibility: { minServiceCount: 1 }, preview: {}, renderer: 'station-artwork', stationStyle: sideStation('station.shanghai.basic', '上海普通站', 'service', 'white', 'outward', 1.35, .6) },
   { id: 'transfer.shanghai.default', displayName: '上海换乘站', category: '上海', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 2 }, preview: { serviceCount: 2 }, renderer: 'transfer-artwork', transferStyle: whiteCapsuleTransfer('transfer.shanghai.default', '上海换乘站', 'shanghai') },
   { id: 'station.guangzhou.basic', displayName: '广州地铁基本车站', category: '广州', applicableType: 'station', immutable: true, compatibility: { minServiceCount: 1 }, preview: { lineCodes: ['1'], stationCodes: ['01'] }, renderer: 'station-artwork', stationStyle: numberStation('station.guangzhou.basic', '广州地铁基本车站') },
   { id: 'transfer.guangzhou.classic', displayName: '广州地铁换乘车站（经典）', category: '广州', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 2, maxServiceCount: 4, recommendedServiceCount: 2 }, preview: { serviceCount: 2, lineCodes: ['1', '2'], stationCodes: ['01', '02'] }, renderer: 'transfer-artwork', transferStyle: transfer({ id: 'transfer.guangzhou.classic', name: '广州地铁换乘车站（经典）', template: 'guangzhouClassic', shellFill: 'white', shellStroke: '#3f454a', shellStrokeWidth: 1.25, dotsVisible: false, minServiceCount: 2, maxServiceCount: 4, recommendedServiceCount: 2 }) },
@@ -56,7 +56,7 @@ const PRESETS: BuiltInPreset[] = [
   { id: 'transfer.beijing.default', displayName: '北京地铁换乘车站', category: '北京', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 2 }, preview: { serviceCount: 2 }, renderer: 'transfer-artwork', transferStyle: whiteCapsuleTransfer('transfer.beijing.default', '北京地铁换乘车站', 'beijing') },
   { id: 'transfer.kunming.two', displayName: '昆明地铁两线换乘站', category: '昆明', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 2, recommendedServiceCount: 2 }, preview: { serviceCount: 2 }, renderer: 'transfer-artwork', transferStyle: transfer({ id: 'transfer.kunming.two', name: '昆明地铁两线换乘站', template: 'kunming', shellFill: 'white', shellStroke: '#3f454a', shellStrokeWidth: 1.25, dotsVisible: false, minServiceCount: 2, recommendedServiceCount: 2 }) },
   { id: 'transfer.kunming.three', displayName: '昆明地铁三线换乘站', category: '昆明', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 3, recommendedServiceCount: 3 }, preview: { serviceCount: 3 }, renderer: 'transfer-artwork', transferStyle: transfer({ id: 'transfer.kunming.three', name: '昆明地铁三线换乘站', template: 'kunming', shellFill: 'white', shellStroke: '#3f454a', shellStrokeWidth: 1.25, dotsVisible: false, minServiceCount: 2, recommendedServiceCount: 3 }) },
-  { id: 'station.metroman.basic', displayName: '地铁通基本车站', category: '地铁通', applicableType: 'station', immutable: true, compatibility: { minServiceCount: 1 }, preview: {}, renderer: 'station-artwork', stationStyle: sideStation('station.metroman.basic', '地铁通基本车站', 'fixed', 'white') },
+  { id: 'station.metroman.basic', displayName: '地铁通基本车站', category: '地铁通', applicableType: 'station', immutable: true, compatibility: { minServiceCount: 1 }, preview: {}, renderer: 'station-artwork', stationStyle: sideStation('station.metroman.basic', '地铁通基本车站', 'fixed', 'white', 'inward', .5, .36) },
   { id: 'transfer.metroman.default', displayName: '地铁通换乘车站', category: '地铁通', applicableType: 'transfer', immutable: true, compatibility: { minServiceCount: 2 }, preview: { serviceCount: 2 }, renderer: 'transfer-artwork', transferStyle: whiteCapsuleTransfer('transfer.metroman.default', '地铁通换乘车站', 'metroman') },
 ]
 

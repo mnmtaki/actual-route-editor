@@ -10,6 +10,7 @@ import { sortTransferLinesForSpatialOrder } from '../geometry/transferOrdering'
 import { resolveSideMarkerPlacement } from '../geometry/sideMarker'
 import { StationArtwork } from '../renderer/stationStyles'
 import { getLineDisplayCode, getStationCodeForLine, renderTransferArtwork } from '../renderer/transferArtwork'
+import { effectiveLineWidth } from '../data/style'
 
 const stationPreview: Station = { id: 'preset-preview-station', name: '预览', x: 0, y: 0, labelOffsetX: 0, labelOffsetY: 0 }
 const previewLines: Line[] = [
@@ -33,8 +34,11 @@ export function PresetPreview({ project, presetId, serviceCount }: { project: Ac
   if (preset.applicableType === 'station' && preset.stationStyle) {
     const sampleProject = previewProject(project, 1)
     const line = sampleProject.lines[0]
-    const placement = preset.stationStyle.template === 'sideMarker' ? resolveSideMarkerPlacement(sampleProject, stationPreview.id, line.id, preset.stationStyle.sideOffset, preset.stationStyle.preferredSide) : undefined
-    return <svg className="preset-preview-svg" viewBox="-70 -45 140 90" role="img" aria-label={`${preset.displayName}预览`}><line x1="-70" y1="0" x2="70" y2="0" stroke={line.color} strokeWidth="11" strokeLinecap="round" /><StationArtwork station={stationPreview} style={preset.stationStyle} lineColor={line.color} centerX={placement?.x} centerY={placement?.y} lineCode={getLineDisplayCode(line)} stationCode="01" /></svg>
+    const placement = preset.stationStyle.template === 'sideMarker' || preset.stationStyle.placement === 'side'
+      ? resolveSideMarkerPlacement(sampleProject, stationPreview.id, line.id, { placementMode: preset.stationStyle.sidePlacementMode ?? 'outward', depthRatio: preset.stationStyle.sideDepthRatio, thicknessRatio: preset.stationStyle.sideThicknessRatio, preferredSide: preset.stationStyle.preferredSide })
+      : undefined
+    const lineWidth = effectiveLineWidth(line, sampleProject.settings)
+    return <svg className="preset-preview-svg" viewBox="-70 -45 140 90" role="img" aria-label={`${preset.displayName}预览`}><line x1="-70" y1="0" x2="70" y2="0" stroke={line.color} strokeWidth={lineWidth} strokeLinecap="round" /><StationArtwork station={stationPreview} style={preset.stationStyle} lineColor={line.color} centerX={placement?.x} centerY={placement?.y} lineCode={getLineDisplayCode(line)} stationCode="01" sideMarker={placement} /></svg>
   }
   if (!preset.transferStyle) return null
   const count = serviceCount ?? preset.preview.serviceCount ?? preset.compatibility.recommendedServiceCount ?? preset.compatibility.minServiceCount

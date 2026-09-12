@@ -1,6 +1,7 @@
 import type { Line, Station, StationStyle } from '../data/model'
+import type { SideMarkerPlacement } from '../geometry/sideMarker'
 
-export interface OrdinaryStationRenderProps { station: Station; size: number; style?: StationStyle; lineColor?: string; backgroundColor?: string; centerX?: number; centerY?: number; lineCode?: string; stationCode?: string }
+export interface OrdinaryStationRenderProps { station: Station; size: number; style?: StationStyle; lineColor?: string; backgroundColor?: string; centerX?: number; centerY?: number; lineCode?: string; stationCode?: string; sideMarker?: SideMarkerPlacement }
 export interface TransferStationRenderProps { station: Station; lines: Line[]; size: number; minorAxis: number; dotGap: number; endPadding: number; rotation: number; centerX?: number; centerY?: number; minMajorAxis?: number }
 export interface PresentationStationRenderProps extends TransferStationRenderProps { previousLines: Line[]; morphProgress: number; opacity: number; scale: number; ordinaryStyle?: StationStyle; lineColor?: string; backgroundColor?: string }
 export const TRANSFER_CONTAINER_STYLE = { fill: 'white', stroke: '#3f454a', strokeWidth: 1.75, vectorEffect: 'non-scaling-stroke' as const }
@@ -29,9 +30,13 @@ function shapeNode(style: StationStyle, centerX: number, centerY: number, width:
 }
 
 /** Shared ordinary-station SVG artwork used by editor, presentation and export. */
-export function renderStationArtwork({ station, style, lineColor = '#596161', backgroundColor = '#f3f0e9', centerX = station.x, centerY = station.y, lineCode = '', stationCode = '' }: { station: Station; style: StationStyle; lineColor?: string; backgroundColor?: string; centerX?: number; centerY?: number; lineCode?: string; stationCode?: string }) {
+export function renderStationArtwork({ station, style, lineColor = '#596161', backgroundColor = '#f3f0e9', centerX = station.x, centerY = station.y, lineCode = '', stationCode = '', sideMarker }: { station: Station; style: StationStyle; lineColor?: string; backgroundColor?: string; centerX?: number; centerY?: number; lineCode?: string; stationCode?: string; sideMarker?: SideMarkerPlacement }) {
+  const isSideMarker = style.template === 'sideMarker' || style.placement === 'side'
+  const markerCenterX = sideMarker?.x ?? centerX, markerCenterY = sideMarker?.y ?? centerY
+  const markerWidth = isSideMarker && sideMarker?.thickness ? sideMarker.thickness : style.width
+  const markerHeight = isSideMarker && sideMarker?.depth ? sideMarker.depth : style.height
   const markerFill = style.markerColorMode === 'service' ? lineColor : (style.markerColor ?? style.fillColor)
-  const fill = style.template === 'sideMarker' || style.template === 'numberPill'
+  const fill = isSideMarker || style.template === 'numberPill'
     ? markerFill
     : style.fillEnabled ? colorFor(style.fillColorMode, style.fillColor, backgroundColor, '#ffffff') : 'none'
   const stroke = style.strokeEnabled && style.strokeWidth > 0 ? colorFor(style.strokeColorMode, style.strokeColor, backgroundColor, '#3f454a') : 'none'
@@ -45,17 +50,19 @@ export function renderStationArtwork({ station, style, lineColor = '#596161', ba
     'data-station-shape': style.shape,
   }
   const halo = style.haloEnabled && style.haloWidth > 0
-    ? shapeNode(style, centerX, centerY, style.width + style.haloGap * 2, style.height + style.haloGap * 2, { fill: 'none', stroke: style.haloColor, strokeWidth: style.haloWidth, strokeOpacity: style.haloOpacity, 'data-station-shape': `${style.shape}-halo` })
+    ? shapeNode(style, markerCenterX, markerCenterY, markerWidth + style.haloGap * 2, markerHeight + style.haloGap * 2, { fill: 'none', stroke: style.haloColor, strokeWidth: style.haloWidth, strokeOpacity: style.haloOpacity, 'data-station-shape': `${style.shape}-halo` })
     : null
-  const transform = style.rotation ? `rotate(${style.rotation} ${centerX} ${centerY})` : undefined
-  const body = shapeNode(style, centerX, centerY, style.width, style.height, bodyAttrs)
+  const markerRotation = sideMarker ? sideMarker.rotation : 0
+  const rotation = markerRotation + (style.rotation || 0)
+  const transform = rotation ? `rotate(${rotation} ${markerCenterX} ${markerCenterY})` : undefined
+  const body = shapeNode(style, markerCenterX, markerCenterY, markerWidth, markerHeight, bodyAttrs)
   const codeText = [style.showLineCode === true ? lineCode : '', style.showStationCode === true ? stationCode : ''].filter(Boolean).join(' | ')
-  const code = style.template === 'numberPill' && codeText ? <text className="station-number-pill-label" data-station-line-code={lineCode} x={centerX} y={centerY + style.width * .08} textAnchor="middle" fill={lineColor === '#ffffff' || lineColor === 'white' ? '#202526' : '#ffffff'} fontSize={Math.max(4, Math.min(style.height * .52, style.width * .23))} fontWeight="700">{codeText}</text> : null
-  return <g className="station-artwork" data-station-artwork={station.id} data-station-style-id={style.id} transform={transform}>{halo}{body}{code}</g>
+  const code = style.template === 'numberPill' && codeText ? <text className="station-number-pill-label" data-station-line-code={lineCode} x={markerCenterX} y={markerCenterY + style.width * .08} textAnchor="middle" fill={lineColor === '#ffffff' || lineColor === 'white' ? '#202526' : '#ffffff'} fontSize={Math.max(4, Math.min(style.height * .52, style.width * .23))} fontWeight="700">{codeText}</text> : null
+  return <g className="station-artwork" data-station-artwork={station.id} data-station-style-id={style.id} data-side-marker-mode={sideMarker?.placementMode} data-side-marker-side={sideMarker?.side} data-side-marker-anchor-x={sideMarker?.anchorX} data-side-marker-anchor-y={sideMarker?.anchorY} data-side-marker-line-width={sideMarker?.lineWidth} data-side-marker-depth={sideMarker?.depth} data-side-marker-thickness={sideMarker?.thickness} transform={transform}>{halo}{body}{code}</g>
 }
 
-export function StationArtwork({ station, style, lineColor, backgroundColor, centerX, centerY, lineCode, stationCode }: { station: Station; style: StationStyle; lineColor?: string; backgroundColor?: string; centerX?: number; centerY?: number; lineCode?: string; stationCode?: string }) {
-  return <>{renderStationArtwork({ station, style, lineColor, backgroundColor, centerX, centerY, lineCode, stationCode })}</>
+export function StationArtwork({ station, style, lineColor, backgroundColor, centerX, centerY, lineCode, stationCode, sideMarker }: { station: Station; style: StationStyle; lineColor?: string; backgroundColor?: string; centerX?: number; centerY?: number; lineCode?: string; stationCode?: string; sideMarker?: SideMarkerPlacement }) {
+  return <>{renderStationArtwork({ station, style, lineColor, backgroundColor, centerX, centerY, lineCode, stationCode, sideMarker })}</>
 }
 
 export function getDefaultTransferMetrics(size:number,count:number,dotGap:number,endPadding:number,minorAxis:number,minMajorAxis=0){
@@ -64,7 +71,7 @@ export function getDefaultTransferMetrics(size:number,count:number,dotGap:number
   const naturalWidth=horizontalPadding*2+count*dotDiameter+Math.max(0,count-1)*gap
   return { dotDiameter, gap, horizontalPadding, naturalWidth, height:Math.max(dotDiameter,minorAxis), width:Math.max(naturalWidth,minMajorAxis) }
 }
-const ordinary=({station,size,style,lineColor,backgroundColor,centerX=centerOf(station).x,centerY=centerOf(station).y,lineCode,stationCode}:OrdinaryStationRenderProps)=>style ? <StationArtwork station={station} style={style} lineColor={lineColor} backgroundColor={backgroundColor} centerX={centerX} centerY={centerY} lineCode={lineCode} stationCode={stationCode}/> : <circle cx={centerX} cy={centerY} r={size/2} fill="white" data-testid={`station-${station.id}`}/>
+const ordinary=({station,size,style,lineColor,backgroundColor,centerX=centerOf(station).x,centerY=centerOf(station).y,lineCode,stationCode,sideMarker}:OrdinaryStationRenderProps)=>style ? <StationArtwork station={station} style={style} lineColor={lineColor} backgroundColor={backgroundColor} centerX={centerX} centerY={centerY} lineCode={lineCode} stationCode={stationCode} sideMarker={sideMarker}/> : <circle cx={centerX} cy={centerY} r={size/2} fill="white" data-testid={`station-${station.id}`}/>
 const transfer=({station,lines,size,minorAxis,dotGap,endPadding,rotation,centerX=centerOf(station).x,centerY=centerOf(station).y,minMajorAxis=0}:TransferStationRenderProps)=>{const metrics=getDefaultTransferMetrics(size,lines.length,dotGap,endPadding,minorAxis,minMajorAxis);return <g transform={`rotate(${rotation} ${centerX} ${centerY})`} data-testid={`transfer-${station.id}`}><rect x={centerX-metrics.width/2} y={centerY-metrics.height/2} width={metrics.width} height={metrics.height} rx={metrics.height/2} {...TRANSFER_CONTAINER_STYLE}/>{lines.map((line,index)=><circle key={line.id} cx={dotX(centerX,metrics,index)} cy={centerY} r={metrics.dotDiameter/2} fill={line.color}/>)}</g>}
 const presentation=({station,previousLines,lines,size,minorAxis,dotGap,endPadding,rotation,morphProgress,opacity,scale,centerX=centerOf(station).x,centerY=centerOf(station).y,minMajorAxis=0,ordinaryStyle,lineColor,backgroundColor}:PresentationStationRenderProps)=>{const previousCount=previousLines.length;if(lines.length<2)return <g opacity={opacity} transform={`translate(${station.x} ${station.y}) scale(${scale}) translate(${-station.x} ${-station.y})`}>{ordinary({station,size,style:ordinaryStyle,lineColor,backgroundColor})}</g>;const fromMetrics=getDefaultTransferMetrics(size,Math.max(2,previousCount),dotGap,endPadding,minorAxis,minMajorAxis),toMetrics=getDefaultTransferMetrics(size,lines.length,dotGap,endPadding,minorAxis,minMajorAxis),morph=morphProgress,width=lerp(previousCount<2?size:fromMetrics.width,toMetrics.width,morph),height=lerp(previousCount<2?size:fromMetrics.height,toMetrics.height,morph);return <g opacity={opacity} transform={`rotate(${rotation} ${centerX} ${centerY})`} data-presentation-station={station.id}>{previousCount<2&&<g opacity={1-morph}>{ordinary({station,size,style:ordinaryStyle,lineColor,backgroundColor})}</g>}<rect x={centerX-width/2} y={centerY-height/2} width={width} height={height} rx={height/2} {...TRANSFER_CONTAINER_STYLE} opacity={previousCount<2?morph:1}/>{lines.map((line,index)=>{const previousIndex=previousLines.findIndex(item=>item.id===line.id),fromX=previousIndex>=0&&previousCount>=2?dotX(centerX,fromMetrics,previousIndex):centerX,toX=dotX(centerX,toMetrics,index);return <circle key={line.id} cx={lerp(fromX,toX,morph)} cy={centerY} r={toMetrics.dotDiameter/2} fill={line.color} opacity={previousIndex>=0&&previousCount>=2?1:morph}/>})}</g>}
 export const DEFAULT_STATION_STYLE:StationStyleDefinition={id:'default',name:'默认站点',renderOrdinary:ordinary,renderTransfer:transfer,renderPresentation:presentation}

@@ -21,6 +21,15 @@ describe('line drawing geometry operations', () => {
     expect(segment?.mode).toBe('smooth')
   })
 
+  it('keeps a newly drawn station interval smooth even without control points', () => {
+    const created = createLine(createEmptyProject(), { name: '默认平滑测试', color: '#336699' })
+    const first = appendStationToLineWithWaypoints(created.project, created.lineId, { x: 100, y: 100 }, [], null)
+    const second = appendStationToLineWithWaypoints(first.project, created.lineId, { x: 420, y: 240 }, [], first.stationId)
+    const segment = second.project.geometry.segments.find(item => item.id === second.segmentId)
+    expect(segment?.mode).toBe('smooth')
+    expect(segment?.waypoints).toHaveLength(0)
+  })
+
   it('connects to an existing Station without losing draft control points', () => {
     const created = createLine(structuredClone(demoProject), { name: '接入测试', color: '#663399' })
     const first = connectExistingStationWithWaypoints(created.project, created.lineId, 's1', [], null)

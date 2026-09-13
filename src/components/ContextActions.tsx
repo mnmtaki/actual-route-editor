@@ -1,24 +1,24 @@
 import type { ActualRouteProject, Selection, StructureType } from '../data/model'
-import { getWaypointStructureChange, type WaypointStructureChange } from '../data/structure'
+import { getSegmentStyleIntervalAtProgress, type WaypointStructureChange } from '../data/structure'
 import { DropdownArrow } from './Toolbar'
 import { getLineDisplayName } from '../data/lineIdentity'
 
-export function ContextActions({ project, selection, onExtend, onInsertStation, onAddWaypoint, onStraighten, onStructureChange, onSetStructureAtPoint, onWaypointStructureChange, onStructureNodeChange, onDelete }: {
+export function ContextActions({ project, selection, onExtend, onInsertStation, onAddWaypoint, onStraighten: _onStraighten, onStructureChange: _onStructureChange, onSetStructureAtPoint, onWaypointStructureChange: _onWaypointStructureChange, onStructureNodeChange: _onStructureNodeChange, onDelete }: {
   project: ActualRouteProject; selection: Selection; onExtend: (stationId: string) => void; onInsertStation: () => void; onAddWaypoint: () => void; onStraighten: () => void
   onStructureChange: (value: StructureType) => void; onSetStructureAtPoint?: (value: StructureType) => void; onWaypointStructureChange?: (value: WaypointStructureChange) => void; onStructureNodeChange?: (value: StructureType) => void; onDelete: () => void
 }) {
   if (!selection) return null
-  const title = selection.type === 'station' ? project.stations.find(item => item.id === selection.id)?.name ?? '站点' : selection.type === 'segment' ? '区间' : selection.type === 'waypoint' ? '路径点' : selection.type === 'structureNode' ? '结构节点' : selection.type === 'line' ? getLineDisplayName(project, selection.id) || '线路' : '底图'
+  const title = selection.type === 'station' ? project.stations.find(item => item.id === selection.id)?.name ?? '站点' : selection.type === 'segment' ? '线路段' : selection.type === 'waypoint' ? '控制点' : selection.type === 'structureNode' ? '样式点' : selection.type === 'line' ? getLineDisplayName(project, selection.id) || '线路' : '底图'
   const segment = selection.type === 'segment' ? project.geometry.segments.find(item => item.id === selection.id) : null
-  const waypointSegment = selection.type === 'waypoint' ? project.geometry.segments.find(item => item.id === selection.segmentId) : null
-  const waypointStructure = selection.type === 'waypoint' && waypointSegment ? getWaypointStructureChange(waypointSegment, selection.id) : 'none'
-  const structureNode = selection.type === 'structureNode' ? project.geometry.segments.find(item => item.id === selection.segmentId)?.structureNodes?.find(item => item.id === selection.id) : null
-  if(segment)return <section className="context-sheet context-action-bar" aria-label="区间快捷操作"><strong>{title}</strong><button className="primary" onClick={onInsertStation}>＋站点</button><button onClick={onAddWaypoint}>＋路径点</button><details className="context-menu"><summary><span>结构</span><DropdownArrow/></summary><div><label><span>区间起始结构</span><select aria-label="线路结构" value={segment.structureType} onChange={event=>onStructureChange(event.target.value as StructureType)}><StructureOptions/></select></label>{onSetStructureAtPoint&&<><button onClick={()=>onSetStructureAtPoint('underground')}>从点击处开始地下</button><button onClick={()=>onSetStructureAtPoint('elevated')}>从点击处开始高架</button></>}</div></details><details className="context-menu"><summary aria-label="更多区间操作">更多</summary><div><button onClick={onStraighten}>恢复直线</button><button className="danger" onClick={onDelete}>删除区间</button></div></details></section>
+  if (segment) {
+    const interval = getSegmentStyleIntervalAtProgress(project, segment, selection.type === 'segment' ? selection.progress ?? .5 : .5)
+    return <section className="context-sheet context-action-bar" aria-label="线路段快捷操作"><strong>{title}</strong><button className="primary" onClick={onInsertStation}>＋站点</button><button onClick={onAddWaypoint}>＋控制点</button>{onSetStructureAtPoint&&<button onClick={()=>onSetStructureAtPoint(interval.structureType)}>＋样式点</button>}<details className="context-menu"><summary aria-label="更多线路段操作">更多<DropdownArrow/></summary><div><button className="danger" onClick={onDelete}>删除站间区间</button></div></details></section>
+  }
+  const pointSelection = selection.type === 'waypoint' || selection.type === 'structureNode'
   return <section className="context-sheet" aria-label="对象操作"><div className="sheet-handle"/><strong>{title}</strong><div className="context-buttons">
     {selection.type==='station'&&<button className="primary" onClick={()=>onExtend(selection.id)}>＋ 从本站延伸</button>}
-    {selection.type==='waypoint'&&onWaypointStructureChange&&<label className="structure-control"><span>从此控制点开始</span><select aria-label="控制点结构变化" value={waypointStructure} onChange={event=>onWaypointStructureChange(event.target.value as WaypointStructureChange)}><option value="none">不改变</option><StructureOptions/></select></label>}
-    {structureNode&&onStructureNodeChange&&<label className="structure-control"><span>从此处开始</span><select aria-label="结构节点类型" value={structureNode.structureAfter} onChange={event=>onStructureNodeChange(event.target.value as StructureType)}><StructureOptions/></select></label>}
-    <button className="danger" onClick={onDelete}>删除</button>
+    {selection.type==='waypoint'&&<span className="context-hint">拖动控制点改变线路形状；删除请在属性栏操作</span>}
+    {selection.type==='structureNode'&&<span className="context-hint">拖动样式点移动样式分界；删除请在属性栏操作</span>}
+    {!pointSelection&&<button className="danger" onClick={onDelete}>删除</button>}
   </div></section>
 }
-function StructureOptions(){return <><option value="underground">地下</option><option value="elevated">高架</option></>}

@@ -71,16 +71,16 @@ describe('MobileShell', () => {
     vi.useRealTimers()
   })
 
-  it('exposes existing Segment actions in the mobile Inspector drawer', () => {
-    const onAddWaypoint = vi.fn(), onInsertStation = vi.fn(), onStructure = vi.fn()
-    render(<MobileShell project={structuredClone(demoProject)} selection={{ type: 'segment', id: 'a-1' }} activeLineId={demoProject.lines[0].id} onSelectLine={vi.fn()} onChange={vi.fn()} onAddLine={vi.fn()} onOpenPresentation={vi.fn()} onAddText={vi.fn()} onImportProject={vi.fn()} onImportBackground={vi.fn()} onExportProject={vi.fn()} onExportSvg={vi.fn()} onExportImage={vi.fn()} onShareProject={vi.fn()} onShareSvg={vi.fn()} onFitAll={vi.fn()} onZoomSelection={vi.fn()} onDeleteSelection={vi.fn()} onAddLineBadge={vi.fn()} onPhasePreview={vi.fn()} onStartPhaseDrawing={vi.fn()} onInsertStation={onInsertStation} onAddWaypoint={onAddWaypoint} onStructureChange={onStructure} onUndo={vi.fn()} onRedo={vi.fn()} canUndo={false} canRedo={false} />)
+  it('exposes station, control-point and style-point actions in the mobile Inspector drawer', () => {
+    const onAddWaypoint = vi.fn(), onInsertStation = vi.fn(), onStylePoint = vi.fn()
+    render(<MobileShell project={structuredClone(demoProject)} selection={{ type: 'segment', id: 'a-1', progress: .5 }} activeLineId={demoProject.lines[0].id} onSelectLine={vi.fn()} onChange={vi.fn()} onAddLine={vi.fn()} onOpenPresentation={vi.fn()} onAddText={vi.fn()} onImportProject={vi.fn()} onImportBackground={vi.fn()} onExportProject={vi.fn()} onExportSvg={vi.fn()} onExportImage={vi.fn()} onShareProject={vi.fn()} onShareSvg={vi.fn()} onFitAll={vi.fn()} onZoomSelection={vi.fn()} onDeleteSelection={vi.fn()} onAddLineBadge={vi.fn()} onPhasePreview={vi.fn()} onStartPhaseDrawing={vi.fn()} onInsertStation={onInsertStation} onAddWaypoint={onAddWaypoint} onStructureChange={()=>{}} onSetStructureAtPoint={onStylePoint} onUndo={vi.fn()} onRedo={vi.fn()} canUndo={false} canRedo={false} />)
     fireEvent.click(screen.getByRole('button', { name: '属性' }))
     fireEvent.click(screen.getByRole('button', { name: '＋站点' }))
-    fireEvent.click(screen.getByRole('button', { name: '＋路径点' }))
+    fireEvent.click(screen.getByRole('button', { name: '＋控制点' }))
+    fireEvent.click(screen.getByRole('button', { name: '＋样式点' }))
     expect(onInsertStation).toHaveBeenCalledTimes(1)
     expect(onAddWaypoint).toHaveBeenCalledTimes(1)
-    const select = screen.getByLabelText('线路结构')
-    fireEvent.change(select, { target: { value: 'elevated' } })
-    expect(onStructure).toHaveBeenCalledWith('elevated')
+    expect(onStylePoint).toHaveBeenCalledTimes(1)
+    expect(screen.queryByLabelText('线路结构')).toBeNull()
   })
 })

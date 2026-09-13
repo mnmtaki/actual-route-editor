@@ -1,10 +1,10 @@
 import { memo, useMemo, type Ref } from 'react'
 import type { ActualRouteProject, Line } from '../data/model'
-import { getSegmentPath } from '../geometry/path'
+import { getSegmentSubpathSpans, pathSpansToSvgPath } from '../geometry/path'
 import { getTransferMarkerLayout } from '../geometry/tangent'
 import { sortTransferLinesForSpatialOrder } from '../geometry/transferOrdering'
 import { SegmentArtwork, StructureRunArtwork } from '../renderer/segmentStyles'
-import { compileElevatedRuns } from '../data/structure'
+import { compileElevatedRuns, getSegmentStyleIntervals } from '../data/structure'
 import { getStationStyle } from '../renderer/stationStyles'
 import { resolveStationStyle } from '../data/stationStyles'
 import { resolveTransferStyle } from '../data/transferStyles'
@@ -24,14 +24,14 @@ import { collapseLinesByServiceFamily, getEffectiveLineColor, getLineDisplayName
 import { isCompoundStationCanonical } from '../data/compoundStation'
 import type { PresentationSequence } from './types'
 
+const clamp = (value: number) => Math.max(0, Math.min(1, value))
+
 export const PresentationScene = memo(function PresentationScene({ project, sequence, time, width, height, svgRef }: { project: ActualRouteProject; sequence: PresentationSequence; time: number; width: number; height: number; svgRef?: Ref<SVGSVGElement> }) {
   const state = useMemo(() => getPresentationState(project, sequence, time), [project, sequence, time])
-  // Presentation uses the same transfer renderer and ordinary station style
-  // resolver as the editor/export scene.
   const defaultTransferDefinition = getStationStyle('default')
   const lineMap = useMemo(() => new Map(project.lines.map(line => [line.id, line])), [project.lines])
   const historicalProject = useMemo(() => ({ ...project, geometry: { ...project.geometry, segments: project.geometry.segments.map(segment => ({ ...segment, lineId: state.segmentStates[segment.id]?.lineId ?? segment.lineId })) } }), [project, state.segmentStates])
-  const segmentArtwork = useMemo(() => project.geometry.segments.map(segment => { const lineId = state.segmentStates[segment.id]?.lineId ?? segment.lineId; const historicalSegment = historicalProject.geometry.segments.find(item => item.id === segment.id) ?? segment; const line = lineMap.get(lineId); return { segment, line: line ? lineWithEffectiveColor(project, line) : undefined, path: getSegmentPath(historicalProject, historicalSegment) } }), [project, state.segmentStates, historicalProject, lineMap])
+  const segmentArtwork = useMemo(() => project.geometry.segments.map(segment => { const lineId = state.segmentStates[segment.id]?.lineId ?? segment.lineId; const historicalSegment = historicalProject.geometry.segments.find(item => item.id === segment.id) ?? segment; const line = lineMap.get(lineId); return { segment, historicalSegment, line: line ? lineWithEffectiveColor(project, line) : undefined } }), [project, state.segmentStates, historicalProject, lineMap])
   const transferLayouts = useMemo(() => new Map(project.stations.filter(station => isCompoundStationCanonical(project, station)).map(station => { const visibleRelationIds = state.stationStates[station.id]?.visibleRelationIds; const stationStyle = effectiveStationStyle(station, project.settings); return [station.id, getTransferMarkerLayout(project, station.id, state.historyDate, visibleRelationIds, stationStyle.transferEndPadding)] as const })), [project, state.historyDate, state.stationStates])
   const elevatedRuns = useMemo(() => compileElevatedRuns(historicalProject, new Set(historicalProject.geometry.segments.filter(segment => lineMap.get(segment.lineId)?.visible).map(segment => segment.id)), Object.fromEntries(Object.entries(state.segmentStates).map(([id, value]) => [id, { revealProgress: value.revealProgress, revealFrom: value.revealFrom, opacity: value.opacity }]))), [historicalProject, lineMap, state.segmentStates])
   const visibleLineIds = new Set(segmentArtwork.filter(({ segment, line }) => line?.visible && (state.segmentStates[segment.id]?.revealProgress ?? 0) > 0).map(({ segment }) => state.segmentStates[segment.id]?.lineId ?? segment.lineId))
@@ -41,12 +41,24 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
     <rect x={state.camera.x} y={state.camera.y} width={state.camera.width} height={state.camera.height} fill="#f3f0e9" />
     {sequence.settings.showBackground && project.background?.visible && <image href={project.background.dataUrl} x={project.background.x} y={project.background.y} width={project.background.width} height={project.background.height} opacity={project.background.opacity} />}
     <VectorBasemapLayer project={project} presentation />
-    <g data-presentation-layer="segments">{segmentArtwork.map(({ segment, line, path }) => {
+    <g data-presentation-layer="segments">{segmentArtwork.map(({ segment, historicalSegment, line }) => {
       const segmentState = state.segmentStates[segment.id]
       if (!line?.visible || !segmentState || segmentState.revealProgress <= 0 || segmentState.opacity <= 0) return null
-      return <SegmentArtwork key={segment.id} segment={segment} line={line} path={path} lineWidth={effectiveLineWidth(line, project.settings)} revealProgress={segmentState.revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} style={resolveLineStyle(project, line, segment.lineStyleId === undefined ? undefined : segment)} />
+      return <g key={segment.id}>{getSegmentStyleIntervals(historicalProject, historicalSegment).map((interval,index)=>{
+        const length = interval.end - interval.start
+        if (length <= 1e-5) return null
+        const revealProgress = segmentState.revealFrom === 'from'
+          ? clamp((segmentState.revealProgress - interval.start) / length)
+          : clamp((segmentState.revealProgress - (1 - interval.end)) / length)
+        if (revealProgress <= 0) return null
+        const spans=getSegmentSubpathSpans(historicalProject,historicalSegment,interval.start,interval.end)
+        if(!spans.length)return null
+        const intervalSegment={...historicalSegment,structureType:interval.structureType,lineStyleId:interval.lineStyleId}
+        return <SegmentArtwork key={`${segment.id}:${index}`} segment={intervalSegment} line={line} path={pathSpansToSvgPath(spans)} lineWidth={effectiveLineWidth(line, project.settings)} revealProgress={revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} style={resolveLineStyle(project,line,interval.lineStyleId===undefined?undefined:intervalSegment)}/>
+      })}</g>
     })}</g>
-    <g data-presentation-layer="structure-runs">{elevatedRuns.map(run => { const line = lineMap.get(run.lineId); return line ? <StructureRunArtwork key={run.id} run={run} line={lineWithEffectiveColor(project, line)} lineWidth={effectiveLineWidth(line, project.settings)} style={getLineStyle(project, 'elevated')} /> : null })}</g>    <g data-presentation-layer="stations">{project.stations.filter(station => isCompoundStationCanonical(project, station)).map(station => {
+    <g data-presentation-layer="structure-runs">{elevatedRuns.map(run => { const line = lineMap.get(run.lineId); return line ? <StructureRunArtwork key={run.id} run={run} line={lineWithEffectiveColor(project, line)} lineWidth={effectiveLineWidth(line, project.settings)} style={getLineStyle(project, 'elevated')} /> : null })}</g>
+    <g data-presentation-layer="stations">{project.stations.filter(station => isCompoundStationCanonical(project, station)).map(station => {
       const stationState = state.stationStates[station.id]
       if (!stationState || stationState.opacity <= 0) return null
       const lines = collapseLinesByServiceFamily(project, findLines(stationState.lineIds)), previousLines = collapseLinesByServiceFamily(project, findLines(stationState.previousLineIds)), renderLines = lines.length > 1 ? sortTransferLinesForSpatialOrder(project, station.id, lines, state.historyDate).map(line => lineWithEffectiveColor(project, line)) : lines.map(line => lineWithEffectiveColor(project, line)), renderPreviousLines = previousLines.length > 1 ? sortTransferLinesForSpatialOrder(project, station.id, previousLines, state.historyDate).map(line => lineWithEffectiveColor(project, line)) : previousLines.map(line => lineWithEffectiveColor(project, line)), stationStyle = effectiveStationStyle(station, project.settings)
@@ -76,8 +88,8 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
       <text x={state.camera.x + state.camera.width * .05} y={state.camera.y + state.camera.height * .835} fill="#5d625f" fontSize={Math.min(state.camera.height * .022, state.camera.width * .015)}>全网</text>
       {sequence.settings.showOperatingLength && <text x={state.camera.x + state.camera.width * .105} y={state.camera.y + state.camera.height * .835} fill="#202523" fontSize={Math.min(state.camera.height * .027, state.camera.width * .019)} fontWeight="700">运营里程 {state.statistics.operatingLengthKm.toFixed(1)} km</text>}
       {sequence.settings.showStationCount && <text x={state.camera.x + state.camera.width * .29} y={state.camera.y + state.camera.height * .835} fill="#202523" fontSize={Math.min(state.camera.height * .027, state.camera.width * .019)} fontWeight="700">车站 {state.statistics.stationCount} 座</text>}
-      {state.lineStatistics.map((item, index) => { const line = lineMap.get(item.lineId); return line ? <g key={item.lineId} transform={`translate(${state.camera.x + state.camera.width * (.05 + (index % 2) * .18)} ${state.camera.y + state.camera.height * (.885 + Math.floor(index / 2) * .035)})`}><rect x="0" y={-state.camera.height * .018} width={state.camera.width * .014} height={state.camera.height * .024} rx={state.camera.height * .006} fill={getEffectiveLineColor(project,line)} /><text x={state.camera.width * .021} y="0" fill="#4d5350" fontSize={Math.min(state.camera.height * .019, state.camera.width * .013)}>{getLineDisplayName(project,line)}， {item.operatingLengthKm.toFixed(1)} km， {item.stationCount} 站</text></g> : null })}
+      {state.lineStatistics.map((item, index) => { const line = lineMap.get(item.lineId); return line ? <g key={item.lineId} transform={`translate(${state.camera.x + state.camera.width * (.05 + (index % 2) * .18)} ${state.camera.y + state.camera.height * (.885 + Math.floor(index / 2) * .035)})`}><rect x="0" y={-state.camera.height * .018} width={state.camera.width * .014} height={state.camera.height * .024} rx={state.camera.height*.006} fill={getEffectiveLineColor(project,line)} /><text x={state.camera.width*.021} y="0" fill="#4d5350" fontSize={Math.min(state.camera.height*.019,state.camera.width*.013)}>{getLineDisplayName(project,line)}， {item.operatingLengthKm.toFixed(1)} km， {item.stationCount} 站</text></g> : null })}
     </g>}
-    {sequence.settings.showDate && <g className="presentation-date"><rect x={state.camera.x + state.camera.width * .73} y={state.camera.y + state.camera.height * .865} width={state.camera.width * .235} height={state.camera.height * .095} rx={state.camera.height * .016} fill="#fffdf8" stroke="#d8d2c7" strokeWidth={state.camera.height * .002} opacity=".94" /><text x={state.camera.x + state.camera.width * .8475} y={state.camera.y + state.camera.height * .928} textAnchor="middle" fill="#202523" fontSize={Math.min(state.camera.height * .042, state.camera.width * .032)} fontWeight="700">{state.dateLabel}</text></g>}
+    {sequence.settings.showDate && <g className="presentation-date"><rect x={state.camera.x + state.camera.width*.73} y={state.camera.y + state.camera.height*.865} width={state.camera.width*.235} height={state.camera.height*.095} rx={state.camera.height*.016} fill="#fffdf8" stroke="#d8d2c7" strokeWidth={state.camera.height*.002} opacity=".94" /><text x={state.camera.x+state.camera.width*.8475} y={state.camera.y+state.camera.height*.928} textAnchor="middle" fill="#202523" fontSize={Math.min(state.camera.height*.042,state.camera.width*.032)} fontWeight="700">{state.dateLabel}</text></g>}
   </svg>
 })

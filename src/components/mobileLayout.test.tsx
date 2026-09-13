@@ -11,8 +11,8 @@ describe('mobile-ready information architecture hooks',()=>{
     expect(drawer).toHaveClass('style-drawer')
     expect(drawer).not.toHaveAttribute('style')
   })
-  it('uses the compact action-bar class shared by touch layout',()=>{
+  it('uses the compact line-section action-bar class shared by touch layout',()=>{
     render(<ContextActions project={demoProject} selection={{type:'segment',id:'a-1'}} onExtend={()=>{}} onInsertStation={()=>{}} onAddWaypoint={()=>{}} onStraighten={()=>{}} onStructureChange={()=>{}} onDelete={()=>{}}/>)
-    expect(screen.getByRole('region',{name:'区间快捷操作'})).toHaveClass('context-action-bar')
+    expect(screen.getByRole('region',{name:'线路段快捷操作'})).toHaveClass('context-action-bar')
   })
 })

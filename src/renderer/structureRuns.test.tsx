@@ -134,6 +134,9 @@ describe('Structure Nodes and continuous Elevated Runs',()=>{
     const transitionDom=render(<svg><StructureRunArtwork run={transitionRun} line={transitionProject.lines[0]} lineWidth={18}/></svg>).container
     expect(transitionRun.startBoundary).toBe('structure-transition'); expect(transitionRun.endBoundary).toBe('structure-transition')
     expect(transitionDom.querySelectorAll('[data-terminal-cap]')).toHaveLength(0)
+    expect(transitionDom.querySelectorAll('[data-transition-seam-cover]')).toHaveLength(2)
+    expect(transitionDom.querySelector('[data-transition-seam-cover="start"]')?.getAttribute('r')).toBe('9')
+    expect(transitionDom.querySelector('[data-transition-seam-cover="end"]')?.getAttribute('r')).toBe('9')
 
     const terminalProject=baseProject(); terminalProject.geometry.segments.forEach(item=>{item.structureType='elevated'})
     const terminalRun=compileElevatedRuns(terminalProject)[0]
@@ -141,6 +144,7 @@ describe('Structure Nodes and continuous Elevated Runs',()=>{
     expect(terminalRun.startBoundary).toBe('line-terminal'); expect(terminalRun.endBoundary).toBe('line-terminal')
     expect(terminalDom.querySelectorAll('[data-terminal-cap="start"]')).toHaveLength(3)
     expect(terminalDom.querySelectorAll('[data-terminal-cap="end"]')).toHaveLength(3)
+    expect(terminalDom.querySelectorAll('[data-transition-seam-cover]')).toHaveLength(0)
     expect(terminalDom.querySelectorAll('[data-run-centerline]')).toHaveLength(3)
   })
 

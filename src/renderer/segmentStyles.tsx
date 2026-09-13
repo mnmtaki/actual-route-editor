@@ -37,8 +37,15 @@ export function StructureRunArtwork({ run, line, lineWidth, style }: { run: Stru
   const layers = resolveLineStyleLayers(style ?? fallbackStyle, line.color, lineWidth), common = { d: run.path, fill: 'none', strokeLinecap: 'butt' as const, strokeLinejoin: 'round' as const }
   const getLayerClass = (index: number) => index === layers.length - 1 ? 'segment-main' : index === 0 ? 'segment-elevated-outer' : index === 1 ? 'segment-elevated-separator' : 'line-style-layer line-style-layer-' + index
   return <g data-structure-run-id={run.id} data-structure-type="elevated" data-run-segments={run.segmentIds.join(',')} data-start-boundary={run.startBoundary} data-end-boundary={run.endBoundary} opacity={run.opacity}>
-    {layers.map((layer, index) => <g key={layer.id}><path {...common} data-run-centerline={index === layers.length - 1 ? 'main' : index === 0 ? 'outer' : index === 1 ? 'separator' : layer.id} className={getLayerClass(index)} data-line-style-layer={layer.id} stroke={layer.resolvedColor} strokeWidth={layer.resolvedWidth} strokeOpacity={layer.resolvedOpacity} strokeLinecap={layer.lineCap ?? 'butt'} strokeLinejoin={layer.lineJoin ?? 'round'} strokeDasharray={layer.resolvedDash} /><TerminalCaps run={run} radius={layer.resolvedWidth / 2} fill={layer.resolvedColor} layer={index === layers.length - 1 ? 'main' : index === 0 ? 'outer' : index === 1 ? 'separator' : layer.id} /></g>)}
+    {layers.map((layer, index) => <g key={layer.id}><path {...common} data-run-centerline={index === layers.length - 1 ? 'main' : index === 0 ? 'outer' : index === 1 ? 'separator' : layer.id} className={getLayerClass(index)} data-line-style-layer={layer.id} stroke={layer.resolvedColor} strokeWidth={layer.resolvedWidth} strokeOpacity={layer.resolvedOpacity} strokeLinecap={layer.lineCap ?? 'butt'} strokeLinejoin={layer.lineJoin ?? 'round'} strokeDasharray={layer.resolvedDash} />{index === layers.length - 1 && <TransitionSeamCovers run={run} radius={layer.resolvedWidth / 2} fill={layer.resolvedColor} opacity={layer.resolvedOpacity} />}<TerminalCaps run={run} radius={layer.resolvedWidth / 2} fill={layer.resolvedColor} layer={index === layers.length - 1 ? 'main' : index === 0 ? 'outer' : index === 1 ? 'separator' : layer.id} /></g>)}
   </g>
+}
+function TransitionSeamCovers({ run, radius, fill, opacity }: { run: StructureRun; radius: number; fill: string; opacity: number }) {
+  const start = run.spans[0]?.start, end = run.spans.at(-1)?.end
+  return <>
+    {run.startBoundary === 'structure-transition' && start && <circle data-transition-seam-cover="start" cx={start.x} cy={start.y} r={radius} fill={fill} opacity={opacity} />}
+    {run.endBoundary === 'structure-transition' && end && <circle data-transition-seam-cover="end" cx={end.x} cy={end.y} r={radius} fill={fill} opacity={opacity} />}
+  </>
 }
 function TerminalCaps({ run, radius, fill, layer }: { run: StructureRun; radius: number; fill: string; layer: string }) {
   const start = run.spans[0]?.start, end = run.spans.at(-1)?.end

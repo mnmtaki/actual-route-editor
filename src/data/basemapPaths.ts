@@ -1,7 +1,8 @@
 import type { ActualRouteProject, BasemapPath, BasemapPathCategory, BasemapPathPoint } from './model'
 import { uid } from './model'
 
-export type DrawingMode = { kind: 'line'; lineId: string; anchorStationId: string | null; phaseId?: string } | { kind: 'basemap'; pathId: string } | { kind: 'road'; roadId: string; styleId: string } | { kind?: 'line'; lineId: string; anchorStationId: string | null; phaseId?: string }
+export interface LineDraftPoint { id: string; x: number; y: number }
+export type DrawingMode = { kind: 'line'; lineId: string; anchorStationId: string | null; phaseId?: string; draftPoints?: LineDraftPoint[]; lastCreatedStationId?: string } | { kind: 'basemap'; pathId: string } | { kind: 'road'; roadId: string; styleId: string } | { kind?: 'line'; lineId: string; anchorStationId: string | null; phaseId?: string; draftPoints?: LineDraftPoint[]; lastCreatedStationId?: string }
 
 export const DEFAULT_BASEMAP_COLORS: Record<BasemapPathCategory, string> = { water: '#9ecbd3', terrain: '#b8c89b', other: '#d2c5a5' }
 

@@ -48,6 +48,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const drawingClick = useRef<{ time: number; x: number; y: number } | null>(null)
   const pointerDoubleFinish = useRef(false)
   const draftDrag = useRef<{ pointerId: number; id: string } | null>(null)
+  const lineCanvasPointer = useRef<{ pointerId: number; startClient: Point; lastClient: Point; moved: boolean } | null>(null)
   const [preview, setPreview] = useState<ActualRouteProject | null>(null)
   const [canvasWidth, setCanvasWidth] = useState(920)
   const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
@@ -85,6 +86,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const beginPinch = () => {
     const points = [...pointers.current.entries()].slice(0, 2)
     if (points.length < 2) return
+    lineCanvasPointer.current = null
     const [[firstId, first], [secondId, second]] = points
     const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
     const initialDistance = Math.hypot(second.x - first.x, second.y - first.y)
@@ -104,6 +106,13 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     return true
   }
 
+  const addDraftPointAt = (position: Point) => {
+    if (!lineDraft?.anchorStationId) return
+    const point = { id: uid('draft-waypoint'), x: position.x, y: position.y }
+    setLineDraft(current => current ? { ...current, points: [...current.points, point] } : current)
+    setDrawingPointSelection({ kind: 'draft', id: point.id })
+  }
+
   const addDraftPoint = () => {
     if (!lineDraft?.anchorStationId) return
     const anchor = shown.stations.find(item => item.id === lineDraft.anchorStationId)
@@ -118,9 +127,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }
     if (Math.hypot(dx, dy) < 1e-6) { dx = 1; dy = 0 }
     const length = Math.hypot(dx, dy), distance = 86
-    const point = { id: uid('draft-waypoint'), x: last.x + dx / length * distance, y: last.y + dy / length * distance }
-    setLineDraft(current => current ? { ...current, points: [...current.points, point] } : current)
-    setDrawingPointSelection({ kind: 'draft', id: point.id })
+    addDraftPointAt({ x: last.x + dx / length * distance, y: last.y + dy / length * distance })
   }
 
   const promoteDraftPoint = (id: string) => {
@@ -172,13 +179,18 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (calibration) { capture(event); gesture.current = { kind: 'calibrationTap', pointerId: event.pointerId, startClient: { x: event.clientX, y: event.clientY }, lastClient: { x: event.clientX, y: event.clientY }, moved: false }; return }
     const target = event.target as Element
     if (drawing?.kind === 'line') {
+      const isCanvasBlank = target === event.currentTarget || target.classList.contains('canvas-bg')
+      if (!isCanvasBlank) return
       if (!lineDraft?.anchorStationId) {
         const point = pointerToWorld(event.clientX, event.clientY)
         const result = appendStationToLineWithWaypoints(project, drawing.lineId, point, [], null, drawing.phaseId)
         onDragCommit(project, result.project)
         setLineDraft({ lineId: drawing.lineId, phaseId: drawing.phaseId, anchorStationId: result.stationId, points: [], lastCreatedStationId: result.stationId })
         onSelect({ type: 'station', id: result.stationId })
+        return
       }
+      capture(event)
+      lineCanvasPointer.current = { pointerId: event.pointerId, startClient: { x: event.clientX, y: event.clientY }, lastClient: { x: event.clientX, y: event.clientY }, moved: false }
       return
     }
     if (drawing) {
@@ -198,6 +210,17 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const point = pointerToWorld(event.clientX, event.clientY)
       const id = draftDrag.current.id
       setLineDraft(current => current ? { ...current, points: current.points.map(item => item.id === id ? { ...item, x: point.x, y: point.y } : item) } : current)
+      return
+    }
+    if (lineCanvasPointer.current?.pointerId === event.pointerId) {
+      const current = lineCanvasPointer.current
+      const dx = event.clientX - current.startClient.x, dy = event.clientY - current.startClient.y
+      current.moved ||= Math.hypot(dx, dy) > 6
+      if (current.moved) {
+        const before = pointerToWorld(current.lastClient.x, current.lastClient.y), after = pointerToWorld(event.clientX, event.clientY)
+        current.lastClient = { x: event.clientX, y: event.clientY }
+        setView(value => ({ ...value, x: value.x - (after.x - before.x), y: value.y - (after.y - before.y) }))
+      }
       return
     }
     const current = gesture.current
@@ -280,6 +303,12 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const endGesture = (event: React.PointerEvent) => {
     pointers.current.delete(event.pointerId)
     if (draftDrag.current?.pointerId === event.pointerId) { draftDrag.current = null; return }
+    if (lineCanvasPointer.current?.pointerId === event.pointerId) {
+      const current = lineCanvasPointer.current
+      lineCanvasPointer.current = null
+      if (!current.moved && event.type === 'pointerup') addDraftPointAt(pointerToWorld(event.clientX, event.clientY))
+      return
+    }
     const current = gesture.current
     if (current.kind === 'pinchingCanvas') { if (pointers.current.size < 2) gesture.current = { kind: 'idle' }; return }
     if (current.kind === 'calibrationTap' && current.pointerId === event.pointerId) { if (!current.moved) onCalibrationPoint?.(pointerToWorld(event.clientX, event.clientY)); gesture.current = { kind: 'idle' }; pointers.current.clear(); return }
@@ -301,8 +330,12 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     const rawLine = shown.lines.find(item => item.id === lineDraft.lineId)
     if (!anchor || !rawLine) return null
     const line = lineWithEffectiveColor(shown, rawLine), points = lineDraft.points
-    const pathPoints = [anchor, ...points]
-    const path = pathPoints.length > 1 ? `M ${pathPoints.map(item => `${item.x} ${item.y}`).join(' L ')}` : ''
+    const path = points.length ? (() => {
+      const endpoint = points.at(-1)!
+      const draftStation = { id: '__drawing-preview-end__', name: '', x: endpoint.x, y: endpoint.y, labelOffsetX: 0, labelOffsetY: 0 }
+      const draftSegment = { id: '__drawing-preview-segment__', lineId: lineDraft.lineId, fromStationId: anchor.id, toStationId: draftStation.id, mode: 'smooth' as const, structureType: 'underground' as const, structureNodes: [], waypoints: points.slice(0, -1).map(point => ({ id: point.id, x: point.x, y: point.y, type: 'smooth' as const })) }
+      return getSegmentPath({ ...shown, stations: [...shown.stations, draftStation] }, draftSegment)
+    })() : ''
     const last = points.at(-1) ?? anchor
     const previous = points.length >= 2 ? points[points.length - 2] : points.length === 1 ? anchor : null
     let dx = previous ? last.x - previous.x : 0, dy = previous ? last.y - previous.y : 0
@@ -343,7 +376,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     <MapElementsLayer project={shown} selectedId={selection?.type === 'mapElement' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={(event, element) => { if (drawing) return; if (startObjectDrag('draggingMapElement', event, { x: element.x, y: element.y }, element.id)) onSelect({ type: 'mapElement', id: element.id }) }} />
     <LineLegendLayer project={shown} selectedId={selection?.type === 'lineLegend' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={(event, legend) => { if (drawing) return; if (legend.locked) { onSelect({ type: 'lineLegend', id: legend.id }); return } if (startObjectDrag('draggingLineLegend', event, { x: legend.x, y: legend.y }, legend.id)) onSelect({ type: 'lineLegend', id: legend.id }) }} />
     <g data-layer="waypoints" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (()=>{const segmentId=selection.type==='segment'?selection.id:selection.segmentId,segment=shown.geometry.segments.find(item=>item.id===segmentId);if(!segment)return null;const cornerIds=new Set(getSegmentRoundedCornerPlans(shown,segment).map(plan=>plan.waypointId));return segment.waypoints.map(waypoint=>{const isCorner=cornerIds.has(waypoint.id),selected=selection.type==='waypoint'&&selection.id===waypoint.id,selectWaypoint=(event:React.PointerEvent)=>{if(isSegmentGeometryLocked(shown,segmentId)){onSelect({type:'waypoint',id:waypoint.id,segmentId});onEditBlocked?.('线路已锁定');return}if(startObjectDrag('draggingWaypoint',event,{x:waypoint.x,y:waypoint.y},waypoint.id,segmentId))onSelect({type:'waypoint',id:waypoint.id,segmentId})};return <g key={waypoint.id} data-corner-handle={isCorner?'true':undefined} data-waypoint-id={waypoint.id} onPointerDown={selectWaypoint}><circle className="waypoint-hit" cx={waypoint.x} cy={waypoint.y} r={stationHitRadius} fill="transparent" pointerEvents="all"/><circle cx={waypoint.x} cy={waypoint.y} r={isCorner?7:8} className={`waypoint ${isCorner?'corner-waypoint':''} ${selected?'selected':''}`} pointerEvents="none"/></g>})})()}</g>
-    <g data-layer="style-points" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (() => { const segmentId = selection.type === 'segment' ? selection.id : selection.segmentId; const segment = shown.geometry.segments.find(item => item.id === segmentId); if (!segment) return null; return (segment.structureNodes ?? []).map(node => { const point = getStructureNodePoint(shown, segment, node); if (!point) return null; const selected = selection.type === 'structureNode' && selection.id === node.id, attached=Boolean(node.waypointId); return <g key={node.id} transform={`translate(${point.x} ${point.y})`} data-style-point-id={node.id} data-structure-node-id={node.id} data-attached-waypoint-id={node.waypointId ?? ''} onPointerDown={event => { event.stopPropagation(); if (attached) { onSelect({ type: 'structureNode', id: node.id, segmentId }); return }; if (isSegmentGeometryLocked(shown, segmentId)) { onSelect({ type: 'structureNode', id: node.id, segmentId }); onEditBlocked?.('线路已锁定'); return }; if (startObjectDrag('draggingStructureNode', event, point, node.id, segmentId)) onSelect({ type: 'structureNode', id: node.id, segmentId }) }}><circle r={attached?6:structureHitRadius} fill="transparent" pointerEvents="all" /><path d="M 0 -5 L 5 0 L 0 5 L -5 0 Z" fill={selected?'#fff4c9':'#fffdf9'} stroke={selected?'#b98700':'#353b38'} strokeWidth={selected?2:1.5} vectorEffect="non-scaling-stroke" pointerEvents="none" /></g> }) })()}</g>
+    <g data-layer="style-points" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (() => { const segmentId = selection.type === 'segment' ? selection.id : selection.segmentId; const segment = shown.geometry.segments.find(item=>item.id===segmentId); if (!segment) return null; return (segment.structureNodes ?? []).map(node => { const point = getStructureNodePoint(shown, segment, node); if (!point) return null; const selected = selection.type === 'structureNode' && selection.id === node.id, attached=Boolean(node.waypointId); return <g key={node.id} transform={`translate(${point.x} ${point.y})`} data-style-point-id={node.id} data-structure-node-id={node.id} data-attached-waypoint-id={node.waypointId ?? ''} onPointerDown={event => { event.stopPropagation(); if (attached) { onSelect({ type: 'structureNode', id: node.id, segmentId }); return }; if (isSegmentGeometryLocked(shown, segmentId)) { onSelect({ type: 'structureNode', id: node.id, segmentId }); onEditBlocked?.('线路已锁定'); return }; if (startObjectDrag('draggingStructureNode', event, point, node.id, segmentId)) onSelect({ type: 'structureNode', id: node.id, segmentId }) }}><circle r={attached?6:structureHitRadius} fill="transparent" pointerEvents="all" /><path d="M 0 -5 L 5 0 L 0 5 L -5 0 Z" fill={selected?'#fff4c9':'#fffdf9'} stroke={selected?'#b98700':'#353b38'} strokeWidth={selected?2:1.5} vectorEffect="non-scaling-stroke" pointerEvents="none" /></g> }) })()}</g>
     <g data-layer="station-actions" data-editor="true">{selection?.type === 'station' && !drawing && (() => { const station = shown.stations.find(item => item.id === selection.id); if (!station) return null; const handle = getStationHandleStyle(shown, station.id, shown.timeline.currentDate); return <g className="station-extend" transform={`translate(${handle.x} ${handle.y})`} onPointerDown={event => { event.stopPropagation(); onExtend(station.id) }}><circle className="station-extend-hit" r={Math.max(stationHitRadius, 18)} fill="transparent" pointerEvents="all" /><circle className="station-extend-button" r="8.5" fill="white" stroke={handle.color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" pointerEvents="none" /><path className="station-extend-plus" d="M -3.2 0 H 3.2 M 0 -3.2 V 3.2" stroke={handle.color} strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" pointerEvents="none" /></g> })()}</g>
     {drawing?.kind === 'line' && !lineDraft?.anchorStationId && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置起点站</text></g>}
     {calibration && <g data-editor="true" data-layer="calibration-overlay"><rect x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="transparent" pointerEvents="all" onPointerDown={event => handleCanvasPointerDown(event as unknown as React.PointerEvent<SVGSVGElement>)} /><line x1={calibration.points[0]?.x ?? 0} y1={calibration.points[0]?.y ?? 0} x2={calibration.points[1]?.x ?? calibration.points[0]?.x ?? 0} y2={calibration.points[1]?.y ?? calibration.points[0]?.y ?? 0} stroke="#c89521" strokeWidth="2" strokeDasharray="8 5" pointerEvents="none" />{calibration.points.map((point,index)=><circle key={index} cx={point.x} cy={point.y} r="8" fill="#fff9e8" stroke="#c89521" strokeWidth="2" pointerEvents="none" />)}<text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#765c1a" fontSize="16" pointerEvents="none">{calibration.points.length ? '再点一下选择第二个点' : '点击地图上的第一个点'}</text></g>}

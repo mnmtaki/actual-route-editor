@@ -5,6 +5,8 @@ import { isSegmentGeometryLocked } from './lineLock'
 
 const EPSILON = 1e-5
 export interface StructureInterval { start: number; end: number; structureType: StructureType }
+export interface StyleInterval extends StructureInterval { lineStyleId?: string | null; startNodeId?: string }
+export interface StyleIntervalState { structureType: StructureType; lineStyleId?: string | null }
 export interface StructureVisibility { revealProgress: number; revealFrom: 'from' | 'to'; opacity: number }
 export type StructureRunBoundary = 'continuous' | 'structure-transition' | 'line-terminal'
 export interface StructureRun { id: string; lineId: string; structureType: 'elevated'; segmentIds: string[]; points: Point[]; spans: PathSpan[]; path: string; opacity: number; startBoundary: StructureRunBoundary; endBoundary: StructureRunBoundary; startTangent: Point; endTangent: Point }
@@ -17,20 +19,111 @@ export function resolveStructureNodeProgress(project: ActualRouteProject, segmen
   }
   return clamp(node.progress ?? 0)
 }
-export function getSegmentStructureIntervals(project: ActualRouteProject, segment: Segment): StructureInterval[] {
-  const nodes = [...(segment.structureNodes ?? [])].map(node => ({ node, progress: resolveStructureNodeProgress(project, segment, node) })).filter(item => item.progress > EPSILON && item.progress < 1 - EPSILON).sort((a, b) => a.progress - b.progress || a.node.id.localeCompare(b.node.id))
-  const intervals: StructureInterval[] = []; let cursor = 0, current = segment.structureType
-  for (const { node, progress } of nodes) { if (progress > cursor + EPSILON) intervals.push({ start: cursor, end: progress, structureType: current }); current = node.structureAfter; cursor = progress }
-  if (cursor < 1 - EPSILON) intervals.push({ start: cursor, end: 1, structureType: current })
+function sortedStylePoints(project: ActualRouteProject, segment: Segment) {
+  return [...(segment.structureNodes ?? [])]
+    .map(node => ({ node, progress: resolveStructureNodeProgress(project, segment, node) }))
+    .filter(item => item.progress > EPSILON && item.progress < 1 - EPSILON)
+    .sort((a, b) => a.progress - b.progress || a.node.id.localeCompare(b.node.id))
+}
+function nextLineStyle(current: string | null | undefined, node: StructureNode) {
+  return node.styleAfter === undefined ? current : node.styleAfter.lineStyleId
+}
+export function getSegmentStyleIntervals(project: ActualRouteProject, segment: Segment): StyleInterval[] {
+  const nodes = sortedStylePoints(project, segment)
+  const intervals: StyleInterval[] = []
+  let cursor = 0, structureType = segment.structureType, lineStyleId = segment.lineStyleId, startNodeId: string | undefined
+  for (const { node, progress } of nodes) {
+    if (progress > cursor + EPSILON) intervals.push({ start: cursor, end: progress, structureType, lineStyleId, ...(startNodeId ? { startNodeId } : {}) })
+    structureType = node.structureAfter
+    lineStyleId = nextLineStyle(lineStyleId, node)
+    cursor = progress
+    startNodeId = node.id
+  }
+  if (cursor < 1 - EPSILON) intervals.push({ start: cursor, end: 1, structureType, lineStyleId, ...(startNodeId ? { startNodeId } : {}) })
   return intervals
 }
-export function addStructureNodeAtProgress(project: ActualRouteProject, segmentId: string, progress: number, structureAfter: StructureType): { project: ActualRouteProject; nodeId: string | null } {
+export function getSegmentStyleIntervalAtProgress(project: ActualRouteProject, segment: Segment, progress: number): StyleInterval {
+  const clamped = clamp(progress)
+  const intervals = getSegmentStyleIntervals(project, segment)
+  return intervals.find(interval => clamped >= interval.start - EPSILON && clamped < interval.end - EPSILON)
+    ?? intervals.at(-1)
+    ?? { start: 0, end: 1, structureType: segment.structureType, lineStyleId: segment.lineStyleId }
+}
+export function getSegmentStructureIntervals(project: ActualRouteProject, segment: Segment): StructureInterval[] {
+  return getSegmentStyleIntervals(project, segment).map(({ start, end, structureType }) => ({ start, end, structureType }))
+}
+/** Add a style boundary without changing the rendered result. Both new intervals inherit the style that was active at the insertion point. */
+export function addStructureNodeAtProgress(project: ActualRouteProject, segmentId: string, progress: number, _legacyStructureAfter?: StructureType): { project: ActualRouteProject; nodeId: string | null } {
   const next = structuredClone(project), segment = next.geometry.segments.find(item => item.id === segmentId)
   if (!segment) return { project, nodeId: null }
   if (isSegmentGeometryLocked(project, segmentId)) return { project, nodeId: null }
-  const node: StructureNode = { id: uid('structure'), progress: clamp(progress), structureAfter }
+  const at = Math.max(EPSILON, Math.min(1 - EPSILON, progress))
+  const existing = sortedStylePoints(next, segment).find(item => Math.abs(item.progress - at) < EPSILON * 4)
+  if (existing) return { project, nodeId: existing.node.id }
+  const current = getSegmentStyleIntervalAtProgress(next, segment, at)
+  const node: StructureNode = {
+    id: uid('structure'),
+    progress: at,
+    structureAfter: current.structureType,
+    styleAfter: current.lineStyleId === undefined ? {} : { lineStyleId: current.lineStyleId },
+  }
   segment.structureNodes = [...(segment.structureNodes ?? []), node]
   return { project: next, nodeId: node.id }
+}
+export function updateStyleIntervalAtProgress(project: ActualRouteProject, segmentId: string, progress: number, state: StyleIntervalState): ActualRouteProject {
+  if (isSegmentGeometryLocked(project, segmentId)) return project
+  const next = structuredClone(project), segment = next.geometry.segments.find(item => item.id === segmentId)
+  if (!segment) return project
+  const interval = getSegmentStyleIntervalAtProgress(next, segment, progress)
+  if (!interval.startNodeId) {
+    segment.structureType = state.structureType
+    if (state.lineStyleId === undefined) delete segment.lineStyleId
+    else segment.lineStyleId = state.lineStyleId
+    return next
+  }
+  const node = segment.structureNodes?.find(item => item.id === interval.startNodeId)
+  if (!node) return project
+  node.structureAfter = state.structureType
+  node.styleAfter = state.lineStyleId === undefined ? {} : { lineStyleId: state.lineStyleId }
+  return next
+}
+export function styleIntervalStatesAroundPoint(project: ActualRouteProject, segmentId: string, nodeId: string): { before: StyleIntervalState; after: StyleIntervalState } | null {
+  const segment = project.geometry.segments.find(item => item.id === segmentId)
+  if (!segment) return null
+  const ordered = sortedStylePoints(project, segment), index = ordered.findIndex(item => item.node.id === nodeId)
+  if (index < 0) return null
+  const progress = ordered[index].progress
+  const before = getSegmentStyleIntervalAtProgress(project, segment, Math.max(0, progress - EPSILON * 8))
+  const after = getSegmentStyleIntervalAtProgress(project, segment, Math.min(1, progress + EPSILON * 8))
+  return {
+    before: { structureType: before.structureType, lineStyleId: before.lineStyleId },
+    after: { structureType: after.structureType, lineStyleId: after.lineStyleId },
+  }
+}
+export function styleIntervalStatesEqual(a: StyleIntervalState, b: StyleIntervalState) {
+  return a.structureType === b.structureType && a.lineStyleId === b.lineStyleId
+}
+export function deleteStylePoint(project: ActualRouteProject, segmentId: string, nodeId: string, keep: 'before' | 'after' = 'before'): ActualRouteProject {
+  if (isSegmentGeometryLocked(project, segmentId)) return project
+  const next = structuredClone(project), segment = next.geometry.segments.find(item => item.id === segmentId)
+  if (!segment) return project
+  const ordered = sortedStylePoints(next, segment), index = ordered.findIndex(item => item.node.id === nodeId)
+  if (index < 0) return project
+  const states = styleIntervalStatesAroundPoint(next, segmentId, nodeId)
+  if (!states) return project
+  if (keep === 'after') {
+    const previous = index > 0 ? ordered[index - 1].node : null
+    if (previous) {
+      previous.structureAfter = states.after.structureType
+      previous.styleAfter = states.after.lineStyleId === undefined ? {} : { lineStyleId: states.after.lineStyleId }
+    } else {
+      segment.structureType = states.after.structureType
+      if (states.after.lineStyleId === undefined) delete segment.lineStyleId
+      else segment.lineStyleId = states.after.lineStyleId
+    }
+  }
+  segment.structureNodes = (segment.structureNodes ?? []).filter(node => node.id !== nodeId)
+  return next
 }
 export function setWaypointStructureAfter(project: ActualRouteProject, segmentId: string, waypointId: string, change: WaypointStructureChange | null): ActualRouteProject {
   const next = structuredClone(project), segment = next.geometry.segments.find(item => item.id === segmentId)
@@ -46,8 +139,6 @@ export function setWaypointStructureAfter(project: ActualRouteProject, segmentId
     const existing = segment.structureNodes[existingIndex]
     existing.structureAfter = structureAfter
     delete existing.progress
-    // A waypoint owns one structure instruction. Collapse legacy duplicates so
-    // the selector and interval resolver cannot disagree after a re-render.
     segment.structureNodes = segment.structureNodes.filter((node, index) => index === existingIndex || node.waypointId !== waypointId)
   } else {
     segment.structureNodes.push({ id: uid('structure'), waypointId, structureAfter })
@@ -68,20 +159,16 @@ export function moveIndependentStructureNode(project: ActualRouteProject, segmen
   return next
 }
 export function deleteStructureNode(project: ActualRouteProject, segmentId: string, nodeId: string): ActualRouteProject {
-  if (isSegmentGeometryLocked(project, segmentId)) return project
-  const next = structuredClone(project), segment = next.geometry.segments.find(item => item.id === segmentId)
-  if (!segment) return project
-  segment.structureNodes = (segment.structureNodes ?? []).filter(node => node.id !== nodeId); return next
+  return deleteStylePoint(project, segmentId, nodeId, 'before')
 }
 export function getStructureNodePoint(project: ActualRouteProject, segment: Segment, node: StructureNode) { return sampleSegmentAtLengthRatio(project, segment, resolveStructureNodeProgress(project, segment, node))?.point ?? null }
 export function getWaypointStructureAfter(segment: Segment, waypointId: string) { return segment.structureNodes?.find(node => node.waypointId === waypointId)?.structureAfter ?? null }
 export function getWaypointStructureChange(segment: Segment, waypointId: string): WaypointStructureChange { return getWaypointStructureAfter(segment, waypointId) ?? 'none' }
 
-export function splitSegmentStructure(project: ActualRouteProject, segment: Segment, splitProgress: number, beforeWaypointIds: Set<string>, afterWaypointIds: Set<string>): { beforeType: StructureType; beforeNodes: StructureNode[]; afterType: StructureType; afterNodes: StructureNode[] } {
+export function splitSegmentStructure(project: ActualRouteProject, segment: Segment, splitProgress: number, beforeWaypointIds: Set<string>, afterWaypointIds: Set<string>): { beforeType: StructureType; beforeLineStyleId?: string | null; beforeNodes: StructureNode[]; afterType: StructureType; afterLineStyleId?: string | null; afterNodes: StructureNode[] } {
   const split = Math.max(EPSILON, Math.min(1 - EPSILON, splitProgress))
-  const resolved = (segment.structureNodes ?? []).map(node => ({ node, progress: resolveStructureNodeProgress(project, segment, node) })).sort((a, b) => a.progress - b.progress || a.node.id.localeCompare(b.node.id))
-  let afterType = segment.structureType
-  for (const item of resolved) if (item.progress <= split + EPSILON) afterType = item.node.structureAfter
+  const resolved = sortedStylePoints(project, segment)
+  const atSplit = getSegmentStyleIntervalAtProgress(project, segment, Math.min(1, split + EPSILON * 2))
   const mapNode = (item: { node: StructureNode; progress: number }, side: 'before' | 'after'): StructureNode => {
     const waypointIds = side === 'before' ? beforeWaypointIds : afterWaypointIds
     const waypointId = item.node.waypointId && waypointIds.has(item.node.waypointId) ? item.node.waypointId : undefined
@@ -90,8 +177,10 @@ export function splitSegmentStructure(project: ActualRouteProject, segment: Segm
   }
   return {
     beforeType: segment.structureType,
+    beforeLineStyleId: segment.lineStyleId,
     beforeNodes: resolved.filter(item => item.progress < split - EPSILON).map(item => mapNode(item, 'before')),
-    afterType,
+    afterType: atSplit.structureType,
+    afterLineStyleId: atSplit.lineStyleId,
     afterNodes: resolved.filter(item => item.progress > split + EPSILON).map(item => mapNode(item, 'after')),
   }
 }

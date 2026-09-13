@@ -13,7 +13,8 @@ export function StyleGeometryInspector({ project, selection, onChange, onDelete,
   const [deleteChoice, setDeleteChoice] = useState(false)
   const patch = (mutate: (next: ActualRouteProject) => void) => { const next=structuredClone(project); mutate(next); onChange(next) }
   const shell = (content: React.ReactNode) => <aside className={embedded?'mobile-inspector panel':'right-panel panel'}><div className="panel-heading"><div><h2>属性</h2><span className="panel-subtitle">当前选择</span></div></div><div className="inspector-body">{content}</div></aside>
-  if (!selection || !['segment','waypoint','structureNode'].includes(selection.type)) return shell(null)
+  if (!selection) return shell(null)
+  if (selection.type !== 'segment' && selection.type !== 'waypoint' && selection.type !== 'structureNode') return shell(null)
   const segmentId = selection.type === 'segment' ? selection.id : selection.segmentId
   const segment = project.geometry.segments.find(item => item.id === segmentId)
   if (!segment) return shell(<div className="empty-inspector"><p>当前对象已不存在，请重新选择。</p></div>)
@@ -57,6 +58,7 @@ export function StyleGeometryInspector({ project, selection, onChange, onDelete,
     return shell(<><h3>控制点</h3><Field label="点类型"><select disabled={locked} value={waypoint.type} onChange={event=>patch(next=>{next.geometry.segments.find(item=>item.id===segment.id)!.waypoints.find(item=>item.id===waypoint.id)!.type=event.target.value as 'smooth'|'corner'})}><option value="smooth">平滑</option><option value="corner">折角</option></select></Field>{cornerPlan&&<section className="corner-radius-control"><Field label="圆角半径"><input disabled={locked} type="number" inputMode="decimal" min="0" step="1" value={waypoint.cornerRadius??defaultRadius} onChange={event=>patch(next=>{const target=next.geometry.segments.find(item=>item.id===segment.id)?.waypoints.find(item=>item.id===waypoint.id);const value=Number(event.target.value);if(target&&Number.isFinite(value))target.cornerRadius=Math.max(0,value)})}/></Field><p className="meta-note">请求值 {round(cornerPlan.requestedRadius)}，实际值 {round(cornerPlan.effectiveRadius)}{cornerPlan.effectiveRadius+.01<cornerPlan.requestedRadius?'（受相邻腿长限制）':''}</p><button disabled={locked||waypoint.cornerRadius===undefined} onClick={()=>patch(next=>{const target=next.geometry.segments.find(item=>item.id===segment.id)?.waypoints.find(item=>item.id===waypoint.id);if(target)delete target.cornerRadius})}>使用默认值</button></section>}<p className="meta-note">控制点只改变线路形状，不改变线路段样式。与样式点重合时，两者仍是独立职责。</p><button className="danger" disabled={locked} onClick={removeControlPoint}>删除控制点</button></>)
   }
 
+  if (selection.type !== 'structureNode') return shell(null)
   const node=segment.structureNodes?.find(item=>item.id===selection.id)
   if(!node)return shell(<div className="empty-inspector"><p>样式点已删除，请重新选择。</p></div>)
   const states=styleIntervalStatesAroundPoint(project,segment.id,node.id), pointLabel=stylePointName(node.id)

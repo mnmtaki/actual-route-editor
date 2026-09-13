@@ -24,6 +24,8 @@ import { collapseLinesByServiceFamily, getEffectiveLineColor, getLineDisplayName
 import { isCompoundStationCanonical } from '../data/compoundStation'
 import type { PresentationSequence } from './types'
 
+const clamp = (value: number) => Math.max(0, Math.min(1, value))
+
 export const PresentationScene = memo(function PresentationScene({ project, sequence, time, width, height, svgRef }: { project: ActualRouteProject; sequence: PresentationSequence; time: number; width: number; height: number; svgRef?: Ref<SVGSVGElement> }) {
   const state = useMemo(() => getPresentationState(project, sequence, time), [project, sequence, time])
   const defaultTransferDefinition = getStationStyle('default')
@@ -42,15 +44,17 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
     <g data-presentation-layer="segments">{segmentArtwork.map(({ segment, historicalSegment, line }) => {
       const segmentState = state.segmentStates[segment.id]
       if (!line?.visible || !segmentState || segmentState.revealProgress <= 0 || segmentState.opacity <= 0) return null
-      const revealStart = segmentState.revealFrom === 'from' ? 0 : Math.max(0, 1 - segmentState.revealProgress)
-      const revealEnd = segmentState.revealFrom === 'from' ? Math.min(1, segmentState.revealProgress) : 1
       return <g key={segment.id}>{getSegmentStyleIntervals(historicalProject, historicalSegment).map((interval,index)=>{
-        const start=Math.max(interval.start,revealStart), end=Math.min(interval.end,revealEnd)
-        if(end-start<=1e-5)return null
-        const spans=getSegmentSubpathSpans(historicalProject,historicalSegment,start,end)
+        const length = interval.end - interval.start
+        if (length <= 1e-5) return null
+        const revealProgress = segmentState.revealFrom === 'from'
+          ? clamp((segmentState.revealProgress - interval.start) / length)
+          : clamp((segmentState.revealProgress - (1 - interval.end)) / length)
+        if (revealProgress <= 0) return null
+        const spans=getSegmentSubpathSpans(historicalProject,historicalSegment,interval.start,interval.end)
         if(!spans.length)return null
         const intervalSegment={...historicalSegment,structureType:interval.structureType,lineStyleId:interval.lineStyleId}
-        return <SegmentArtwork key={`${segment.id}:${index}`} segment={intervalSegment} line={line} path={pathSpansToSvgPath(spans)} lineWidth={effectiveLineWidth(line, project.settings)} opacity={segmentState.opacity} renderLegacyStructure={false} style={resolveLineStyle(project,line,interval.lineStyleId===undefined?undefined:intervalSegment)}/>
+        return <SegmentArtwork key={`${segment.id}:${index}`} segment={intervalSegment} line={line} path={pathSpansToSvgPath(spans)} lineWidth={effectiveLineWidth(line, project.settings)} revealProgress={revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} style={resolveLineStyle(project,line,interval.lineStyleId===undefined?undefined:intervalSegment)}/>
       })}</g>
     })}</g>
     <g data-presentation-layer="structure-runs">{elevatedRuns.map(run => { const line = lineMap.get(run.lineId); return line ? <StructureRunArtwork key={run.id} run={run} line={lineWithEffectiveColor(project, line)} lineWidth={effectiveLineWidth(line, project.settings)} style={getLineStyle(project, 'elevated')} /> : null })}</g>

@@ -18,7 +18,7 @@ function applyDrawingWaypoints(project: ActualRouteProject, existingSegmentIds: 
   const segment = project.geometry.segments.find(item => !existingSegmentIds.has(item.id))
   if (!segment) return null
   segment.waypoints = points.map(point => ({ id: point.id || uid('waypoint'), x: point.x, y: point.y, type: 'smooth' as const }))
-  segment.mode = segment.waypoints.length ? 'smooth' : 'straight'
+  segment.mode = 'smooth'
   return segment.id
 }
 

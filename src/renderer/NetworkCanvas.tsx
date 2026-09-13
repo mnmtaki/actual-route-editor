@@ -152,7 +152,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     } else if (current.kind === 'draggingStructureNode') {
       const segment = next.geometry.segments.find(item => item.id === current.segmentId), node = segment?.structureNodes?.find(item => item.id === current.id)
       if (segment && node && !node.waypointId) {
-        const threshold = Math.max(9, structureHitRadius * .36)
+        const threshold = Math.min(12, Math.max(5, 6 * view.width / canvasWidth))
         const nearest = segment.waypoints.map(waypoint => ({ waypoint, distance: Math.hypot(waypoint.x - point.x, waypoint.y - point.y) })).sort((a, b) => a.distance - b.distance)[0]
         if (nearest && nearest.distance <= threshold) { node.waypointId = nearest.waypoint.id; delete node.progress }
         else { delete node.waypointId; node.progress = findSegmentProgressForPoint(next, segment, point) }

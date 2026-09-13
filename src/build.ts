@@ -1,1 +1,1 @@
-export const BUILD_VERSION = '2026-09-13-style-point-intervals-78'
+export const BUILD_VERSION = '2026-09-14-endpoint-point-drawing-79'

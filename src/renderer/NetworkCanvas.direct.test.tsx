@@ -14,14 +14,24 @@ beforeAll(() => {
 const baseProps = { selection: null, drawing: null, onSelect: vi.fn(), onCreatePoint: vi.fn(), onConnectStation: vi.fn(), onExtend: vi.fn(), onSegmentPoint: vi.fn(), onPreview: vi.fn(), onDragCommit: vi.fn(), view: { x: 0, y: 0, width: 920, height: 680 }, setView: vi.fn() }
 
 describe('direct manipulation gestures', () => {
-  it('adds one node for a single drawing click and finishes on the second click without a duplicate endpoint',()=>{
-    const onCreatePoint=vi.fn(),onFinishDrawing=vi.fn(),svgProps={...baseProps,onCreatePoint,onFinishDrawing,drawing:{kind:'line' as const,lineId:'line-a',anchorStationId:null,phaseId:undefined}}
-    const {container}=render(<NetworkCanvas {...svgProps} project={structuredClone(demoProject)}/>)
-    const svg=container.querySelector('svg')!
-    vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
-    fireEvent.pointerDown(svg,{pointerId:31,clientX:300,clientY:320,bubbles:true});fireEvent.pointerUp(svg,{pointerId:31,clientX:300,clientY:320,bubbles:true})
-    fireEvent.pointerDown(svg,{pointerId:31,clientX:300,clientY:320,bubbles:true});fireEvent.pointerUp(svg,{pointerId:31,clientX:300,clientY:320,bubbles:true})
-    expect(onCreatePoint).toHaveBeenCalledTimes(1);expect(onFinishDrawing).toHaveBeenCalledTimes(1)
+  it('adds endpoint control points immediately and commits them when a point switches to Station',()=>{
+    const project=structuredClone(demoProject),onCreatePoint=vi.fn(),onFinishDrawing=vi.fn(),onDragCommit=vi.fn()
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} onCreatePoint={onCreatePoint} onFinishDrawing={onFinishDrawing} onDragCommit={onDragCommit} drawing={{kind:'line' as const,lineId:'line-a',anchorStationId:'s4',phaseId:undefined}}/>)
+    const firstPlus=container.querySelector('[data-line-draft-add="true"]')!
+    fireEvent.pointerDown(firstPlus,{pointerId:31,bubbles:true})
+    expect(container.querySelectorAll('[data-draft-point-id]')).toHaveLength(1)
+    const secondPlus=container.querySelector('[data-line-draft-add="true"]')!
+    fireEvent.pointerDown(secondPlus,{pointerId:32,bubbles:true})
+    expect(container.querySelectorAll('[data-draft-point-id]')).toHaveLength(2)
+    expect(onCreatePoint).not.toHaveBeenCalled();expect(onFinishDrawing).not.toHaveBeenCalled();expect(onDragCommit).not.toHaveBeenCalled()
+    fireEvent.pointerDown(screen.getByText('切换为站点').parentElement!,{pointerId:33,bubbles:true})
+    expect(onDragCommit).toHaveBeenCalledTimes(1)
+    const next=onDragCommit.mock.calls[0][1] as typeof project
+    expect(next.stations).toHaveLength(project.stations.length+1)
+    expect(next.geometry.segments).toHaveLength(project.geometry.segments.length+1)
+    const added=next.geometry.segments.find(item=>!project.geometry.segments.some(before=>before.id===item.id))!
+    expect(added.fromStationId).toBe('s4')
+    expect(added.waypoints).toHaveLength(1)
   })
   it('shows lightweight selectable handles for the actual corners of a selected rounded Segment',()=>{
     const project=structuredClone(demoProject),segment=project.geometry.segments.find(item=>item.id==='a-1')!,onSelect=vi.fn()
@@ -84,7 +94,7 @@ describe('direct manipulation gestures', () => {
     fireEvent.pointerDown(svg, { pointerId: 22, clientX: original.x + 70, clientY: original.y + 40, bubbles: true })
     fireEvent.pointerMove(svg, { pointerId: 22, clientX: original.x + 150, clientY: original.y + 40, bubbles: true })
     fireEvent.pointerUp(svg, { pointerId: 22, clientX: original.x + 150, clientY: original.y + 40, bubbles: true })
-    fireEvent.pointerUp(svg, { pointerId: 21, clientX: original.x + 30, clientY: original.y, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 21, clientX: original.x + 30, clientY: original.y + 40, bubbles: true })
     expect(onDragCommit).not.toHaveBeenCalled()
     expect(setView).toHaveBeenCalled()
     expect(onPreview).toHaveBeenLastCalledWith(demoProject)
@@ -147,7 +157,7 @@ describe('direct manipulation gestures', () => {
     const waypoint = container.querySelector('[data-waypoint-id="w1"]')!
     fireEvent.pointerDown(waypoint, { pointerId: 42, clientX: 300, clientY: 455, bubbles: true })
     fireEvent.pointerMove(svg, { pointerId: 42, clientX: 360, clientY: 490, bubbles: true })
-    fireEvent.pointerUp(svg, { pointerId: 42, clientX: 360, clientY: 490, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 42, clientX: 360,clientY:490,bubbles:true })
     expect(onDragCommit).not.toHaveBeenCalled()
     expect(onPreview).not.toHaveBeenCalled()
   })})

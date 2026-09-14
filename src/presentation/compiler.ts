@@ -7,6 +7,7 @@ import { getStationNameAt, normalizeStationNameHistory } from '../data/stationNa
 import { resolveSegmentLineAt, normalizeSegmentLineHistory } from '../data/segmentLineHistory'
 import { resolveMetersPerWorldUnit } from '../data/distance'
 import { getCompoundStationMemberIds } from '../data/compoundStation'
+import { isLineOperationalAt, isRelationOperationalAt, isSegmentOperationalAt } from '../data/operationEvents'
 export { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import type { CameraView, DirectedSegment, HistoryEvent, PresentationBeat, PresentationCompileCache, PresentationSequence } from './types'
 
@@ -24,24 +25,30 @@ export function compileHistoryEvents(project: ActualRouteProject, settings: Pres
   const openings = new Map<string, Segment[]>()
   for (const segment of project.geometry.segments) {
     const date = openDate(project, segment)
-    if (!validDate(date) || date < start || date > end) continue
-    const openingLineId = resolveSegmentLineAt(segment, date)
-    const phase = project.openingPhases.find(item => item.lineId === openingLineId && item.openedAt === date && item.segmentIds.includes(segment.id) && !item.overriddenSegmentIds?.includes(segment.id))
-    const key = `${date}\u0000${openingLineId}\u0000${phase?.id ?? ''}`
-    openings.set(key, [...(openings.get(key) ?? []), segment])
+    if (validDate(date) && date >= start && date <= end) {
+      const openingLineId = resolveSegmentLineAt(segment, date)
+      const phase = project.openingPhases.find(item => item.lineId === openingLineId && item.openedAt === date && item.segmentIds.includes(segment.id) && !item.overriddenSegmentIds?.includes(segment.id))
+      const key = `${date}\u0000${openingLineId}\u0000${phase?.id ?? ''}`
+      openings.set(key, [...(openings.get(key) ?? []), segment])
+    }
+    for (const entry of segment.operationHistory ?? []) if (entry.state === 'open' && validDate(entry.effectiveAt) && entry.effectiveAt >= start && entry.effectiveAt <= end) {
+      const openingLineId = resolveSegmentLineAt(segment, entry.effectiveAt)
+      const key = `${entry.effectiveAt}\u0000${openingLineId}\u0000op:${entry.eventId ?? entry.id}`
+      openings.set(key, [...(openings.get(key) ?? []), segment])
+    }
   }
   const events: HistoryEvent[] = []
   for (const [key, segments] of openings) {
-    const [historyDate, lineId, openingPhaseId] = key.split('\u0000')
-    const phase = openingPhaseId ? project.openingPhases.find(item => item.id === openingPhaseId) : undefined
-    const earlier = project.geometry.segments.filter(segment => validDate(openDate(project, segment)) && openDate(project, segment) < historyDate && resolveSegmentLineAt(segment, previousDate(historyDate)) === lineId)
+    const [historyDate, lineId, openingGroupId] = key.split('\u0000')
+    const phase = openingGroupId && !openingGroupId.startsWith('op:') ? project.openingPhases.find(item => item.id === openingGroupId) : undefined
+    const earlier = project.geometry.segments.filter(segment => isSegmentOperationalAt(segment, previousDate(historyDate)) && resolveSegmentLineAt(segment, previousDate(historyDate)) === lineId)
     for (const [componentIndex, component] of connectedComponents(segments).entries()) {
       const type = earlier.length ? 'LINE_EXTENSION' : 'LINE_OPENING'
       const branches = directComponent(project, component, earlier, phase, lineId, historyDate)
       const stationIds = unique(component.flatMap(segment => [segment.fromStationId, segment.toStationId])).filter(stationId => stationOpensAt(project, stationId, lineId, historyDate))
       const interchangeStationIds = stationIds.filter(stationId => { const before = activeLineIds(project, stationId, previousDate(historyDate)).length, after = activeLineIds(project, stationId, historyDate).length; return after >= 2 && after > before })
       const eventTypes = unique([type, 'SEGMENT_OPENING', ...(stationIds.length ? ['STATION_OPENING'] : []), ...(interchangeStationIds.length ? ['INTERCHANGE_CREATED'] : [])]) as HistoryEvent['eventTypes']
-      events.push({ id: `${historyDate}-${lineId}-${openingPhaseId || 'legacy'}-${componentIndex}`, type, eventTypes, historyDate, lineId, openingPhaseId: openingPhaseId || undefined, segmentIds: component.map(segment => segment.id), stationIds, interchangeStationIds, branches })
+      events.push({ id: `${historyDate}-${lineId}-${openingGroupId || 'legacy'}-${componentIndex}`, type, eventTypes, historyDate, lineId, openingPhaseId: phase?.id, segmentIds: component.map(segment => segment.id), stationIds, interchangeStationIds, branches })
     }
   }
   const reassignmentGroups = new Map<string, Segment[]>()
@@ -80,7 +87,11 @@ export function compileHistoryEvents(project: ActualRouteProject, settings: Pres
     const phase = project.openingPhases.find(item => item.lineId === relation.lineId && item.openedAt === historyDate && item.stationRelationIds.includes(relation.id) && !item.overriddenStationRelationIds?.includes(relation.id))
     events.push({ id: `${historyDate}-${relation.lineId}-station-${relation.stationId}`, type: 'STATION_OPENING', eventTypes: ['STATION_OPENING', ...(interchangeStationIds.length ? ['INTERCHANGE_CREATED' as const] : [])], historyDate, lineId: relation.lineId, openingPhaseId: phase?.id, segmentIds: [], stationIds: [relation.stationId], interchangeStationIds, branches: [] })
   }
+  for (const relation of project.stationLineRelations) for (const entry of relation.operationHistory ?? []) if (entry.state === 'open' && validDate(entry.effectiveAt) && entry.effectiveAt >= start && entry.effectiveAt <= end && !covered.has(`${entry.effectiveAt}\u0000${relation.lineId}\u0000${relation.stationId}`)) { const before=activeLineIds(project,relation.stationId,previousDate(entry.effectiveAt)).length,after=activeLineIds(project,relation.stationId,entry.effectiveAt).length,interchangeStationIds=after>=2&&after>before?[relation.stationId]:[]; events.push({ id: `${entry.effectiveAt}-${relation.lineId}-station-reopen-${relation.stationId}-${entry.id}`, type: 'STATION_OPENING', eventTypes: ['STATION_OPENING', ...(interchangeStationIds.length ? ['INTERCHANGE_CREATED' as const] : [])], historyDate: entry.effectiveAt, lineId: relation.lineId, segmentIds: [], stationIds: [relation.stationId], interchangeStationIds, branches: [] }) }
   for (const segment of project.geometry.segments) if (validDate(segment.closedAt) && segment.closedAt >= start && segment.closedAt <= end) events.push({ id: `${segment.closedAt}-${segment.lineId}-close-${segment.id}`, type: 'SEGMENT_CLOSURE', eventTypes: ['SEGMENT_CLOSURE'], historyDate: segment.closedAt, lineId: segment.lineId, segmentIds: [segment.id], stationIds: [], interchangeStationIds: [], branches: [] })
+  const operationClosures = new Map<string, Segment[]>()
+  for (const segment of project.geometry.segments) for (const entry of segment.operationHistory ?? []) if (entry.state === 'closed' && validDate(entry.effectiveAt) && entry.effectiveAt >= start && entry.effectiveAt <= end) { const key=`${entry.effectiveAt}\u0000${resolveSegmentLineAt(segment,entry.effectiveAt)}\u0000${entry.eventId ?? entry.id}`; operationClosures.set(key,[...(operationClosures.get(key)??[]),segment]) }
+  for (const [key,segments] of operationClosures) { const [historyDate,lineId,eventId]=key.split('\u0000'),meta=project.operationEvents?.find(item=>item.id===eventId); for (const [componentIndex,component] of connectedComponents(segments).entries()) { const stationIds=(meta?.stationRelationIds??[]).map(id=>project.stationLineRelations.find(item=>item.id===id)?.stationId).filter((id):id is string=>Boolean(id)); const type=meta?.affectsLine?'LINE_CLOSURE':'SEGMENT_CLOSURE'; events.push({ id:`${historyDate}-${lineId}-operation-close-${eventId}-${componentIndex}`,type,eventTypes:[type],historyDate,lineId,segmentIds:component.map(segment=>segment.id),stationIds,interchangeStationIds:[],branches:[] }) } }
   for (const line of project.lines) if (validDate(line.closedAt) && line.closedAt >= start && line.closedAt <= end) {
     const lineSegments = project.geometry.segments.filter(segment => segment.lineId === line.id)
     events.push({ id: `${line.closedAt}-${line.id}-line-close`, type: 'LINE_CLOSURE', eventTypes: ['LINE_CLOSURE'], historyDate: line.closedAt, lineId: line.id, segmentIds: lineSegments.map(segment => segment.id), stationIds: unique(lineSegments.flatMap(segment => [segment.fromStationId, segment.toStationId])), interchangeStationIds: [], branches: [] })
@@ -161,7 +172,7 @@ function buildCompileCache(project: ActualRouteProject, beats: PresentationBeat[
   return { segmentOpeningBeat, segmentClosureBeat, stationBeatIndices, stationLineOpeningBeat, activeLineIdsByDate, segmentLengths, segmentLineIdsByDate }
 }
 export function stationLineKey(stationId:string,lineId:string){return `${stationId}\u0000${lineId}`}
-function activeLinesForAllStations(project: ActualRouteProject, date: string) { const lines = new Map(project.lines.map(line => [line.id, line])), result: Record<string, string[]> = {}; for (const relation of project.stationLineRelations) { const line = lines.get(relation.lineId); if (!line || !isOpenAt(relation.openedAt, relation.closedAt, date) || !isOpenAt(line.openedAt, line.closedAt, date)) continue; result[relation.stationId] = [...(result[relation.stationId] ?? []), line.id] } for (const ids of Object.values(result)) ids.sort((a, b) => compareLines(lines.get(a), lines.get(b))); return result }
+function activeLinesForAllStations(project: ActualRouteProject, date: string) { const lines = new Map(project.lines.map(line => [line.id, line])), result: Record<string, string[]> = {}; for (const relation of project.stationLineRelations) { const line = lines.get(relation.lineId); if (!line || !isRelationOperationalAt(relation,date) || !isLineOperationalAt(line,date)) continue; result[relation.stationId] = [...(result[relation.stationId] ?? []), line.id] } for (const ids of Object.values(result)) ids.sort((a, b) => compareLines(lines.get(a), lines.get(b))); return result }
 function compareLines(a: Line | undefined, b: Line | undefined) { return (a?.openedAt || '0000-01-01').localeCompare(b?.openedAt || '0000-01-01') || (a?.lineOrder ?? 1e9) - (b?.lineOrder ?? 1e9) }
 function connectedComponents(segments: Segment[]) { const remaining = new Set(segments.map(segment => segment.id)), result: Segment[][] = []; while (remaining.size) { const first = segments.find(segment => remaining.has(segment.id))!, queue = [first], component: Segment[] = []; remaining.delete(first.id); while (queue.length) { const current = queue.shift()!; component.push(current); for (const candidate of segments) if (remaining.has(candidate.id) && sharesStation(current, candidate)) { remaining.delete(candidate.id); queue.push(candidate) } } result.push(component) } return result }
 function directComponent(project: ActualRouteProject, component: Segment[], earlier: Segment[], phase?: OpeningPhase, lineId?: string, historyDate?: string): DirectedSegment[][] {
@@ -181,8 +192,8 @@ function directComponent(project: ActualRouteProject, component: Segment[], earl
 }
 function withRatios(branch: Omit<DirectedSegment, 'startRatio' | 'endRatio'>[]) { const total = branch.reduce((sum, item) => sum + item.length, 0) || branch.length; let cursor = 0; return branch.map(item => { const startRatio = cursor / total; cursor += item.length || 1; return { ...item, startRatio, endRatio: cursor / total } }) }
 export function estimateSegmentLength(project: ActualRouteProject, segment: Segment) { return getSegmentCurveLength(project, segment) }
-function stationOpensAt(project: ActualRouteProject, stationId: string, lineId: string, date: string) { const relation = project.stationLineRelations.find(item => item.stationId === stationId && item.lineId === lineId); return (relation?.openedAt || project.stations.find(item => item.id === stationId)?.openedAt || date) === date }
-function activeLineIds(project: ActualRouteProject, stationId: string, date: string) { const memberIds = new Set(getCompoundStationMemberIds(project, stationId)); return project.stationLineRelations.filter(relation => memberIds.has(relation.stationId) && isOpenAt(relation.openedAt, relation.closedAt, date) && isOpenAt(project.lines.find(line => line.id === relation.lineId)?.openedAt, project.lines.find(line => line.id === relation.lineId)?.closedAt, date)).map(relation => relation.lineId) }
+function stationOpensAt(project: ActualRouteProject, stationId: string, lineId: string, date: string) { const relation = project.stationLineRelations.find(item => item.stationId === stationId && item.lineId === lineId); return relation?.operationHistory?.some(entry=>entry.state==='open'&&entry.effectiveAt===date) || (relation?.openedAt || project.stations.find(item => item.id === stationId)?.openedAt || date) === date }
+function activeLineIds(project: ActualRouteProject, stationId: string, date: string) { const memberIds = new Set(getCompoundStationMemberIds(project, stationId)); return project.stationLineRelations.filter(relation => memberIds.has(relation.stationId) && isRelationOperationalAt(relation,date) && isLineOperationalAt(project.lines.find(line => line.id === relation.lineId),date)).map(relation => relation.lineId) }
 function previousDate(date: string) { const value = new Date(`${date}T00:00:00Z`); value.setUTCDate(value.getUTCDate() - 1); return value.toISOString().slice(0, 10) }
 function sharesStation(a: Segment, b: Segment) { return a.fromStationId === b.fromStationId || a.fromStationId === b.toStationId || a.toStationId === b.fromStationId || a.toStationId === b.toStationId }
 function lineOrder(project: ActualRouteProject, lineId: string) { return project.lines.find(line => line.id === lineId)?.lineOrder ?? 1e9 }

@@ -75,4 +75,17 @@ describe('timeline', () => {
     project.stationLineRelations.push({ id: 'r-branch-s2', stationId: 's2', lineId: branch.id, openedAt: '2000-01-01' })
     expect(getPassengerVisibleRelationIds(project, 's2', '2015-01-01')).toContain('r-branch-s2')
   })
+
+
+  it('reopens a previously closed segment through operation history', () => {
+    const project = structuredClone(demoProject)
+    const segment = project.geometry.segments[0]
+    segment.closedAt = '2030-01-01'
+    segment.operationHistory = [{ id: 'reopen', effectiveAt: '2035-01-01', state: 'open' }]
+    const line = project.lines.find(item => item.id === segment.lineId)!
+    line.closedAt = '2030-01-01'
+    line.operationHistory = [{ id: 'line-reopen', effectiveAt: '2035-01-01', state: 'open' }]
+    expect(getActiveNetworkAtTime(project, '2031-01-01').segments.some(item => item.id === segment.id)).toBe(false)
+    expect(getActiveNetworkAtTime(project, '2035-01-01').segments.some(item => item.id === segment.id)).toBe(true)
+  })
 })

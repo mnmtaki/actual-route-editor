@@ -7,6 +7,7 @@ import { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import { collapseLineIdsByServiceFamily, getRootLineId } from '../data/lineIdentity'
 import { worldUnitsToKilometers } from '../data/distance'
 import { getCompoundStationMemberIds, getCompoundStationRelations, getPassengerStationIdentity, isCompoundStationCanonical } from '../data/compoundStation'
+import { isRelationOperationalAt, isSegmentOperationalAt } from '../data/operationEvents'
 import type { PresentationBeat, PresentationSequence, PresentationState, StationPresentationState } from './types'
 
 export function getPresentationState(project: ActualRouteProject, sequence: PresentationSequence, presentationTime: number): PresentationState {
@@ -21,14 +22,24 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
 
   const segmentStates: PresentationState['segmentStates'] = {}
   for (const segment of project.geometry.segments) {
-    const openingIndex = sequence.cache.segmentOpeningBeat[segment.id], closureIndex = sequence.cache.segmentClosureBeat[segment.id]
     const historicalLineId = sequence.cache.segmentLineIdsByDate[historyDate]?.[segment.id] ?? resolveSegmentLineAt(segment, historyDate)
-    const opening = openingIndex === undefined ? undefined : sequence.beats[openingIndex], closure = closureIndex === undefined ? undefined : sequence.beats[closureIndex]
-    let revealProgress = opening ? beatSegmentProgress(opening, segment.id, time) : historicallyVisible(segment.openedAt, segment.closedAt, historyDate) ? 1 : 0
-    let opacity = revealProgress > 0 ? 1 : 0
-    if (closure && time >= closure.revealStart) opacity *= 1 - easing.transfer(clamp((time - closure.revealStart) / Math.max(.000001, closure.revealDuration)))
-    if (closure && time >= closure.revealEnd) { revealProgress = 0; opacity = 0 }
-    const revealFrom = opening ? beatSegmentDirection(opening, segment.id, segment.fromStationId) : 'from'
+    const currentOpening = Boolean(currentBeat?.segmentIds.includes(segment.id) && currentBeat.eventTypes.includes('SEGMENT_OPENING'))
+    const currentClosure = Boolean(currentBeat?.segmentIds.includes(segment.id) && (currentBeat.eventTypes.includes('SEGMENT_CLOSURE') || currentBeat.eventTypes.includes('LINE_CLOSURE')))
+    let revealProgress = isSegmentOperationalAt(segment, historyDate) ? 1 : 0
+    let opacity = revealProgress
+    let revealFrom: 'from' | 'to' = 'from'
+    if (currentOpening && currentBeat) {
+      revealProgress = beatSegmentProgress(currentBeat, segment.id, time)
+      opacity = revealProgress > 0 ? 1 : 0
+      revealFrom = beatSegmentDirection(currentBeat, segment.id, segment.fromStationId)
+    } else if (currentClosure && currentBeat) {
+      revealProgress = 1
+      opacity = time < currentBeat.revealStart ? 1 : 1 - easing.transfer(clamp((time - currentBeat.revealStart) / Math.max(.000001, currentBeat.revealDuration)))
+      if (time >= currentBeat.revealEnd) { revealProgress = 0; opacity = 0 }
+    } else if (revealProgress > 0) {
+      const priorOpening = [...sequence.beats].reverse().find(beat => beat.historyDate <= historyDate && beat.segmentIds.includes(segment.id) && beat.eventTypes.includes('SEGMENT_OPENING'))
+      if (priorOpening) revealFrom = beatSegmentDirection(priorOpening, segment.id, segment.fromStationId)
+    }
     segmentStates[segment.id] = { lineId: historicalLineId, revealProgress, revealFrom, opacity, strokeDashoffset: (revealFrom === 'from' ? 1 : -1) * (1 - revealProgress) }
   }
 
@@ -99,7 +110,7 @@ function presentationVisibleRelationIds(project: ActualRouteProject, stationId: 
   const representativeFamilies = new Set(lineIds.map(lineId => project.lines.find(line => line.id === lineId)).filter((line): line is ActualRouteProject['lines'][number] => Boolean(line)).map(line => getRootLineId(project, line)))
   return getCompoundStationMemberIds(project, stationId).flatMap(memberId => project.stationLineRelations.filter(relation => {
     const relationLine = project.lines.find(line => line.id === relation.lineId)
-    return relation.stationId === memberId && Boolean(relationLine && representativeFamilies.has(getRootLineId(project, relationLine))) && active(relation.openedAt, relation.closedAt, date)
+    return relation.stationId === memberId && Boolean(relationLine && representativeFamilies.has(getRootLineId(project, relationLine))) && isRelationOperationalAt(relation, date)
   }).map(relation => relation.id))
 }
 function getPresentationStationCountForLine(project: ActualRouteProject, stationStates: Record<string, StationPresentationState>, lineId: string) {

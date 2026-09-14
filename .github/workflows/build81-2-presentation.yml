@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - feat/operation-history-81
-    paths:
-      - scripts/build81_2_presentation.py
 
 permissions:
   contents: write

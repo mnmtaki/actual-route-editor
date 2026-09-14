@@ -1,6 +1,6 @@
 import type { ActualRouteProject, ISODate, Line, Segment, StationLineRelation } from '../data/model'
 import { collapseLinesByServiceFamily, getRootLineId } from '../data/lineIdentity'
-import { getCompoundStationCanonical, getCompoundStationRelations } from '../data/compoundStation'
+import { getCompoundStationCanonical, getCompoundStationMemberIds, getCompoundStationRelations } from '../data/compoundStation'
 import { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import { isLineOperationalAt, isRelationOperationalAt, isSegmentOperationalAt } from '../data/operationEvents'
 export { isLineOperationalAt, isRelationOperationalAt, isSegmentOperationalAt } from '../data/operationEvents'
@@ -22,16 +22,19 @@ function compareRelations(project: ActualRouteProject, stationId: string, a: str
  * Hierarchy is intentionally asymmetric:
  * - a relation-level closure may suppress an otherwise open line/segment;
  * - a relation-level opening can never resurrect a closed parent line or a station
- *   whose every incident segment on that line is closed.
+ *   whose every incident segment in the same passenger service family is closed.
  * A later network operation event must reopen the parent service first.
  */
 export function isStationLineServiceActiveAt(project: ActualRouteProject, relation: StationLineRelation, time: string) {
   const line = project.lines.find(item => item.id === relation.lineId)
   if (!line?.visible || !isLineOperationalAt(line, time) || !isRelationOperationalAt(relation, time)) return false
+  const memberIds = new Set(getCompoundStationMemberIds(project, relation.stationId))
+  const relationFamily = getRootLineId(project, line)
   return project.geometry.segments.some(segment => {
-    if (segment.fromStationId !== relation.stationId && segment.toStationId !== relation.stationId) return false
+    if (!memberIds.has(segment.fromStationId) && !memberIds.has(segment.toStationId)) return false
     if (!isSegmentOperationalAt(segment, time)) return false
-    return resolveSegmentLineAt(segment, time) === relation.lineId
+    const effectiveLine = project.lines.find(item => item.id === resolveSegmentLineAt(segment, time))
+    return Boolean(effectiveLine && getRootLineId(project, effectiveLine) === relationFamily)
   })
 }
 

@@ -4,6 +4,11 @@ import { uid } from './model'
 export interface LineDraftPoint { id: string; x: number; y: number }
 export type DrawingMode = { kind: 'line'; lineId: string; anchorStationId: string | null; phaseId?: string; draftPoints?: LineDraftPoint[]; lastCreatedStationId?: string } | { kind: 'basemap'; pathId: string } | { kind: 'road'; roadId: string; styleId: string } | { kind?: 'line'; lineId: string; anchorStationId: string | null; phaseId?: string; draftPoints?: LineDraftPoint[]; lastCreatedStationId?: string }
 
+type NativeBasemapPath = BasemapPath & { smooth?: boolean }
+
+const HANDLE_RATIO = .32
+const MAX_CHORD_RATIO = .42
+
 export const DEFAULT_BASEMAP_COLORS: Record<BasemapPathCategory, string> = { water: '#9ecbd3', terrain: '#b8c89b', other: '#d2c5a5' }
 
 export function normalizeBasemapPaths(value: unknown): BasemapPath[] | undefined {
@@ -27,7 +32,7 @@ export function normalizeBasemapPaths(value: unknown): BasemapPath[] | undefined
     const rawSource = raw.source && typeof raw.source === 'object' ? raw.source as Record<string, unknown> : undefined
     const sourceLineId = rawSource?.sourceLineId
     const source = rawSource?.format === 'aarc' && (typeof sourceLineId === 'string' || Number.isFinite(Number(sourceLineId))) ? { format: 'aarc' as const, sourceLineId: typeof sourceLineId === 'string' ? sourceLineId : Number(sourceLineId), sourceWidthRatio: rawSource.sourceWidthRatio as number | undefined, sourcePhysicalWidth: rawSource.sourcePhysicalWidth as number | undefined, sourceColor: rawSource.sourceColor as string | undefined, sourceColorPre: rawSource.sourceColorPre as number | undefined, sourceStyleId: rawSource.sourceStyleId as number | undefined, sourceZIndex: rawSource.sourceZIndex as number | undefined, kind: rawSource.kind as 'terrain' | 'line-style' | undefined, raw: rawSource.raw as Record<string, unknown> | undefined } : undefined
-    const normalized: BasemapPath = { id, ...(typeof raw.name === 'string' && raw.name ? { name: raw.name } : {}), category, points, color, width, opacity, closed, isFilled, zIndex, visible: raw.visible !== false, locked: raw.locked === true, ...(source ? { source } : {}) }
+    const normalized = { id, ...(typeof raw.name === 'string' && raw.name ? { name: raw.name } : {}), category, points, color, width, opacity, closed, isFilled, zIndex, visible: raw.visible !== false, locked: raw.locked === true, ...(raw.smooth === true ? { smooth: true } : {}), ...(source ? { source } : {}) } as NativeBasemapPath
     const isAarcSource = raw.source && typeof raw.source === 'object' && (raw.source as Record<string, unknown>).format === 'aarc'
     return [isAarcSource ? normalized : removeRepeatedTerminalPoint(normalized)]
   })
@@ -40,6 +45,7 @@ export function sortedBasemapPaths(paths: BasemapPath[] | undefined): BasemapPat
 
 export function getBasemapPathD(path: BasemapPath): string {
   if (!path.points.length) return ''
+  if ((path as NativeBasemapPath).smooth === true && (!path.closed || path.points.length >= 3)) return getSmoothBasemapPathD(path)
   const first = path.points[0]
   const commands = [`M ${first.x} ${first.y}`]
   for (const point of path.points.slice(1)) commands.push(`L ${point.x} ${point.y}`)
@@ -47,10 +53,10 @@ export function getBasemapPathD(path: BasemapPath): string {
   return commands.join(' ')
 }
 
-export function createBasemapPath(project: ActualRouteProject, category: BasemapPathCategory, center = { x: 0, y: 0 }): { project: ActualRouteProject; pathId: string } {
+export function createBasemapPath(project: ActualRouteProject, category: BasemapPathCategory, _center = { x: 0, y: 0 }): { project: ActualRouteProject; pathId: string } {
   const next = structuredClone(project), pathId = uid('basemap')
   next.basemapPaths ??= []
-  next.basemapPaths.push({ id: pathId, name: category === 'water' ? '水体' : category === 'terrain' ? '地形' : '底图路径', category, points: [{ id: uid('basemap-point'), x: center.x, y: center.y }], color: DEFAULT_BASEMAP_COLORS[category], width: 3, opacity: 1, closed: false, isFilled: false, zIndex: 0, visible: true, locked: false })
+  next.basemapPaths.push({ id: pathId, name: category === 'water' ? '水体' : category === 'terrain' ? '地形' : '底图路径', category, points: [], color: DEFAULT_BASEMAP_COLORS[category], width: 3, opacity: 1, closed: false, isFilled: false, zIndex: 0, visible: true, locked: false, smooth: true } as NativeBasemapPath)
   return { project: next, pathId }
 }
 
@@ -97,6 +103,46 @@ export function insertBasemapPoint(project: ActualRouteProject, pathId: string, 
   path.points.splice(bestIndex + 1, 0, { id: uid('basemap-point'), x: point.x, y: point.y })
   return next
 }
+
+function getSmoothBasemapPathD(path: BasemapPath): string {
+  const points = path.points
+  if (points.length < 2) return `M ${points[0].x} ${points[0].y}`
+  const spanCount = path.closed ? points.length : points.length - 1
+  let result = `M ${round(points[0].x)} ${round(points[0].y)}`
+  for (let index = 0; index < spanCount; index += 1) {
+    const start = points[index]
+    const end = points[(index + 1) % points.length]
+    const previous = path.closed ? points[(index - 1 + points.length) % points.length] : index === 0 ? reflect(points[1], points[0]) : points[index - 1]
+    const following = path.closed ? points[(index + 2) % points.length] : index + 2 < points.length ? points[index + 2] : reflect(points.at(-2)!, points.at(-1)!)
+    const chord = distance(start, end)
+    const tangent1 = limitedTangent(previous, start, end, chord)
+    const tangent2 = limitedTangent(start, end, following, chord)
+    result += ` C ${round(start.x + tangent1.x)} ${round(start.y + tangent1.y)} ${round(end.x - tangent2.x)} ${round(end.y - tangent2.y)} ${round(end.x)} ${round(end.y)}`
+  }
+  if (path.closed) result += ' Z'
+  return result
+}
+
+function limitedTangent(previous: BasemapPathPoint, current: BasemapPathPoint, next: BasemapPathPoint, chord: number) {
+  const incoming = distance(previous, current), outgoing = distance(current, next)
+  const direction = normalize({ x: next.x - previous.x, y: next.y - previous.y }, { x: next.x - current.x, y: next.y - current.y })
+  const handleLength = Math.min(chord * MAX_CHORD_RATIO, Math.min(incoming, outgoing) * HANDLE_RATIO)
+  return { x: direction.x * handleLength, y: direction.y * handleLength }
+}
+
+function normalize(value: { x: number; y: number }, fallback: { x: number; y: number }) {
+  const length = Math.hypot(value.x, value.y)
+  if (length > 1e-6) return { x: value.x / length, y: value.y / length }
+  const fallbackLength = Math.hypot(fallback.x, fallback.y) || 1
+  return { x: fallback.x / fallbackLength, y: fallback.y / fallbackLength }
+}
+
+function reflect(point: BasemapPathPoint, around: BasemapPathPoint): BasemapPathPoint {
+  return { id: '', x: around.x * 2 - point.x, y: around.y * 2 - point.y }
+}
+
+function distance(a: { x: number; y: number }, b: { x: number; y: number }) { return Math.hypot(b.x - a.x, b.y - a.y) }
+function round(value: number) { return Math.round(value * 1000) / 1000 }
 
 function projectToLine(point: { x: number; y: number }, a: BasemapPathPoint, b: BasemapPathPoint) {
   const dx = b.x - a.x, dy = b.y - a.y, length2 = dx * dx + dy * dy, t = length2 ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / length2)) : 0

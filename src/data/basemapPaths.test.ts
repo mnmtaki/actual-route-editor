@@ -11,10 +11,23 @@ describe('BasemapPath model helpers', () => {
     expect(getBasemapPathD(paths[0])).toBe('M 0 0 L 10 0 Z')
   })
 
+  it('starts native drawing empty and renders added nodes smoothly', () => {
+    const project = createEmptyProject()
+    const created = createBasemapPath(project, 'terrain', { x: 999, y: 999 })
+    expect(created.project.basemapPaths?.[0].points).toHaveLength(0)
+    let next = appendBasemapPoint(created.project, created.pathId, { x: 10, y: 20 })
+    next = appendBasemapPoint(next, created.pathId, { x: 90, y: 40 })
+    next = appendBasemapPoint(next, created.pathId, { x: 160, y: 120 })
+    const path = next.basemapPaths?.[0]
+    expect(path?.points.map(point => [point.x, point.y])).toEqual([[10, 20], [90, 40], [160, 120]])
+    expect(getBasemapPathD(path!)).toContain(' C ')
+  })
+
   it('keeps stable z ordering and supports point/path editing', () => {
     const project = createEmptyProject()
-    const created = createBasemapPath(project, 'water', { x: 1, y: 2 })
-    let next = appendBasemapPoint(created.project, created.pathId, { x: 11, y: 2 })
+    const created = createBasemapPath(project, 'water')
+    let next = appendBasemapPoint(created.project, created.pathId, { x: 1, y: 2 })
+    next = appendBasemapPoint(next, created.pathId, { x: 11, y: 2 })
     next = insertBasemapPoint(next, created.pathId, { x: 6, y: 2 })
     expect(next.basemapPaths?.[0].points).toHaveLength(3)
     const paths = next.basemapPaths!
@@ -23,7 +36,7 @@ describe('BasemapPath model helpers', () => {
   })
 
   it('round-trips basemap paths while leaving old projects compatible', () => {
-    const project = createEmptyProject(), created = createBasemapPath(project, 'terrain', { x: 4, y: 8 })
+    const project = createEmptyProject(), created = createBasemapPath(project, 'terrain')
     const restored = parseProjectJson(serializeProject(created.project))
     expect(restored.basemapPaths).toEqual(created.project.basemapPaths)
     const legacy = structuredClone(created.project)

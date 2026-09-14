@@ -7,7 +7,8 @@ import { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import { collapseLineIdsByServiceFamily, getRootLineId } from '../data/lineIdentity'
 import { worldUnitsToKilometers } from '../data/distance'
 import { getCompoundStationMemberIds, getCompoundStationRelations, getPassengerStationIdentity, isCompoundStationCanonical } from '../data/compoundStation'
-import { isRelationOperationalAt, isSegmentOperationalAt } from '../data/operationEvents'
+import { isSegmentOperationalAt } from '../data/operationEvents'
+import { isStationLineServiceActiveAt } from '../timeline/active'
 import type { PresentationBeat, PresentationSequence, PresentationState, StationPresentationState } from './types'
 
 export function getPresentationState(project: ActualRouteProject, sequence: PresentationSequence, presentationTime: number): PresentationState {
@@ -110,7 +111,7 @@ function presentationVisibleRelationIds(project: ActualRouteProject, stationId: 
   const representativeFamilies = new Set(lineIds.map(lineId => project.lines.find(line => line.id === lineId)).filter((line): line is ActualRouteProject['lines'][number] => Boolean(line)).map(line => getRootLineId(project, line)))
   return getCompoundStationMemberIds(project, stationId).flatMap(memberId => project.stationLineRelations.filter(relation => {
     const relationLine = project.lines.find(line => line.id === relation.lineId)
-    return relation.stationId === memberId && Boolean(relationLine && representativeFamilies.has(getRootLineId(project, relationLine))) && isRelationOperationalAt(relation, date)
+    return relation.stationId === memberId && Boolean(relationLine && representativeFamilies.has(getRootLineId(project, relationLine))) && isStationLineServiceActiveAt(project, relation, date)
   }).map(relation => relation.id))
 }
 function getPresentationStationCountForLine(project: ActualRouteProject, stationStates: Record<string, StationPresentationState>, lineId: string) {

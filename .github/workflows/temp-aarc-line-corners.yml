@@ -1,0 +1,36 @@
+name: Temp AARC line corners
+on:
+  push:
+    branches: [fix/aarc-terrain-geometry-fidelity]
+permissions:
+  contents: write
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/aarc-terrain-geometry-fidelity
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - name: Apply AARC line corner fidelity
+        run: python .github/temp-aarc-line-corners.py
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test -- --run
+      - name: Build web
+        run: npm run build:web
+      - name: Commit validated change and remove temporary CI files
+        run: |
+          rm .github/temp-aarc-line-corners.py .github/workflows/temp-aarc-line-corners.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Match AARC transit corner geometry"
+          git push origin HEAD:fix/aarc-terrain-geometry-fidelity

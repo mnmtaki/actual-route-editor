@@ -23,7 +23,9 @@ jobs:
         shell: bash
         run: |
           python .github/temp-aarc-terrain-patch.py
-          sed -i 's/!== null/!== undefined/g' src/import-export/aarc.ts
+          sed -i 's/sourceTurnRadius !== null/sourceTurnRadius !== undefined/' src/import-export/aarc.ts
+          sed -i 's/sourceLineWidthBase !== null/sourceLineWidthBase !== undefined/' src/import-export/aarc.ts
+          sed -i 's/sourceCarpetWiden !== null/sourceCarpetWiden !== undefined/' src/import-export/aarc.ts
       - name: Install
         run: npm ci
       - name: Typecheck

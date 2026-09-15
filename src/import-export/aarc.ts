@@ -164,6 +164,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
         id: `aarc-station-${pointId}`,
         name: text(point.name) || `未命名站 ${pointId}`,
         ...(typeof point.nameS === 'string' && point.nameS.length ? { nameS: point.nameS } : {}),
+        ...(point.free === true ? { free: true } : {}),
         x: position[0], y: position[1],
         labelOffsetX: nameP?.[0] ?? 14,
         labelOffsetY: nameP?.[1] ?? -14,
@@ -183,7 +184,10 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
       // source point ids in component metadata.
       createStation(component.canonicalPointId)
       const canonical = stationByPoint.get(component.canonicalPointId)
-      if (canonical) for (const pointId of component.pointIds) stationByPoint.set(pointId, canonical)
+      if (canonical) {
+        if (component.pointIds.some(pointId => pointMap.get(pointId)?.free === true)) canonical.free = true
+        for (const pointId of component.pointIds) stationByPoint.set(pointId, canonical)
+      }
     }
   }  // Compound interchanges group passenger identity only. Every source
   // occurrence remains its own Station so the rail geometry stays intact.

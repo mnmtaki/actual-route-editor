@@ -17,7 +17,9 @@ jobs:
           node-version: 22.19.0
           cache: npm
       - name: Apply AARC line corner fidelity
-        run: python .github/temp-aarc-line-corners.py
+        run: |
+          python .github/temp-aarc-line-corners.py
+          python .github/temp-aarc-line-corners-testfix.py
       - name: Install
         run: npm ci
       - name: Typecheck
@@ -28,7 +30,7 @@ jobs:
         run: npm run build:web
       - name: Commit validated change and remove temporary CI files
         run: |
-          rm .github/temp-aarc-line-corners.py .github/workflows/temp-aarc-line-corners.yml
+          rm .github/temp-aarc-line-corners.py .github/temp-aarc-line-corners-testfix.py .github/workflows/temp-aarc-line-corners.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { demoProject } from '../data/demo'
+import { createOperationEvent } from '../data/operationEvents'
+import { getOpeningPhasePathCandidates } from '../data/openingPhases'
 import { getActiveLinesAtStation, getActiveNetworkAtTime, getFirstLineAtStation, getPassengerVisibleRelationIds, isActiveAt } from './active'
 
 describe('timeline', () => {
@@ -54,7 +56,6 @@ describe('timeline', () => {
     expect(active.relations.map(relation => relation.id)).toContain('r-aux-a')
   })
 
-
   it('keeps compound visibility stable as canonical and auxiliary relations toggle', () => {
     const project = structuredClone(demoProject)
     const canonical = project.stations.find(station => station.id === 's2')!
@@ -74,5 +75,45 @@ describe('timeline', () => {
     project.stationLineRelations = project.stationLineRelations.filter(relation => !(relation.stationId === 's2' && relation.lineId === 'line-a'))
     project.stationLineRelations.push({ id: 'r-branch-s2', stationId: 's2', lineId: branch.id, openedAt: '2000-01-01' })
     expect(getPassengerVisibleRelationIds(project, 's2', '2015-01-01')).toContain('r-branch-s2')
+  })
+
+  it('reopens a previously closed segment through operation history', () => {
+    const project = structuredClone(demoProject)
+    const segment = project.geometry.segments[0]
+    segment.closedAt = '2030-01-01'
+    segment.operationHistory = [{ id: 'reopen', effectiveAt: '2035-01-01', state: 'open' }]
+    const line = project.lines.find(item => item.id === segment.lineId)!
+    line.closedAt = '2030-01-01'
+    line.operationHistory = [{ id: 'line-reopen', effectiveAt: '2035-01-01', state: 'open' }]
+    expect(getActiveNetworkAtTime(project, '2031-01-01').segments.some(item => item.id === segment.id)).toBe(false)
+    expect(getActiveNetworkAtTime(project, '2035-01-01').segments.some(item => item.id === segment.id)).toBe(true)
+  })
+
+  it('lets a station-level closure override an open parent service', () => {
+    const project = structuredClone(demoProject)
+    const relation = project.stationLineRelations.find(item => item.stationId === 's3' && item.lineId === 'line-a')!
+    relation.closedAt = '2030-01-01'
+    expect(getActiveLinesAtStation(project, 's3', '2031-01-01').map(line => line.id)).not.toContain('line-a')
+    expect(getActiveNetworkAtTime(project, '2031-01-01').segments.filter(segment => segment.lineId === 'line-a')).toHaveLength(3)
+  })
+
+  it('does not let a station-level opening override a stopped parent service', () => {
+    let project = structuredClone(demoProject)
+    const path = getOpeningPhasePathCandidates(project, 'line-a', 's1', 's4')[0]
+    project = createOperationEvent(project, { lineId: 'line-a', effectiveAt: '2030-01-01', state: 'closed', path }).project
+    const relation = project.stationLineRelations.find(item => item.stationId === 's3' && item.lineId === 'line-a')!
+    relation.operationHistory = [...(relation.operationHistory ?? []), { id: 'manual-reopen', effectiveAt: '2035-01-01', state: 'open' }]
+    expect(getActiveLinesAtStation(project, 's3', '2035-01-01').map(line => line.id)).not.toContain('line-a')
+    expect(getActiveNetworkAtTime(project, '2035-01-01').segments.filter(segment => segment.lineId === 'line-a')).toHaveLength(0)
+  })
+
+  it('allows a later network opening event to reopen service after a full closure', () => {
+    let project = structuredClone(demoProject)
+    const path = getOpeningPhasePathCandidates(project, 'line-a', 's1', 's4')[0]
+    project = createOperationEvent(project, { lineId: 'line-a', effectiveAt: '2030-01-01', state: 'closed', path }).project
+    project = createOperationEvent(project, { lineId: 'line-a', effectiveAt: '2035-01-01', state: 'open', path }).project
+    expect(getActiveNetworkAtTime(project, '2031-01-01').segments.filter(segment => segment.lineId === 'line-a')).toHaveLength(0)
+    expect(getActiveNetworkAtTime(project, '2035-01-01').segments.filter(segment => segment.lineId === 'line-a')).toHaveLength(3)
+    expect(getActiveLinesAtStation(project, 's3', '2035-01-01').map(line => line.id)).toContain('line-a')
   })
 })

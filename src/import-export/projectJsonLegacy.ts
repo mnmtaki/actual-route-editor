@@ -13,6 +13,7 @@ import { normalizeStationAnchor } from '../data/stationAnchor'
 import { createDefaultStationStyle, normalizeStationStyles } from '../data/stationStyles'
 import { canonicalizeTransferPresetId, getBuiltInStationStyle, getBuiltInTransferStyle } from '../data/presetRegistry'
 import { normalizeTransferStyles } from '../data/transferStyles'
+import { normalizeOperationEvents, normalizeOperationHistory } from '../data/operationEvents'
 
 type LegacySettings = Partial<ProjectSettings> & { stationDiameterRatio?: number }
 
@@ -74,6 +75,7 @@ export function parseProjectJson(text: string): ActualRouteProject {
   const normalizedRoads = normalizeRoads((parsed as Record<string, unknown>).roads)
   const normalizedRoadStyles = normalizeRoadStyles((parsed as Record<string, unknown>).roadStyles)
   const normalizedLineLegend = normalizeLineLegend((parsed as Record<string, unknown>).lineLegend)
+  const normalizedOperationEvents = normalizeOperationEvents((parsed as Record<string, unknown>).operationEvents)
   const stationPositions = new Map(parsed.stations.map(station => [station.id, { x: station.x, y: station.y }]))
   const legacyLineBadges = rawMapElements.flatMap(value => normalizeLegacyLineBadge(value))
   const presentation: PresentationSettings = {
@@ -109,6 +111,7 @@ export function parseProjectJson(text: string): ActualRouteProject {
     lines: parsed.lines.map((line, index) => { const { styleOverrides: _ignored, parentLineId: _parentLineId, ...rest }=line, styleOverrides=normalizeLineStyleOverrides(line.styleOverrides), parentLineId=typeof line.parentLineId === 'string' && line.parentLineId.trim() ? line.parentLineId.trim() : undefined; return ({ ...rest, ...(parentLineId ? { parentLineId } : {}), ...(styleOverrides?{styleOverrides}:{}), ...(typeof line.lineStyleId === 'string' && line.lineStyleId ? { lineStyleId: line.lineStyleId } : {}), ...normalizedDateFields(line), stationSequence: Array.isArray(line.stationSequence) ? line.stationSequence : [], ...(Array.isArray(line.lineBadges) ? {lineBadges:line.lineBadges.flatMap(value => normalizeLineBadge(value))} : {}), lineOrder: Number.isFinite(line.lineOrder) ? line.lineOrder : index, visible: line.visible !== false, locked: line.locked === true })}),
     stationLineRelations: Array.isArray(parsed.stationLineRelations) ? parsed.stationLineRelations.map(relation => { const { anchor: _ignoredAnchor, stationCode: _rawStationCode, ...rest } = relation; const anchor = normalizeStationAnchor(relation.anchor, stationPositions.get(relation.stationId)); const stationCode=typeof relation.stationCode==='string'&&relation.stationCode.trim()?relation.stationCode.trim():undefined; return ({ ...rest, ...(stationCode?{stationCode}:{}), ...normalizedDateFields(relation), ...(anchor ? { anchor } : {}) }) }) : [],
     openingPhases: Array.isArray(parsed.openingPhases) ? parsed.openingPhases.map(phase => ({ id: String(phase.id), lineId: String(phase.lineId), name: typeof phase.name === 'string' ? phase.name : undefined, openedAt: normalizeRequiredDate(phase.openedAt, today), segmentIds: Array.isArray(phase.segmentIds) ? phase.segmentIds.map(String) : [], stationRelationIds: Array.isArray(phase.stationRelationIds) ? phase.stationRelationIds.map(String) : [], revealStartStationId: typeof phase.revealStartStationId === 'string' ? phase.revealStartStationId : undefined, revealEndStationId: typeof phase.revealEndStationId === 'string' ? phase.revealEndStationId : undefined, showOverviewAfter: phase.showOverviewAfter === true, overriddenSegmentIds: Array.isArray(phase.overriddenSegmentIds) ? phase.overriddenSegmentIds.map(String) : [], overriddenStationRelationIds: Array.isArray(phase.overriddenStationRelationIds) ? phase.overriddenStationRelationIds.map(String) : [] })) : [],
+    ...(normalizedOperationEvents ? { operationEvents: normalizedOperationEvents } : {}),
     geometry: { segments: parsed.geometry.segments.map(segment => ({ ...segment, ...(segment.lineStyleId === null ? { lineStyleId: null } : typeof segment.lineStyleId === 'string' && segment.lineStyleId.trim() ? { lineStyleId: segment.lineStyleId.trim() } : {}), ...normalizedDateFields(segment), ...(normalizeSegmentLineHistory(segment.lineHistory) ? { lineHistory: normalizeSegmentLineHistory(segment.lineHistory) } : {}), mode: segment.mode === 'smooth' || segment.mode === 'corner' || segment.mode === 'rounded' ? segment.mode : 'straight', ...(typeof segment.cornerRadius === 'number' && Number.isFinite(segment.cornerRadius) && segment.cornerRadius >= 0 ? {cornerRadius:segment.cornerRadius} : {}), structureType: segment.structureType === 'elevated' ? 'elevated' : 'underground', structureNodes: Array.isArray(segment.structureNodes) ? segment.structureNodes.filter(node => node && typeof node.id === 'string').map(node => ({ id: node.id, structureAfter: node.structureAfter === 'elevated' ? 'elevated' : 'underground', ...(typeof node.waypointId === 'string' ? { waypointId: node.waypointId } : {}), ...(typeof node.progress === 'number' && Number.isFinite(node.progress) ? { progress: Math.max(0, Math.min(1, node.progress)) } : {}) })) : [], waypoints: Array.isArray(segment.waypoints) ? segment.waypoints.map(waypoint => ({ ...waypoint, ...(typeof waypoint.cornerRadius === 'number' && Number.isFinite(waypoint.cornerRadius) && waypoint.cornerRadius >= 0 ? {cornerRadius:waypoint.cornerRadius} : {}), ...(waypoint.free === true ? { free: true } : {}) })) : [] })) },
     mapElements: rawMapElements.flatMap(element => normalizeMapElement(element)),
     ...(Array.isArray(parsed.textTags) ? { textTags: parsed.textTags.flatMap(value => normalizeAarcTextTag(value)) } : {}),
@@ -127,6 +130,9 @@ export function parseProjectJson(text: string): ActualRouteProject {
     ...(normalizedTransferStyles ? { transferStyles: normalizedTransferStyles } : {}),
     ...(defaultTransferStyleId ? { defaultTransferStyleId } : {}),
   }
+  for (const line of project.lines) { const history = normalizeOperationHistory(line.operationHistory); if (history) line.operationHistory = history; else delete line.operationHistory }
+  for (const relation of project.stationLineRelations) { const history = normalizeOperationHistory(relation.operationHistory); if (history) relation.operationHistory = history; else delete relation.operationHistory }
+  for (const segment of project.geometry.segments) { const history = normalizeOperationHistory(segment.operationHistory); if (history) segment.operationHistory = history; else delete segment.operationHistory }
   for (const phase of project.openingPhases) {
     if (!phase.revealStartStationId) delete phase.revealStartStationId
     if (!phase.revealEndStationId) delete phase.revealEndStationId

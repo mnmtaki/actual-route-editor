@@ -84,4 +84,14 @@ describe('project and SVG export', () => {
     expect(result).toContain('Muyang Railway Station')
     expect(result).toContain('data-run-centerline="outer"')
     expect(result).toContain('data-terminal-cap="end"')
-  })})
+  })
+
+  it('round-trips repeated operation events and object operation history', () => {
+    const project = structuredClone(demoProject)
+    project.operationEvents = [{ id: 'event-reopen', lineId: 'line-a', effectiveAt: '2035-01-01', state: 'open', segmentIds: ['a-1'], stationRelationIds: [], affectsLine: true }]
+    project.geometry.segments.find(item => item.id === 'a-1')!.operationHistory = [{ id: 'state-reopen', eventId: 'event-reopen', effectiveAt: '2035-01-01', state: 'open' }]
+    const restored = parseProjectJson(serializeProject(project))
+    expect(restored.operationEvents?.[0]).toMatchObject({ id: 'event-reopen', state: 'open', effectiveAt: '2035-01-01' })
+    expect(restored.geometry.segments.find(item => item.id === 'a-1')?.operationHistory?.[0]).toMatchObject({ eventId: 'event-reopen', state: 'open' })
+  })
+})

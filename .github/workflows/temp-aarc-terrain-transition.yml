@@ -1,0 +1,41 @@
+name: Temp AARC terrain junction compatibility
+
+on:
+  push:
+    branches:
+      - fix/aarc-terrain-geometry-fidelity
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+          cache: npm
+      - name: Apply junction compatibility patch
+        run: python .github/temp-aarc-terrain-transition-patch.py
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test -- --run
+      - name: Build web
+        run: npm run build:web
+      - name: Commit validated patch and remove temporary CI files
+        shell: bash
+        run: |
+          rm .github/workflows/temp-aarc-terrain-transition.yml
+          rm .github/temp-aarc-terrain-transition-patch.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Match AARC terrain junction smoothing"
+          git push origin HEAD:fix/aarc-terrain-geometry-fidelity

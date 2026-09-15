@@ -256,12 +256,12 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
           const interval = previousStationSourceIndex === undefined || sourcePointIndex === undefined
             ? { openedAt, closedAt }
             : aggregateAarcInterval(atomicDates, previousStationSourceIndex, sourcePointIndex, { openedAt, closedAt })
-          const sourceFromPointId = previousStation.source?.pointId
+          const sourceFromPointId = previousStationSourceIndex === undefined ? previousStation.source?.pointId : geometryPoints[previousStationSourceIndex]?.id
           const sourceLineForSlices = rawLine as unknown as { id?: unknown; pts?: unknown[] }
           const styleSlice = sourceFromPointId === undefined ? undefined : resolveAarcStyleSliceForInterval(sourceLineForSlices, styleSlices, sourceFromPointId, sourcePoint.id)
           const timeSlice = sourceFromPointId === undefined ? undefined : resolveAarcTimeSliceForInterval(sourceLineForSlices, timeSlices, sourceFromPointId, sourcePoint.id)
           const segmentStyleId = resolveAarcSegmentStyleId(styleSlice?.styleId)
-          const segmentSource = { format: 'aarc' as const, lineId: sourceLineId, sourceLineId, ...(timeSlice?.id !== null && timeSlice?.id !== undefined ? { sourceTimeSliceId: timeSlice.id } : {}), ...(styleSlice?.id !== null && styleSlice?.id !== undefined ? { sourceStyleSliceId: styleSlice.id } : {}), ...(styleSlice?.styleId !== null && styleSlice?.styleId !== undefined ? { sourceStyleId: styleSlice.styleId } : {}), raw: { sourceSegmentIndex: segmentIndex } }
+          const segmentSource = { format: 'aarc' as const, lineId: sourceLineId, sourceLineId, ...(sourceFromPointId !== undefined ? { pointIds: [sourceFromPointId, sourcePoint.id] } : {}), ...(timeSlice?.id !== null && timeSlice?.id !== undefined ? { sourceTimeSliceId: timeSlice.id } : {}), ...(styleSlice?.id !== null && styleSlice?.id !== undefined ? { sourceStyleSliceId: styleSlice.id } : {}), ...(styleSlice?.styleId !== null && styleSlice?.styleId !== undefined ? { sourceStyleId: styleSlice.styleId } : {}), raw: { sourceSegmentIndex: segmentIndex } }
           segments.push({ id: `aarc-segment-${sourceLineId}-${segmentIndex}`, lineId, ...(segmentStyleId !== undefined ? { lineStyleId: segmentStyleId } : {}), fromStationId: previousStation.id, toStationId: station.id, mode: pendingWaypoints.length ? 'rounded' : 'straight', ...(pendingWaypoints.length ? { cornerRadius: 42 } : {}), structureType: 'underground', structureNodes: [], waypoints: pendingWaypoints, openedAt: interval.openedAt, closedAt: interval.closedAt, source: segmentSource })
           segmentIndex += 1
         } else if (pendingWaypoints.length) warnings.push(`AARC 线路 ${sourceLineId} 在首站前的 ${pendingWaypoints.length} 个几何点无法归属区间，已忽略`)

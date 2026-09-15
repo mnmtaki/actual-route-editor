@@ -7,6 +7,7 @@ import { parseProjectJson, serializeProject } from './projectJson'
 import { isValidAarcTerrainColor, parseAarcTerrainWidth, resolveAarcTerrainAppearance, resolveAarcTerrainPreset, resolveAarcTerrainSourceMetrics } from './aarcTerrain'
 import { getBasemapPathD } from '../data/basemapPaths'
 import { formalizeAarcBasemapPoints } from '../data/aarcBasemapGeometry'
+import { reconstructAarcLineGeometry } from './aarcGeometry'
 
 describe('AARC terrain calibration', () => {
   it('resolves known presets before raw colors', () => {
@@ -138,4 +139,15 @@ describe('AARC type=1 terrain importer', () => {
     const restored = parseProjectJson(serializeProject(original))
     expect(restored.basemapPaths).toEqual(original.basemapPaths)
   })
+  it('uses identical AARC formalize geometry for transit lines and terrain', () => {
+    const controls = [
+      { id: 1, x: 0, y: 0, dir: 0 as const, station: true },
+      { id: 2, x: 20, y: 10, dir: 0 as const, station: false },
+      { id: 3, x: 30, y: 10, dir: 1 as const, station: true },
+    ]
+    const line = reconstructAarcLineGeometry(controls).nodes.map(point => [point.x, point.y])
+    const terrain = formalizeAarcBasemapPoints(controls.map(point => ({ id: String(point.id), x: point.x, y: point.y, aarcPointId: point.id, aarcDir: point.dir }))).map(point => [point.x, point.y])
+    expect(line).toEqual(terrain)
+  })
+
 })

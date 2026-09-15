@@ -1,64 +1,22 @@
 import type { BasemapPath, BasemapPathPoint } from './model'
+import { formalizeAarcControlPoints, type AarcFormalPoint } from '../geometry/aarcFormalize'
 
 const EPS = 1e-4
 const TURN_45_RATIO = 2.4142135 * .618
 
-type Dir = 0 | 1
-type PosRel = 's' | 'l' | 'llu' | 'lu' | 'luu' | 'u' | 'uur' | 'ur' | 'urr'
 type WayRel = 'parallel' | '90' | '45' | '135'
 type Coord = { x: number; y: number }
 
-interface ControlPoint extends Coord {
-  key: string | number
-  dir: Dir
-  free: boolean
-}
+export type AarcBasemapFormalPoint = AarcFormalPoint
 
-interface FormalSeg {
-  a: Coord
-  itp: Coord[]
-  b: Coord
-  ill: number
-  direct?: boolean
-  aFree?: boolean
-  bFree?: boolean
-}
-
-export interface AarcBasemapFormalPoint extends Coord {
-  afterIdxEqv: number
-  free?: boolean
-}
-
-/** Port of AARC formalize.ts for imported terrain control points. */
 export function formalizeAarcBasemapPoints(points: BasemapPathPoint[]): AarcBasemapFormalPoint[] {
-  const controls: ControlPoint[] = points.map(point => ({
-    key: Number.isFinite(point.aarcPointId) ? point.aarcPointId! : point.id,
+  return formalizeAarcControlPoints(points.map(point => ({
+    id: Number.isFinite(point.aarcPointId) ? point.aarcPointId! : point.id,
     x: point.x,
     y: point.y,
     dir: point.aarcDir === 1 ? 1 : 0,
     free: point.aarcFree === true,
-  }))
-  if (controls.length < 2) return controls.map((point, index) => ({ x: point.x, y: point.y, afterIdxEqv: index, ...(point.free ? { free: true } : {}) }))
-
-  const ring = controls.length > 2 && controls[0].key === controls.at(-1)!.key
-  const segs: FormalSeg[] = []
-  if (!ring) {
-    for (let i = 0; i < controls.length - 1; i += 1) segs.push(formalizeSeg(controls[i], controls[i + 1]))
-  } else {
-    segs.push(formalizeSeg(controls[controls.length - 2], controls[0]))
-    for (let i = 0; i < controls.length - 1; i += 1) segs.push(formalizeSeg(controls[i], controls[i + 1]))
-    segs.push(formalizeSeg(controls.at(-1)!, controls[1]))
-  }
-  justifyIllPosedSegments(segs)
-  if (!segs.length) return []
-  if (ring) { segs.shift(); segs.pop() }
-
-  const result: AarcBasemapFormalPoint[] = [{ x: segs[0].a.x, y: segs[0].a.y, afterIdxEqv: 0, ...(segs[0].aFree ? { free: true } : {}) }]
-  for (const [index, seg] of segs.entries()) {
-    for (const point of seg.itp) result.push({ x: point.x, y: point.y, afterIdxEqv: index })
-    result.push({ x: seg.b.x, y: seg.b.y, afterIdxEqv: index + 1, ...(seg.bFree ? { free: true } : {}) })
-  }
-  return result
+  })))
 }
 
 /** Build the same formalized and rounded path used by AARC for terrain lines. */
@@ -183,138 +141,6 @@ function wayRel(a: Coord, b: Coord): WayRel {
   return dot > 0 ? '45' : '135'
 }
 
-function formalizeSeg(originalA: ControlPoint, originalB: ControlPoint): FormalSeg {
-  if (originalA.free || originalB.free) return { a: coord(originalA), itp: [], b: coord(originalB), ill: 0, direct: true, aFree: originalA.free, bFree: originalB.free }
-  let a = originalA, b = originalB
-  let xDiff = a.x - b.x, yDiff = a.y - b.y
-  const relation = coordRelDiff(xDiff, yDiff)
-  const posRel = relation.posRel
-  const reversed = relation.rev
-  if (posRel === 's') return { a: coord(originalA), itp: [], b: coord(originalB), ill: 0, aFree: originalA.free, bFree: originalB.free }
-  if (reversed) {
-    ;[a, b] = [b, a]
-    xDiff = -xDiff
-    yDiff = -yDiff
-  }
-  let itp: Coord[] = []
-  let ill = 0
-  if (a.dir === b.dir) {
-    itp = coordFill(a, b, xDiff, yDiff, posRel, reversed, a.dir === 1 ? 'midVert' : 'midInc')
-    if (!itp.length) {
-      if ((a.dir === 0 && (posRel === 'lu' || posRel === 'ur')) || (a.dir === 1 && (posRel === 'l' || posRel === 'u'))) ill = 2
-    } else ill = 1
-  } else if (a.dir === 1) {
-    itp = coordFill(a, b, xDiff, yDiff, posRel, reversed, posRel === 'luu' || posRel === 'uur' ? 'top' : 'bottom')
-  } else {
-    itp = coordFill(a, b, xDiff, yDiff, posRel, reversed, posRel === 'luu' || posRel === 'uur' ? 'bottom' : 'top')
-  }
-  return { a: coord(originalA), itp, b: coord(originalB), ill, aFree: originalA.free, bFree: originalB.free }
-}
-
-function coordRelDiff(xDiff: number, yDiff: number): { posRel: PosRel; rev: boolean } {
-  if (isZero(xDiff)) {
-    if (isZero(yDiff)) return { posRel: 's', rev: false }
-    return { posRel: 'u', rev: yDiff > 0 }
-  }
-  if (isZero(yDiff)) return { posRel: 'l', rev: xDiff > 0 }
-  if (isZero(xDiff - yDiff)) return { posRel: 'lu', rev: xDiff > 0 }
-  if (isZero(xDiff + yDiff)) return { posRel: 'ur', rev: yDiff > 0 }
-  if ((yDiff > 0 && xDiff > yDiff) || (yDiff < 0 && xDiff < yDiff)) return { posRel: 'llu', rev: yDiff > 0 }
-  if ((xDiff > 0 && yDiff > xDiff) || (xDiff < 0 && yDiff < xDiff)) return { posRel: 'luu', rev: xDiff > 0 }
-  if ((yDiff > 0 && -xDiff < yDiff) || (yDiff < 0 && xDiff < -yDiff)) return { posRel: 'uur', rev: yDiff > 0 }
-  return { posRel: 'urr', rev: xDiff < 0 }
-}
-
-function coordFill(a: Coord, b: Coord, xDiff: number, yDiff: number, posRel: PosRel, reversed: boolean, type: 'top' | 'bottom' | 'midVert' | 'midInc'): Coord[] {
-  const result: Coord[] = []
-  if (posRel === 'l' || posRel === 'u' || posRel === 'lu' || posRel === 'ur') return result
-  if (posRel === 'llu') {
-    if (type === 'top') { const bias = -xDiff + yDiff; result.push({ x: a.x + bias, y: a.y }) }
-    else if (type === 'bottom') { const bias = -xDiff + yDiff; result.push({ x: b.x - bias, y: b.y }) }
-    else if (type === 'midInc') { const bias = (-xDiff + yDiff) / 2; result.push({ x: a.x + bias, y: a.y }, { x: b.x - bias, y: b.y }) }
-    else { const bias = -yDiff / 2; result.push({ x: a.x + bias, y: a.y + bias }, { x: b.x - bias, y: b.y - bias }) }
-  } else if (posRel === 'luu') {
-    if (type === 'top') { const bias = xDiff - yDiff; result.push({ x: b.x, y: b.y - bias }) }
-    else if (type === 'bottom') { const bias = xDiff - yDiff; result.push({ x: a.x, y: a.y + bias }) }
-    else if (type === 'midInc') { const bias = (xDiff - yDiff) / 2; result.push({ x: a.x, y: a.y + bias }, { x: b.x, y: b.y - bias }) }
-    else { const bias = -xDiff / 2; result.push({ x: a.x + bias, y: a.y + bias }, { x: b.x - bias, y: b.y - bias }) }
-  } else if (posRel === 'uur') {
-    if (type === 'top') { const bias = -xDiff - yDiff; result.push({ x: b.x, y: b.y - bias }) }
-    else if (type === 'bottom') { const bias = -xDiff - yDiff; result.push({ x: a.x, y: a.y + bias }) }
-    else if (type === 'midInc') { const bias = (-xDiff - yDiff) / 2; result.push({ x: a.x, y: a.y + bias }, { x: b.x, y: b.y - bias }) }
-    else { const bias = -xDiff / 2; result.push({ x: a.x + bias, y: a.y - bias }, { x: b.x - bias, y: b.y + bias }) }
-  } else if (posRel === 'urr') {
-    if (type === 'top') { const bias = xDiff + yDiff; result.push({ x: a.x - bias, y: a.y }) }
-    else if (type === 'bottom') { const bias = xDiff + yDiff; result.push({ x: b.x + bias, y: b.y }) }
-    else if (type === 'midInc') { const bias = (xDiff + yDiff) / 2; result.push({ x: a.x - bias, y: a.y }, { x: b.x + bias, y: b.y }) }
-    else { const bias = yDiff / 2; result.push({ x: a.x + bias, y: a.y - bias }, { x: b.x - bias, y: b.y + bias }) }
-  }
-  if (reversed) result.reverse()
-  return result
-}
-
-function justifyIllPosedSegments(segs: FormalSeg[]) {
-  if (segs.length <= 1) return
-  segs.forEach((seg, index) => {
-    if (!seg.ill) return
-    if (index > 0 && index < segs.length - 1) {
-      const previous = segs[index - 1], next = segs[index + 1]
-      if (!previous.direct && !next.direct && previous.ill < seg.ill && next.ill < seg.ill) {
-        const previousRef = previous.itp.at(-1) ?? previous.a
-        const nextRef = next.itp[0] ?? next.b
-        const intersection = lineIntersection(previousRef, previous.b, nextRef, next.a)
-        if (intersection) seg.itp = [intersection]
-      }
-      return
-    }
-    let intersection: Coord | undefined
-    if (index === segs.length - 1) {
-      const previous = segs[index - 1]
-      if (!previous.direct && previous.ill <= seg.ill && previous.ill < 2) {
-        const neighbourRef = previous.itp.at(-1) ?? previous.a
-        const thisRef = seg.itp.length > 1 ? seg.itp[0] : undefined
-        intersection = justifyEnd(neighbourRef, seg.a, thisRef, seg.b)
-      }
-    } else {
-      const next = segs[index + 1]
-      if (!next.direct && next.ill <= seg.ill && next.ill < 2) {
-        const neighbourRef = next.itp[0] ?? next.b
-        const thisRef = seg.itp.length > 1 ? seg.itp[1] : undefined
-        intersection = justifyEnd(neighbourRef, seg.b, thisRef, seg.a)
-      }
-    }
-    if (intersection) seg.itp = [intersection]
-  })
-}
-
-function justifyEnd(neighbourRef: Coord, shared: Coord, thisRef: Coord | undefined, tip: Coord): Coord | undefined {
-  const neighbourWay = { x: shared.x - neighbourRef.x, y: shared.y - neighbourRef.y }
-  if (magnitude(neighbourWay) < EPS) return undefined
-  if (!thisRef) {
-    if (pointLineDistance(tip, neighbourRef, shared) < EPS) return undefined
-    const perpendicularTip = { x: tip.x - neighbourWay.y, y: tip.y + neighbourWay.x }
-    return lineIntersection(neighbourRef, shared, tip, perpendicularTip)
-  }
-  const thisWay = { x: shared.x - thisRef.x, y: shared.y - thisRef.y }
-  if (!isZero(neighbourWay.x * thisWay.x + neighbourWay.y * thisWay.y)) return undefined
-  return lineIntersection(neighbourRef, shared, tip, { x: tip.x + thisWay.x, y: tip.y + thisWay.y })
-}
-
-function lineIntersection(a: Coord, b: Coord, c: Coord, d: Coord): Coord | undefined {
-  const r = { x: b.x - a.x, y: b.y - a.y }, s = { x: d.x - c.x, y: d.y - c.y }
-  const denominator = cross2(r, s)
-  if (Math.abs(denominator) < EPS) return undefined
-  const t = cross2({ x: c.x - a.x, y: c.y - a.y }, s) / denominator
-  return { x: a.x + r.x * t, y: a.y + r.y * t }
-}
-
-function pointLineDistance(point: Coord, a: Coord, b: Coord) {
-  const way = { x: b.x - a.x, y: b.y - a.y }
-  const length = magnitude(way)
-  return length < EPS ? magnitude({ x: point.x - a.x, y: point.y - a.y }) : Math.abs(cross2({ x: point.x - a.x, y: point.y - a.y }, way)) / length
-}
-
-function coord(point: Coord): Coord { return { x: point.x, y: point.y } }
 function isZero(value: number) { return Math.abs(value) < EPS }
 function sameCoord(a: Coord, b: Coord) { return isZero(a.x - b.x) && isZero(a.y - b.y) }
 function cross2(a: Coord, b: Coord) { return a.x * b.y - a.y * b.x }

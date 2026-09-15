@@ -1,6 +1,6 @@
 export type ISODate = string | null
 export type WaypointType = 'smooth' | 'corner'
-export type SegmentMode = 'straight' | 'smooth' | 'corner' | 'rounded'
+export type SegmentMode = 'straight' | 'smooth' | 'rounded'
 /** The two supported structure states. Missing waypoint nodes mean "inherit". */
 export type StructureType = 'underground' | 'elevated'
 export type LabelDirection = 'up' | 'down' | 'left' | 'right' | 'upper-left' | 'upper-right' | 'lower-left' | 'lower-right'

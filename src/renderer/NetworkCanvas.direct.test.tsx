@@ -23,10 +23,10 @@ describe('direct manipulation gestures', () => {
     const secondPlus=container.querySelector('[data-line-draft-add="true"]')!
     fireEvent.pointerDown(secondPlus,{pointerId:32,bubbles:true})
     expect(container.querySelectorAll('[data-draft-point-id]')).toHaveLength(2)
-    expect(onCreatePoint).not.toHaveBeenCalled();expect(onFinishDrawing).not.toHaveBeenCalled();expect(onDragCommit).not.toHaveBeenCalled()
+    expect(onCreatePoint).not.toHaveBeenCalled();expect(onFinishDrawing).not.toHaveBeenCalled();expect(onDragCommit).toHaveBeenCalledTimes(2)
     fireEvent.pointerDown(screen.getByText('切换为站点').parentElement!,{pointerId:33,bubbles:true})
-    expect(onDragCommit).toHaveBeenCalledTimes(1)
-    const next=onDragCommit.mock.calls[0][1] as typeof project
+    expect(onDragCommit).toHaveBeenCalledTimes(3)
+    const next=onDragCommit.mock.calls.at(-1)![1] as typeof project
     expect(next.stations).toHaveLength(project.stations.length+1)
     expect(next.geometry.segments).toHaveLength(project.geometry.segments.length+1)
     const added=next.geometry.segments.find(item=>!project.geometry.segments.some(before=>before.id===item.id))!
@@ -49,6 +49,17 @@ describe('direct manipulation gestures', () => {
     const widths=[...container.querySelectorAll('.segment-main')].map(path=>path.getAttribute('stroke-width'))
     expect(widths).toContain('44');expect(widths).toContain('30');expect(widths).not.toContain('8')
   })
+  it('keeps paused line drafts visible and offers explicit resume/delete actions', () => {
+    const project=structuredClone(demoProject),onResumeLineDraft=vi.fn(),onDeleteLineDraft=vi.fn()
+    project.lineDrafts=[{id:'draft-a',lineId:'line-a',anchorStationId:'s4',points:[{id:'p1',x:700,y:350},{id:'p2',x:760,y:390}]}]
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} onResumeLineDraft={onResumeLineDraft} onDeleteLineDraft={onDeleteLineDraft}/>)
+    expect(container.querySelector('[data-paused-line-draft-id="draft-a"]')).toBeTruthy()
+    fireEvent.pointerDown(container.querySelector('[data-resume-line-draft="draft-a"]')!,{pointerId:41,bubbles:true})
+    expect(onResumeLineDraft).toHaveBeenCalledWith('draft-a')
+    fireEvent.pointerDown(container.querySelector('[data-delete-line-draft="draft-a"]')!,{pointerId:42,bubbles:true})
+    expect(onDeleteLineDraft).toHaveBeenCalledWith('draft-a')
+  })
+
   it('drags a station directly and commits the whole drag once', () => {
     const onPreview = vi.fn(), onDragCommit = vi.fn(), setView = vi.fn()
     const { container } = render(<NetworkCanvas {...baseProps} project={demoProject} onPreview={onPreview} onDragCommit={onDragCommit} setView={setView} />)

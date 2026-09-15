@@ -1,8 +1,7 @@
-import type { ActualRouteProject, BasemapPath, BasemapPathCategory, BasemapPathPoint } from './model'
+import type { ActualRouteProject, BasemapPath, BasemapPathCategory, BasemapPathPoint, LineDraftPoint } from './model'
 import { uid } from './model'
 
-export interface LineDraftPoint { id: string; x: number; y: number }
-export type DrawingMode = { kind: 'line'; lineId: string; anchorStationId: string | null; phaseId?: string; draftPoints?: LineDraftPoint[]; lastCreatedStationId?: string } | { kind: 'basemap'; pathId: string } | { kind: 'road'; roadId: string; styleId: string } | { kind?: 'line'; lineId: string; anchorStationId: string | null; phaseId?: string; draftPoints?: LineDraftPoint[]; lastCreatedStationId?: string }
+export type DrawingMode = { kind: 'line'; lineId: string; anchorStationId: string | null; phaseId?: string; draftId?: string; draftPoints?: LineDraftPoint[]; lastCreatedStationId?: string } | { kind: 'basemap'; pathId: string } | { kind: 'road'; roadId: string; styleId: string } | { kind?: 'line'; lineId: string; anchorStationId: string | null; phaseId?: string; draftId?: string; draftPoints?: LineDraftPoint[]; lastCreatedStationId?: string }
 
 type NativeBasemapPath = BasemapPath & { smooth?: boolean }
 

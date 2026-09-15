@@ -94,4 +94,14 @@ describe('project and SVG export', () => {
     expect(restored.operationEvents?.[0]).toMatchObject({ id: 'event-reopen', state: 'open', effectiveAt: '2035-01-01' })
     expect(restored.geometry.segments.find(item => item.id === 'a-1')?.operationHistory?.[0]).toMatchObject({ eventId: 'event-reopen', state: 'open' })
   })
+
+
+  it('round-trips paused line drafts without turning them into Segments', () => {
+    const project=structuredClone(demoProject),before=project.geometry.segments.length
+    project.lineDrafts=[{id:'draft-save',lineId:'line-a',anchorStationId:'s4',points:[{id:'dp',x:710,y:365}]}]
+    const restored=parseProjectJson(serializeProject(project))
+    expect(restored.lineDrafts?.[0]).toMatchObject({id:'draft-save',lineId:'line-a',anchorStationId:'s4'})
+    expect(restored.lineDrafts?.[0].points).toEqual([{id:'dp',x:710,y:365}])
+    expect(restored.geometry.segments).toHaveLength(before)
+  })
 })

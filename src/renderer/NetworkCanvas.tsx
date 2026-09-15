@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ActualRouteProject, Road, Selection } from '../data/model'
+import type { ActualRouteProject, LineDraft, LineDraftPoint, Road, Selection } from '../data/model'
 import { uid } from '../data/model'
 import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPlans, getSegmentSubpathSpans, pathSpansToSvgPath } from '../geometry/path'
 import { projectPointToSvgPath, screenPointToWorld } from '../geometry/screenPoint'
@@ -13,7 +13,7 @@ import { AarcTextTagsLayer } from './AarcTextTags'
 import { LineLegendLayer } from './LineLegend'
 import { LineBadgesLayer } from './LineBadges'
 import { VectorBasemapLayer } from './VectorBasemap'
-import type { DrawingMode, LineDraftPoint } from '../data/basemapPaths'
+import type { DrawingMode } from '../data/basemapPaths'
 import { effectiveLineWidth, effectiveStationStyle, snapLabelOffset } from '../data/style'
 import { getLineStyle, resolveLineStyle } from '../data/lineStyles'
 import { isSegmentGeometryLocked, isStationGeometryLocked, lockedStationMessage } from '../data/lineLock'
@@ -21,6 +21,7 @@ import { translateStationWithAnchors } from '../data/stationAnchor'
 import { lineWithEffectiveColor } from '../data/lineIdentity'
 import { getCompoundStationCanonical, isCompoundStationCanonical } from '../data/compoundStation'
 import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, demoteTerminalStationToDrawingPoint } from '../data/operations'
+import { replaceLineDraft } from '../data/lineDrafts'
 
 type View = { x: number; y: number; width: number; height: number }
 type Point = { x: number; y: number }
@@ -31,15 +32,14 @@ type Gesture =
   | { kind: 'pinchingCanvas'; pointerIds: [number, number]; initialDistance: number; startView: View; startWorld: Point }
   | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineBadge' | 'draggingMapElement' | 'draggingLineLegend' | 'draggingBackground' | 'draggingBasemapPoint' | 'draggingBasemapPath' | 'draggingRoadPoint'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; ownerRoadId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
 
-type LineDraftState = { lineId: string; phaseId?: string; anchorStationId: string | null; points: LineDraftPoint[]; lastCreatedStationId?: string }
 type DrawingPointSelection = { kind: 'draft'; id: string } | { kind: 'station'; id: string } | null
 type DrawingCanvasPointer = { pointerId: number; startClient: Point; lastClient: Point; moved: boolean }
 
-export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, view, setView }: {
+export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onResumeLineDraft, onDeleteLineDraft, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, view, setView }: {
   project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; roadDraft?: Road | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
   calibration?: { points: Point[] } | null; onCalibrationPoint?: (point: Point) => void
   selectedStationIds?: string[]; onToggleStationSelection?: (stationId: string) => void
-  onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void; onFinishDrawing?: () => void
+  onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void; onFinishDrawing?: () => void; onResumeLineDraft?: (draftId: string) => void; onDeleteLineDraft?: (draftId: string) => void
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void; onEditBlocked?: (message: string) => void
   view: View; setView: React.Dispatch<React.SetStateAction<View>>
 }) {
@@ -48,12 +48,12 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const pointers = useRef(new Map<number, Point>())
   const drawingClick = useRef<{ time: number; x: number; y: number } | null>(null)
   const pointerDoubleFinish = useRef(false)
-  const draftDrag = useRef<{ pointerId: number; id: string } | null>(null)
+  const draftDrag = useRef<{ pointerId: number; id: string; before: ActualRouteProject; latest: LineDraft; moved: boolean } | null>(null)
   const lineCanvasPointer = useRef<DrawingCanvasPointer | null>(null)
   const basemapCanvasPointer = useRef<DrawingCanvasPointer | null>(null)
   const [preview, setPreview] = useState<ActualRouteProject | null>(null)
   const [canvasWidth, setCanvasWidth] = useState(920)
-  const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
+  const [lineDraft, setLineDraft] = useState<LineDraft | null>(null)
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
   const shown = preview ?? project
   const active = useMemo(() => getActiveNetworkAtTime(shown, shown.timeline.currentDate), [shown])
@@ -78,10 +78,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   useEffect(() => { if (!drawing) drawingClick.current = null }, [drawing])
   useEffect(() => {
     if (drawing?.kind === 'line') {
-      setLineDraft({ lineId: drawing.lineId, phaseId: drawing.phaseId, anchorStationId: drawing.anchorStationId, points: drawing.draftPoints ?? [], lastCreatedStationId: drawing.lastCreatedStationId })
+      const stored = drawing.draftId ? project.lineDrafts?.find(item => item.id === drawing.draftId) : undefined
+      setLineDraft(stored ? structuredClone(stored) : { id: drawing.draftId ?? `ephemeral:${drawing.lineId}`, lineId: drawing.lineId, phaseId: drawing.phaseId, anchorStationId: drawing.anchorStationId, points: drawing.draftPoints ?? [], lastCreatedStationId: drawing.lastCreatedStationId })
     } else setLineDraft(null)
     setDrawingPointSelection(null)
-  }, [drawing?.kind, drawing?.kind === 'line' ? drawing.lineId : undefined, drawing?.kind === 'line' ? drawing.phaseId : undefined, drawing?.kind === 'line' ? drawing.anchorStationId : undefined])
+  }, [drawing?.kind, drawing?.kind === 'line' ? drawing.lineId : undefined, drawing?.kind === 'line' ? drawing.phaseId : undefined, drawing?.kind === 'line' ? drawing.anchorStationId : undefined, drawing?.kind === 'line' ? drawing.draftId : undefined, project.lineDrafts])
 
   const pointerToWorld = (clientX: number, clientY: number): Point => screenPointToWorld(svgRef.current!, clientX, clientY, view)
   const capture = (event: React.PointerEvent) => event.currentTarget.setPointerCapture?.(event.pointerId)
@@ -112,7 +113,9 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const addDraftPointAt = (position: Point) => {
     if (!lineDraft?.anchorStationId) return
     const point = { id: uid('draft-waypoint'), x: position.x, y: position.y }
-    setLineDraft(current => current ? { ...current, points: [...current.points, point] } : current)
+    const nextDraft = { ...lineDraft, points: [...lineDraft.points, point] }
+    setLineDraft(nextDraft)
+    onDragCommit(project, replaceLineDraft(project, nextDraft))
     setDrawingPointSelection({ kind: 'draft', id: point.id })
   }
 
@@ -141,14 +144,18 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     const before = lineDraft.points.slice(0, index)
     const after = lineDraft.points.slice(index + 1)
     const result = appendStationToLineWithWaypoints(project, lineDraft.lineId, point, before, lineDraft.anchorStationId, lineDraft.phaseId)
-    onDragCommit(project, result.project)
-    setLineDraft({ ...lineDraft, anchorStationId: result.stationId, points: after, lastCreatedStationId: result.stationId })
+    const nextDraft = { ...lineDraft, anchorStationId: result.stationId, points: after, lastCreatedStationId: result.stationId }
+    onDragCommit(project, replaceLineDraft(result.project, nextDraft))
+    setLineDraft(nextDraft)
     setDrawingPointSelection(null)
     onSelect({ type: 'station', id: result.stationId })
   }
 
   const removeDraftPoint = (id: string) => {
-    setLineDraft(current => current ? { ...current, points: current.points.filter(item => item.id !== id) } : current)
+    if (!lineDraft) return
+    const nextDraft = { ...lineDraft, points: lineDraft.points.filter(item => item.id !== id) }
+    setLineDraft(nextDraft)
+    onDragCommit(project, replaceLineDraft(project, nextDraft))
     setDrawingPointSelection(null)
   }
 
@@ -156,8 +163,9 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (!lineDraft || lineDraft.lastCreatedStationId !== stationId) return
     const result = demoteTerminalStationToDrawingPoint(project, lineDraft.lineId, stationId)
     if (!result) return
-    onDragCommit(project, result.project)
-    setLineDraft({ ...lineDraft, anchorStationId: result.anchorStationId, points: [...result.draftPoints, ...lineDraft.points], lastCreatedStationId: undefined })
+    const nextDraft = { ...lineDraft, anchorStationId: result.anchorStationId, points: [...result.draftPoints, ...lineDraft.points], lastCreatedStationId: undefined }
+    onDragCommit(project, replaceLineDraft(result.project, nextDraft))
+    setLineDraft(nextDraft)
     setDrawingPointSelection({ kind: 'draft', id: result.draftPoints.at(-1)!.id })
     onSelect(null)
   }
@@ -170,8 +178,9 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     const station = project.stations.find(item => item.id === stationId)
     if (!station || !confirm(`连接到已有站“${station.name ?? '未命名站'}”？`)) return
     const result = connectExistingStationWithWaypoints(project, lineDraft.lineId, stationId, lineDraft.points, lineDraft.anchorStationId, lineDraft.phaseId)
-    onDragCommit(project, result.project)
-    setLineDraft({ ...lineDraft, anchorStationId: stationId, points: [], lastCreatedStationId: undefined })
+    const nextDraft = { ...lineDraft, anchorStationId: stationId, points: [], lastCreatedStationId: undefined }
+    onDragCommit(project, replaceLineDraft(result.project, nextDraft))
+    setLineDraft(nextDraft)
     setDrawingPointSelection(null)
     onSelect({ type: 'station', id: stationId })
   }
@@ -187,8 +196,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       if (!lineDraft?.anchorStationId) {
         const point = pointerToWorld(event.clientX, event.clientY)
         const result = appendStationToLineWithWaypoints(project, drawing.lineId, point, [], null, drawing.phaseId)
-        onDragCommit(project, result.project)
-        setLineDraft({ lineId: drawing.lineId, phaseId: drawing.phaseId, anchorStationId: result.stationId, points: [], lastCreatedStationId: result.stationId })
+        const baseDraft = lineDraft ?? { id: drawing.draftId ?? `ephemeral:${drawing.lineId}`, lineId: drawing.lineId, phaseId: drawing.phaseId, anchorStationId: null, points: [] }
+        const nextDraft = { ...baseDraft, anchorStationId: result.stationId, points: [], lastCreatedStationId: result.stationId }
+        onDragCommit(project, replaceLineDraft(result.project, nextDraft))
+        setLineDraft(nextDraft)
         onSelect({ type: 'station', id: result.stationId })
         return
       }
@@ -221,9 +232,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
     if (draftDrag.current?.pointerId === event.pointerId) {
-      const point = pointerToWorld(event.clientX, event.clientY)
-      const id = draftDrag.current.id
-      setLineDraft(current => current ? { ...current, points: current.points.map(item => item.id === id ? { ...item, x: point.x, y: point.y } : item) } : current)
+      const point = pointerToWorld(event.clientX, event.clientY), drag = draftDrag.current, id = drag.id
+      const nextDraft = { ...drag.latest, points: drag.latest.points.map(item => item.id === id ? { ...item, x: point.x, y: point.y } : item) }
+      drag.latest = nextDraft
+      drag.moved = true
+      setLineDraft(nextDraft)
       return
     }
     if (lineCanvasPointer.current?.pointerId === event.pointerId) {
@@ -327,7 +340,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   }
   const endGesture = (event: React.PointerEvent) => {
     pointers.current.delete(event.pointerId)
-    if (draftDrag.current?.pointerId === event.pointerId) { draftDrag.current = null; return }
+    if (draftDrag.current?.pointerId === event.pointerId) { const drag = draftDrag.current; draftDrag.current = null; if (drag.moved) onDragCommit(drag.before, replaceLineDraft(drag.before, drag.latest)); return }
     if (lineCanvasPointer.current?.pointerId === event.pointerId) {
       const current = lineCanvasPointer.current
       lineCanvasPointer.current = null
@@ -355,6 +368,23 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     return spans.length ? { segment, interval, path: pathSpansToSvgPath(spans) } : null
   })() : null
 
+  const pausedLineDraftOverlay = !drawing ? <g data-layer="paused-line-drafts" data-editor="true">{(shown.lineDrafts ?? []).filter(draft => draft.points.length > 0).map(draft => {
+    const anchor = draft.anchorStationId ? shown.stations.find(item => item.id === draft.anchorStationId) : undefined, rawLine = shown.lines.find(item => item.id === draft.lineId)
+    if (!anchor || !rawLine) return null
+    const line = lineWithEffectiveColor(shown, rawLine), endpoint = draft.points.at(-1)!
+    const previewStation = { id: `__paused-draft-end__${draft.id}`, name: '', x: endpoint.x, y: endpoint.y, labelOffsetX: 0, labelOffsetY: 0 }
+    const previewSegment = { id: `__paused-draft-segment__${draft.id}`, lineId: draft.lineId, fromStationId: anchor.id, toStationId: previewStation.id, mode: 'smooth' as const, structureType: 'underground' as const, structureNodes: [], waypoints: draft.points.slice(0, -1).map(point => ({ id: point.id, x: point.x, y: point.y, type: 'smooth' as const })) }
+    const path = getSegmentPath({ ...shown, stations: [...shown.stations, previewStation] }, previewSegment)
+    return <g key={draft.id} data-paused-line-draft-id={draft.id}>
+      <path d={path} fill="none" stroke={line.color} strokeWidth={effectiveLineWidth(line, shown.settings)} strokeLinecap="round" strokeLinejoin="round" strokeDasharray="10 7" opacity=".58" pointerEvents="none" />
+      {draft.points.map(point => <circle key={point.id} cx={point.x} cy={point.y} r="5.5" fill="#fffdf9" stroke={line.color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" pointerEvents="none" />)}
+      <g transform={`translate(${endpoint.x + 16} ${endpoint.y - 18})`}>
+        <g data-resume-line-draft={draft.id} onPointerDown={event => { event.stopPropagation(); onResumeLineDraft?.(draft.id) }}><rect x="0" y="0" width="72" height="28" rx="7" fill="#fff" stroke={line.color}/><text x="36" y="19" textAnchor="middle" fontSize="13" fill="#252a27" pointerEvents="none">继续绘制</text></g>
+        <g data-delete-line-draft={draft.id} transform="translate(76 0)" onPointerDown={event => { event.stopPropagation(); onDeleteLineDraft?.(draft.id) }}><rect x="0" y="0" width="28" height="28" rx="7" fill="#fff" stroke="#a1a5a2"/><text x="14" y="19" textAnchor="middle" fontSize="16" fill="#6a6f6c" pointerEvents="none">×</text></g>
+      </g>
+    </g>
+  })}</g> : null
+
   const lineDrawingOverlay = (() => {
     if (!lineDraft?.anchorStationId) return null
     const anchor = shown.stations.find(item => item.id === lineDraft.anchorStationId)
@@ -375,7 +405,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     const length = Math.hypot(dx, dy), plus = { x: last.x + dx / length * 86, y: last.y + dy / length * 86 }
     return <g data-layer="line-drawing-overlay" data-editor="true">
       {path && <path d={path} fill="none" stroke={line.color} strokeWidth={effectiveLineWidth(line, shown.settings)} strokeLinecap="round" strokeLinejoin="round" opacity=".76" pointerEvents="none" />}
-      {points.map(point => <g key={point.id} data-draft-point-id={point.id} onDoubleClick={event=>event.stopPropagation()} onPointerDown={event => { event.stopPropagation(); capture(event); draftDrag.current = { pointerId: event.pointerId, id: point.id }; setDrawingPointSelection({ kind: 'draft', id: point.id }) }}><circle cx={point.x} cy={point.y} r={stationHitRadius} fill="transparent" pointerEvents="all"/><circle cx={point.x} cy={point.y} r="8" fill="#fff" stroke={drawingPointSelection?.kind==='draft'&&drawingPointSelection.id===point.id?'#b98700':'#353b38'} strokeWidth="2" vectorEffect="non-scaling-stroke" pointerEvents="none"/></g>)}
+      {points.map(point => <g key={point.id} data-draft-point-id={point.id} onDoubleClick={event=>event.stopPropagation()} onPointerDown={event => { event.stopPropagation(); capture(event); draftDrag.current = { pointerId: event.pointerId, id: point.id, before: project, latest: structuredClone(lineDraft), moved: false }; setDrawingPointSelection({ kind: 'draft', id: point.id }) }}><circle cx={point.x} cy={point.y} r={stationHitRadius} fill="transparent" pointerEvents="all"/><circle cx={point.x} cy={point.y} r="8" fill="#fff" stroke={drawingPointSelection?.kind==='draft'&&drawingPointSelection.id===point.id?'#b98700':'#353b38'} strokeWidth="2" vectorEffect="non-scaling-stroke" pointerEvents="none"/></g>)}
       <g data-line-draft-add="true" transform={`translate(${plus.x} ${plus.y})`} onDoubleClick={event=>event.stopPropagation()} onPointerDown={event => { event.stopPropagation(); addDraftPoint() }}><circle r={Math.max(18, stationHitRadius)} fill="transparent" pointerEvents="all"/><circle r="14" fill="#d9edf2" stroke={line.color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" pointerEvents="none"/><path d="M -6 0 H 6 M 0 -6 V 6" stroke={line.color} strokeWidth="2" strokeLinecap="round" vectorEffect="non-scaling-stroke" pointerEvents="none"/></g>
       {drawingPointSelection?.kind === 'draft' && (() => { const point=points.find(item=>item.id===drawingPointSelection.id); if(!point)return null; return <g transform={`translate(${point.x+16} ${point.y-18})`} onDoubleClick={event=>event.stopPropagation()}><g onPointerDown={event=>{event.stopPropagation();promoteDraftPoint(point.id)}}><rect x="0" y="0" width="78" height="28" rx="7" fill="#fff" stroke="#9aa19d"/><text x="39" y="19" textAnchor="middle" fontSize="13" fill="#252a27" pointerEvents="none">切换为站点</text></g><g transform="translate(0 32)" onPointerDown={event=>{event.stopPropagation();removeDraftPoint(point.id)}}><rect x="0" y="0" width="78" height="28" rx="7" fill="#fff" stroke="#9aa19d"/><text x="39" y="19" textAnchor="middle" fontSize="13" fill="#252a27" pointerEvents="none">移除</text></g></g> })()}
       {drawingPointSelection?.kind === 'station' && drawingPointSelection.id === lineDraft.lastCreatedStationId && (()=>{const station=shown.stations.find(item=>item.id===drawingPointSelection.id);if(!station)return null;return <g transform={`translate(${station.x+16} ${station.y-18})`} onDoubleClick={event=>event.stopPropagation()} onPointerDown={event=>{event.stopPropagation();demoteCurrentStation(station.id)}}><rect x="0" y="0" width="92" height="28" rx="7" fill="#fff" stroke="#9aa19d"/><text x="46" y="19" textAnchor="middle" fontSize="13" fill="#252a27" pointerEvents="none">切换为控制点</text></g>})()}
@@ -420,6 +450,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     <g data-layer="stations">{active.stations.map(station => <StationMarker key={station.id} project={shown} station={station} time={shown.timeline.currentDate} selected={(selection?.type === 'station' && (selection.id === station.id || getCompoundStationCanonical(shown, selection.id)?.id === station.id)) || selectedStationIds.includes(station.id)} hitRadius={stationHitRadius}
       onPointerDown={event => { event.stopPropagation(); if (drawing?.kind === 'line') { connectDrawingToStation(station.id); return } if (drawing) { onConnectStation(station.id); return } if (isStationGeometryLocked(shown, station.id)) { onSelect({ type: 'station', id: station.id }); onEditBlocked?.(lockedStationMessage(shown, station.id)); return } if (startObjectDrag('draggingStation', event, { x: station.x, y: station.y }, station.id)) { const additive = event.ctrlKey || event.metaKey || event.shiftKey; if (additive && onToggleStationSelection) onToggleStationSelection(station.id); else onSelect({ type: 'station', id: station.id }) } }}
       onLabelPointerDown={event => { if (drawing) return; if (startObjectDrag('draggingLabel', event, { x: station.labelOffsetX, y: station.labelOffsetY }, station.id)) onSelect({ type: 'station', id: station.id }) }} />)}</g>
+    {pausedLineDraftOverlay}
     {lineDrawingOverlay}
     <LineBadgesLayer project={shown} selectedId={selection?.type === 'lineBadge' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={(event, line, badge) => { if (drawing) return; if (startObjectDrag('draggingLineBadge', event, { x: badge.x, y: badge.y }, badge.id, undefined, line.id)) onSelect({ type: 'lineBadge', id: badge.id, lineId: line.id }) }} />
     <AarcTextTagsLayer project={shown} />

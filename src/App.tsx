@@ -75,6 +75,7 @@ import { createLineLegend, getLineLegendWorldBounds } from "./data/lineLegend";
 import { calibrationMetersPerWorldUnit } from "./data/distance";
 import { getProjectName, projectFilename as makeProjectFilename } from "./data/projectMetadata";
 import { setLinesBoolean, removeBackground as removeBackgroundCommand } from "./data/editorCommands";
+import { createLineDraft, deleteLineDraft } from "./data/lineDrafts";
 type Drawing = DrawingMode;
 type Point = { x: number; y: number };
 export default function App() {
@@ -303,6 +304,8 @@ export default function App() {
     let next = phase.project;
     if (seed)
       next = connectExistingStation(next, r.lineId, seed, null, phase.phaseId);
+    const draft = createLineDraft(next, r.lineId, seed ?? null, phase.phaseId);
+    next = draft.project;
     history.commit(next);
     setActiveLineId(r.lineId);
     setDrawing({
@@ -310,6 +313,7 @@ export default function App() {
       lineId: r.lineId,
       anchorStationId: seed ?? null,
       phaseId: phase.phaseId,
+      draftId: draft.draftId,
     });
     setSelection(
       seed ? { type: "station", id: seed } : { type: "line", id: r.lineId },
@@ -345,7 +349,16 @@ export default function App() {
       "正在绘制道路；点击地图添加节点，Enter/双击完成当前道路，Esc退出",
     );
   };
+  const pauseLineDrawing = (message: string) => {
+    if (drawing?.kind !== "line") return false;
+    const draft = drawing.draftId ? history.project.lineDrafts?.find(item => item.id === drawing.draftId) : undefined;
+    if (draft && draft.points.length === 0) history.replace(deleteLineDraft(history.project, draft.id));
+    setDrawing(null);
+    setNotice(draft?.points.length ? `${message}；未完成线路草稿已保留` : message);
+    return true;
+  };
   const finishDrawing = () => {
+    if (pauseLineDrawing("已暂停线路绘制")) return;
     if (drawing?.kind === "basemap") {
       setDrawing(null);
       setNotice("底图路径已完成");
@@ -364,6 +377,7 @@ export default function App() {
     }
   };
   const cancelDrawing = () => {
+    if (pauseLineDrawing("已暂停线路绘制")) return;
     if (drawing) {
       if (drawing.kind === "road" && roadDraft && roadDraft.points.length > 0) {
         setRoadDraft({ ...roadDraft, points: [] });
@@ -376,6 +390,7 @@ export default function App() {
     }
   };
   const exitDrawingTool = () => {
+    if (pauseLineDrawing("已退出线路绘制")) return;
     setRoadDraft(null);
     if (drawing?.kind === "road") setSelection(null);
     setDrawing(null);
@@ -442,6 +457,13 @@ export default function App() {
       setSelection({ type: "station", id });
     }
   };
+  const beginLineDraft = (lineId: string, stationId: string | null, phaseId?: string) => {
+    const draft = createLineDraft(history.project, lineId, stationId, phaseId);
+    history.replace(draft.project);
+    setDrawing({ kind: "line", lineId, anchorStationId: stationId, ...(phaseId ? { phaseId } : {}), draftId: draft.draftId });
+    setActiveLineId(lineId);
+    return draft.draftId;
+  };
   const extend = (stationId: string) => {
     const ids = stationLineIds(history.project, stationId);
     if (ids.length === 1) {
@@ -449,8 +471,7 @@ export default function App() {
         setNotice("线路已锁定");
         return;
       }
-      setDrawing({ kind: "line", lineId: ids[0], anchorStationId: stationId });
-      setActiveLineId(ids[0]);
+      beginLineDraft(ids[0], stationId);
       return;
     }
     setChoice(stationId);
@@ -463,8 +484,7 @@ export default function App() {
         setNotice("线路已锁定");
         return;
       }
-      setDrawing({ kind: "line", lineId, anchorStationId: stationId });
-      setActiveLineId(lineId);
+      beginLineDraft(lineId, stationId);
     } else setDialog({ seed: stationId });
   };
   const startPhaseDrawing = (
@@ -476,14 +496,28 @@ export default function App() {
       setNotice("线路已锁定");
       return;
     }
-    setDrawing({ kind: "line", lineId, anchorStationId: stationId, phaseId });
-    setActiveLineId(lineId);
+    beginLineDraft(lineId, stationId, phaseId);
     setSelection(
       stationId
         ? { type: "station", id: stationId }
         : { type: "line", id: lineId },
     );
     setNotice("正在绘制开通阶段；新建区间和线路关系自动继承阶段日期");
+  };
+  const resumeLineDraft = (draftId: string) => {
+    const draft = history.project.lineDrafts?.find(item => item.id === draftId);
+    if (!draft) return;
+    if (isLineLocked(history.project, draft.lineId)) { setNotice("线路已锁定"); return; }
+    setDrawing({ kind: "line", lineId: draft.lineId, anchorStationId: draft.anchorStationId, ...(draft.phaseId ? { phaseId: draft.phaseId } : {}), draftId: draft.id });
+    setActiveLineId(draft.lineId);
+    setSelection(draft.anchorStationId ? { type: "station", id: draft.anchorStationId } : { type: "line", id: draft.lineId });
+    setNotice("已继续未完成线路草稿");
+  };
+  const deletePausedLineDraft = (draftId: string) => {
+    const draft = history.project.lineDrafts?.find(item => item.id === draftId);
+    if (!draft || !window.confirm("删除这段未完成线路草稿？\n已完成的车站和站间区间不会受影响。")) return;
+    history.commit(deleteLineDraft(history.project, draftId));
+    setNotice("未完成线路草稿已删除");
   };
   const removeBackground = () => {
     if (!history.project.background) return false;
@@ -1194,6 +1228,8 @@ export default function App() {
               onDragCommit={history.commitFrom}
               onEditBlocked={setNotice}
               onFinishDrawing={finishDrawing}
+              onResumeLineDraft={resumeLineDraft}
+              onDeleteLineDraft={deletePausedLineDraft}
               view={view}
               setView={setView}
             />

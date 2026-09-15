@@ -191,6 +191,8 @@ export function deleteLineAndOrphans(project: ActualRouteProject, lineId: string
   next.stationLineRelations = next.stationLineRelations.filter(relation => !deletedIds.has(relation.lineId))
   next.geometry.segments = next.geometry.segments.filter(segment => !deletedIds.has(segment.lineId))
   next.openingPhases = next.openingPhases.filter(phase => !deletedIds.has(phase.lineId))
+  next.lineDrafts = (next.lineDrafts ?? []).filter(draft => !deletedIds.has(draft.lineId))
+  if (!next.lineDrafts.length) delete next.lineDrafts
   return pruneOrphanStations(next)
 }
 
@@ -211,6 +213,8 @@ export function deleteStationConsistently(project: ActualRouteProject, stationId
   next.stationLineRelations = next.stationLineRelations.filter((relation) => relation.stationId !== stationId)
   next.geometry.segments = next.geometry.segments.filter((segment) => segment.fromStationId !== stationId && segment.toStationId !== stationId)
   next.lines.forEach((line) => { line.stationSequence = line.stationSequence.filter((id) => id !== stationId) })
+  next.lineDrafts = (next.lineDrafts ?? []).filter(draft => draft.anchorStationId !== stationId)
+  if (!next.lineDrafts.length) delete next.lineDrafts
   return pruneOrphanStations(next)
 }
 
@@ -221,6 +225,8 @@ export function pruneOrphanStations(project: ActualRouteProject): ActualRoutePro
   const stationIds = new Set(next.stations.map((station) => station.id))
   next.lines.forEach((line) => { line.stationSequence = line.stationSequence.filter((id) => stationIds.has(id)) })
   next.geometry.segments = next.geometry.segments.filter((segment) => stationIds.has(segment.fromStationId) && stationIds.has(segment.toStationId))
+  next.lineDrafts = (next.lineDrafts ?? []).filter(draft => draft.anchorStationId ? stationIds.has(draft.anchorStationId) : false)
+  if (!next.lineDrafts.length) delete next.lineDrafts
   const segmentIds = new Set(next.geometry.segments.map(segment => segment.id)), relationIds = new Set(next.stationLineRelations.map(relation => relation.id))
   next.openingPhases.forEach(phase => { phase.segmentIds = phase.segmentIds.filter(id => segmentIds.has(id)); phase.stationRelationIds = phase.stationRelationIds.filter(id => relationIds.has(id)); phase.overriddenSegmentIds = phase.overriddenSegmentIds?.filter(id => segmentIds.has(id)); phase.overriddenStationRelationIds = phase.overriddenStationRelationIds?.filter(id => relationIds.has(id)) })
   return next

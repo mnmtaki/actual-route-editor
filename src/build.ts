@@ -1,1 +1,1 @@
-export const BUILD_VERSION = '2026-09-14-repeated-operation-history-81-2'
+export const BUILD_VERSION = '2026-09-15-persistent-line-drafts-82'

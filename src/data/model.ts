@@ -158,9 +158,27 @@ export type PresentationCameraMode = 'fixed' | 'follow'
 export type PresentationResolution = '1920x1080' | '1080x1920' | '1280x720'
 export interface PresentationSettings { startDate: string; endDate: string; eventDuration: number; growthSpeedKmPerSecond: number; stationOpeningDuration: number; pauseDuration: number; cameraViewWidth: number; overviewAfterEachPhase: boolean; overviewHoldDuration: number; fps: 30 | 60; cameraMode: PresentationCameraMode; resolution: PresentationResolution; showLabels: boolean; showForeignStationNames: boolean; showDate: boolean; showOperatingLength: boolean; showStationCount: boolean; showBackground: boolean; showLegend: boolean; title: string }
 export interface ProjectSettings { lineWidth: number; stationSize: number; stationStyleId: string; transferMinorAxis: number; transferEndPadding: number; transferDotGap: number; stationLabelSize: number; stationLabelFontFamily: string; stationLabelFontWeight: number; stationLabelColor: string; stationForeignLabelSize: number; stationForeignLabelFontFamily: string; stationForeignLabelFontWeight: number; stationForeignLabelColor: string; foreignLabelGap: number; defaultLabelDirection: LabelDirection; defaultLabelDistance: number; defaultStationLabelRotation: number; transferHeightRatio: number; transferGapRatio: number; transferPaddingRatio: number; labelsVisible: boolean; showForeignStationNames: boolean; gridVisible: boolean; exportBackground: boolean; worldUnitsPerKm: number; /** Reference AARC width ratio used only when scaling source-width-aware imported lines. */ aarcLineWidthReferenceRatio?: number }
-export interface BasemapPathPoint { id: string; x: number; y: number }
+export interface BasemapPathPoint {
+  id: string
+  x: number
+  y: number
+  /** AARC control-point identity and direction semantics retained for exact terrain formalization. */
+  aarcPointId?: number
+  aarcDir?: 0 | 1
+  aarcFree?: boolean
+}
 export type BasemapPathCategory = 'water' | 'terrain' | 'other'
-export interface BasemapPath { id: string; name?: string; category: BasemapPathCategory; points: BasemapPathPoint[]; color: string; width: number; opacity: number; closed: boolean; isFilled: boolean; zIndex: number; visible: boolean; locked: boolean; source?: SourceMetadata }
+export type BasemapPathLineCap = 'butt' | 'round' | 'square'
+export interface AarcBasemapGeometry {
+  kind: 'aarc'
+  lineTurnAreaRadius: number
+  lineWidthBase: number
+  lineCarpetWiden: number
+  backgroundColor: string
+  removeCarpet?: boolean
+}
+export type BasemapPathGeometry = AarcBasemapGeometry
+export interface BasemapPath { id: string; name?: string; category: BasemapPathCategory; points: BasemapPathPoint[]; color: string; width: number; opacity: number; closed: boolean; isFilled: boolean; zIndex: number; visible: boolean; locked: boolean; lineCap?: BasemapPathLineCap; geometry?: BasemapPathGeometry; source?: SourceMetadata }
 export type RoadStyleLineCap = 'butt' | 'round' | 'square'
 export type RoadStyleLineJoin = 'miter' | 'round' | 'bevel'
 export interface RoadStyleLayer { id: string; color: string; width: number; opacity: number; dash?: number[]; lineCap: RoadStyleLineCap; lineJoin: RoadStyleLineJoin }

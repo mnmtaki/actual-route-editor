@@ -119,7 +119,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
       const point = pointMap.get(pointId), position = point ? validPosition(point.pos) : null
       if (!point) { warnings.push(`AARC 底图路径 ${sourceLineId} 引用了不存在的 Point ${pointId}`); return [] }
       if (!position) { warnings.push(`AARC 底图路径 ${sourceLineId} 的 Point ${pointId} 缺少有效 pos，已跳过`); return [] }
-      return [{ id: `aarc-basemap-point-${sourceLineId}-${pointId}-${pointIndex}`, x: position[0], y: position[1] }]
+      return [{ id: `aarc-basemap-point-${sourceLineId}-${pointId}-${pointIndex}`, x: position[0], y: position[1], aarcPointId: pointId, aarcDir: point.dir === 1 ? 1 as const : 0 as const, ...(point.free === true ? { aarcFree: true } : {}) }]
     })
     if (points.length < 2) { warnings.push(`AARC 底图路径 ${sourceLineId} 少于两个有效路径点，已跳过`); return [] }
     const repeated = points[0].id === points.at(-1)?.id || (points[0].x === points.at(-1)?.x && points[0].y === points.at(-1)?.y)
@@ -131,7 +131,11 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
     if (rawLine.zIndex !== undefined && rawLine.zIndex !== null && !Number.isFinite(rawZIndex)) warnings.push(`AARC 地形路径 ${sourceLineId} 的 zIndex 无效，已使用默认层级 0`)
     const closed = rawLine.isFilled === true || repeated
     const terrainMetrics = resolveAarcTerrainSourceMetrics(width.raw, source.config.lineWidth)
-    const path: BasemapPath = { id: `aarc-basemap-${sourceLineId}`, ...(typeof rawLine.name === 'string' && rawLine.name ? { name: rawLine.name } : {}), category: appearance.category, points, color: appearance.color, width: terrainMetrics.sourcePhysicalWidth, opacity: 1, closed, isFilled: rawLine.isFilled === true, zIndex, visible: true, locked: false, source: { format: 'aarc', sourceLineId, sourceWidthRatio: terrainMetrics.widthRatio, sourcePhysicalWidth: terrainMetrics.sourcePhysicalWidth, sourceColor: typeof rawLine.color === 'string' ? rawLine.color : undefined, sourceColorPre: finiteNumber(rawLine.colorPre), sourceStyleId: finiteNumber(rawLine.style), sourceZIndex: zIndex, kind: 'terrain', raw: cloneRecord(rawLine) } }
+    const sourceTurnRadius = finiteNumber(source.config.lineTurnAreaRadius)
+    const sourceLineWidthBase = finiteNumber(source.config.lineWidth)
+    const sourceCarpetWiden = finiteNumber(source.config.lineCarpetWiden)
+    const terrainGeometry = { kind: 'aarc' as const, lineTurnAreaRadius: sourceTurnRadius !== undefined && sourceTurnRadius >= 0 ? sourceTurnRadius : 30, lineWidthBase: sourceLineWidthBase !== undefined && sourceLineWidthBase > 0 ? sourceLineWidthBase : 14, lineCarpetWiden: sourceCarpetWiden !== undefined && sourceCarpetWiden >= 0 ? sourceCarpetWiden : 7, backgroundColor: typeof source.config.bgColor === 'string' && source.config.bgColor ? source.config.bgColor : '#ffffff', ...(rawLine.removeCarpet === true ? { removeCarpet: true } : {}) }
+    const path: BasemapPath = { id: `aarc-basemap-${sourceLineId}`, ...(typeof rawLine.name === 'string' && rawLine.name ? { name: rawLine.name } : {}), category: appearance.category, points, color: appearance.color, width: terrainMetrics.sourcePhysicalWidth, opacity: 1, closed, isFilled: rawLine.isFilled === true, zIndex, visible: true, locked: false, ...(rawLine.cap === 'butt' || rawLine.cap === 'round' || rawLine.cap === 'square' ? { lineCap: rawLine.cap } : {}), geometry: terrainGeometry, source: { format: 'aarc', sourceLineId, sourceWidthRatio: terrainMetrics.widthRatio, sourcePhysicalWidth: terrainMetrics.sourcePhysicalWidth, sourceColor: typeof rawLine.color === 'string' ? rawLine.color : undefined, sourceColorPre: finiteNumber(rawLine.colorPre), sourceStyleId: finiteNumber(rawLine.style), sourceZIndex: zIndex, kind: 'terrain', raw: cloneRecord(rawLine) } }
     return [path]
   })
   const stations: Station[] = []

@@ -20,7 +20,10 @@ jobs:
           node-version: 22.19.0
           cache: npm
       - name: Apply focused AARC terrain compatibility patch
-        run: python .github/temp-aarc-terrain-patch.py
+        shell: bash
+        run: |
+          python .github/temp-aarc-terrain-patch.py
+          sed -i 's/!== null/!== undefined/g' src/import-export/aarc.ts
       - name: Install
         run: npm ci
       - name: Typecheck

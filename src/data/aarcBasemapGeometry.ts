@@ -25,6 +25,7 @@ interface FormalSeg {
 }
 
 export interface AarcBasemapFormalPoint extends Coord {
+  afterIdxEqv: number
   free?: boolean
 }
 
@@ -37,7 +38,7 @@ export function formalizeAarcBasemapPoints(points: BasemapPathPoint[]): AarcBase
     dir: point.aarcDir === 1 ? 1 : 0,
     free: point.aarcFree === true,
   }))
-  if (controls.length < 2) return controls.map(point => ({ x: point.x, y: point.y, ...(point.free ? { free: true } : {}) }))
+  if (controls.length < 2) return controls.map((point, index) => ({ x: point.x, y: point.y, afterIdxEqv: index, ...(point.free ? { free: true } : {}) }))
 
   const ring = controls.length > 2 && controls[0].key === controls.at(-1)!.key
   const segs: FormalSeg[] = []
@@ -52,10 +53,10 @@ export function formalizeAarcBasemapPoints(points: BasemapPathPoint[]): AarcBase
   if (!segs.length) return []
   if (ring) { segs.shift(); segs.pop() }
 
-  const result: AarcBasemapFormalPoint[] = [{ x: segs[0].a.x, y: segs[0].a.y, ...(segs[0].aFree ? { free: true } : {}) }]
-  for (const seg of segs) {
-    for (const point of seg.itp) result.push({ x: point.x, y: point.y })
-    result.push({ x: seg.b.x, y: seg.b.y, ...(seg.bFree ? { free: true } : {}) })
+  const result: AarcBasemapFormalPoint[] = [{ x: segs[0].a.x, y: segs[0].a.y, afterIdxEqv: 0, ...(segs[0].aFree ? { free: true } : {}) }]
+  for (const [index, seg] of segs.entries()) {
+    for (const point of seg.itp) result.push({ x: point.x, y: point.y, afterIdxEqv: index })
+    result.push({ x: seg.b.x, y: seg.b.y, afterIdxEqv: index + 1, ...(seg.bFree ? { free: true } : {}) })
   }
   return result
 }

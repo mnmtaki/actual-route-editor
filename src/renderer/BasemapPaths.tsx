@@ -1,5 +1,6 @@
 import type { ActualRouteProject, BasemapPath } from '../data/model'
 import { getBasemapPathD, sortedBasemapPaths } from '../data/basemapPaths'
+import { buildAarcTerrainTransitionPaths } from '../data/aarcTerrainTransitions'
 
 export function BasemapPathArtwork({ path, presentation, selected, hitRadius, onPathPointerDown, onPointPointerDown }: {
   path: BasemapPath
@@ -25,6 +26,15 @@ export function BasemapPathArtwork({ path, presentation, selected, hitRadius, on
     </g>
 }
 
+export function AarcTerrainTransitionsArtwork({ project, part }: { project: ActualRouteProject; part: 'carpet' | 'body' }) {
+  const transitions = buildAarcTerrainTransitionPaths(project.basemapPaths ?? [])
+  if (!transitions.length) return null
+  return <g data-aarc-terrain-transitions={part}>{transitions.map(transition => part === 'carpet'
+    ? <path key={transition.id} data-aarc-terrain-transition-id={transition.id} d={transition.d} fill="none" stroke={transition.carpetColor} strokeWidth={transition.carpetWidth} strokeLinejoin="round" pointerEvents="none" />
+    : <path key={transition.id} data-aarc-terrain-transition-id={transition.id} d={transition.d} fill={transition.color} stroke="none" pointerEvents="none" />
+  )}</g>
+}
+
 export function BasemapPathsLayer({ project, presentation = false, selectedId, hitRadius = 22, onPathPointerDown, onPointPointerDown }: {
   project: ActualRouteProject
   presentation?: boolean
@@ -33,5 +43,5 @@ export function BasemapPathsLayer({ project, presentation = false, selectedId, h
   onPathPointerDown?: (event: React.PointerEvent<SVGPathElement>, path: BasemapPath) => void
   onPointPointerDown?: (event: React.PointerEvent<SVGCircleElement>, path: BasemapPath, pointId: string) => void
 }) {
-  return <g data-layer="basemap-paths">{sortedBasemapPaths(project.basemapPaths).filter(path => path.visible).map(path => <BasemapPathArtwork key={path.id} path={path} presentation={presentation} selected={selectedId === path.id} hitRadius={hitRadius} onPathPointerDown={onPathPointerDown} onPointPointerDown={onPointPointerDown} />)}</g>
+  return <g data-layer="basemap-paths"><AarcTerrainTransitionsArtwork project={project} part="carpet" />{sortedBasemapPaths(project.basemapPaths).filter(path => path.visible).map(path => <BasemapPathArtwork key={path.id} path={path} presentation={presentation} selected={selectedId === path.id} hitRadius={hitRadius} onPathPointerDown={onPathPointerDown} onPointPointerDown={onPointPointerDown} />)}<AarcTerrainTransitionsArtwork project={project} part="body" /></g>
 }

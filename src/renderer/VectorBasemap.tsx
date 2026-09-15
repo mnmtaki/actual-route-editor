@@ -1,6 +1,6 @@
 import type { ActualRouteProject, Road } from '../data/model'
 import { sortedVectorBasemapObjects } from '../data/roads'
-import { BasemapPathArtwork } from './BasemapPaths'
+import { AarcTerrainTransitionsArtwork, BasemapPathArtwork } from './BasemapPaths'
 import { RoadArtwork } from './Roads'
 
 export function VectorBasemapLayer({
@@ -25,6 +25,7 @@ export function VectorBasemapLayer({
   onRoadPointPointerDown?: React.ComponentProps<typeof RoadArtwork>['onPointPointerDown']
 }) {
   return <g data-layer="vector-basemap">
+    <AarcTerrainTransitionsArtwork project={project} part="carpet" />
     {sortedVectorBasemapObjects(project).map(item => {
       if (item.kind === 'basemap') {
         const path = item.object as import('../data/model').BasemapPath
@@ -35,6 +36,7 @@ export function VectorBasemapLayer({
       if (!road.visible) return null
       return <RoadArtwork key={`road-${road.id}`} road={road} project={project} presentation={presentation} selected={selectedId === road.id} hitRadius={hitRadius} onPointerDown={onRoadPointerDown} onPointPointerDown={onRoadPointPointerDown} />
     })}
+    <AarcTerrainTransitionsArtwork project={project} part="body" />
     {draft && <RoadArtwork road={draft} project={project} presentation={false} selected hitRadius={hitRadius} onPointerDown={onRoadPointerDown} onPointPointerDown={onRoadPointPointerDown} />}
   </g>
 }

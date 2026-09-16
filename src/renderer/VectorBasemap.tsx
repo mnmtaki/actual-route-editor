@@ -7,6 +7,7 @@ import { AarcTextTagsLayer } from './AarcTextTags'
 export function VectorBasemapLayer({
   project,
   presentation = false,
+  visibleLineIds,
   selectedId,
   hitRadius = 22,
   draft,
@@ -17,6 +18,7 @@ export function VectorBasemapLayer({
 }: {
   project: ActualRouteProject
   presentation?: boolean
+  visibleLineIds?: Set<string>
   selectedId?: string
   hitRadius?: number
   draft?: Road | null
@@ -38,7 +40,7 @@ export function VectorBasemapLayer({
       return <RoadArtwork key={`road-${road.id}`} road={road} project={project} presentation={presentation} selected={selectedId === road.id} hitRadius={hitRadius} onPointerDown={onRoadPointerDown} onPointPointerDown={onRoadPointPointerDown} />
     })}
     <AarcTerrainTransitionsArtwork project={project} part="body" />
-    <AarcTextTagsLayer project={project} presentation={presentation} mode="sunken" />
+    <AarcTextTagsLayer project={project} presentation={presentation} visibleLineIds={visibleLineIds} mode="sunken" />
     {draft && <RoadArtwork road={draft} project={project} presentation={false} selected hitRadius={hitRadius} onPointerDown={onRoadPointerDown} onPointPointerDown={onRoadPointPointerDown} />}
   </g>
 }

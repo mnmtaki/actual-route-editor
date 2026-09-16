@@ -70,8 +70,9 @@ export function getOrientationAnchorLine(project: ActualRouteProject, stationId:
 }
 export type ActiveSegment = Segment & { effectiveLineIdAtCurrentDate: string }
 export function getActiveNetworkAtTime(project: ActualRouteProject, time: string) {
-  // Keep fake lines/segments in the drawable network. Passenger relations and
-  // station identity are filtered through isStationLineServiceActiveAt above.
+  // Keep fake lines available as drawable entities. Imported AARC fake lines use
+  // the dedicated source-faithful AarcFakeLines layer while fake; native/editor
+  // fake lines keep using their ordinary segment artwork.
   const lines = project.lines.filter(line => line.visible && isLineOperationalAt(line, time))
   const lineIds = new Set(lines.map(line => line.id))
   const relations = project.stationLineRelations.filter(relation => lineIds.has(relation.lineId) && isStationLineServiceActiveAt(project, relation, time))
@@ -82,6 +83,8 @@ export function getActiveNetworkAtTime(project: ActualRouteProject, time: string
     if (!isSegmentOperationalAt(segment, time)) return []
     const effectiveLineIdAtCurrentDate = resolveSegmentLineAt(segment, time)
     if (!lineIds.has(effectiveLineIdAtCurrentDate)) return []
+    const effectiveLine = project.lines.find(line => line.id === effectiveLineIdAtCurrentDate)
+    if (effectiveLine && isFakeLine(effectiveLine) && effectiveLine.source?.format === 'aarc') return []
     return [{ ...segment, lineId: effectiveLineIdAtCurrentDate, effectiveLineIdAtCurrentDate }]
   })
   return { lines, stations, relations, segments }

@@ -123,7 +123,10 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
   )
   warnings.push(...compoundDetection.warnings)
 
-  const allNamePoints = stationPointInputs.map(point => ({ id: point.id, ...(point.name ? { name: point.name } : {}), ...(point.nameS ? { nameS: point.nameS } : {}), sourceOrder: point.sourceOrder }))
+  // AARC getStaName() builds its lookup graph from every save point, not only
+  // sta=1 points. Plain control points can therefore bridge pointLinks during
+  // fallback name lookup even though they never participate in auto-clustering.
+  const allNamePoints = [...pointMap.entries()].map(([id, point], sourceOrder) => ({ id, ...(typeof point.name === 'string' && point.name.length ? { name: point.name } : {}), ...(typeof point.nameS === 'string' && point.nameS.length ? { nameS: point.nameS } : {}), sourceOrder }))
   const resolvedStationNames = new Map<number, ReturnType<typeof resolveAarcStationName>>()
   for (const point of stationPointInputs) resolvedStationNames.set(point.id, resolveAarcStationName(point.id, allNamePoints, source.pointLinks, stationClustering.components))
 
@@ -183,10 +186,16 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
       if (!point || !position) { warnings.push(`AARC Station Point ${pointId} 缺少有效 pos，已跳过`); return }
       const nameP = validPair(point.nameP)
       const resolvedName = resolvedStationNames.get(pointId)
+      const ownName = text(point.name)
+      const ownNameS = typeof point.nameS === 'string' && point.nameS.length ? point.nameS : undefined
+      const borrowedName = resolvedName?.name && !resolvedName.name.startsWith('#') ? resolvedName.name : undefined
       const station: Station = {
         id: `aarc-station-${pointId}`,
-        name: resolvedName?.name && !resolvedName.name.startsWith('#') ? resolvedName.name : (text(point.name) || `未命名站 ${pointId}`),
-        ...(resolvedName?.nameSub ? { nameS: resolvedName.nameSub } : typeof point.nameS === 'string' && point.nameS.length ? { nameS: point.nameS } : {}),
+        // Preserve the source point's own text exactly when present (including
+        // line breaks). AARC fallback name lookup supplies only an unnamed
+        // source point's display name; it must not overwrite source identity.
+        name: ownName ?? borrowedName ?? `未命名站 ${pointId}`,
+        ...(ownNameS !== undefined ? { nameS: ownNameS } : resolvedName?.nameSub ? { nameS: resolvedName.nameSub } : {}),
         ...(point.free === true ? { free: true } : {}),
         x: position[0], y: position[1],
         labelOffsetX: nameP?.[0] ?? 14,

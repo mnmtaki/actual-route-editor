@@ -173,6 +173,17 @@ function candidateSetsCling(a: Required<AarcStationSnapInfo>, b: Required<AarcSt
   return false
 }
 
+export function buildAarcStationComponents(
+  points: AarcStationPointInput[],
+  memberships: Map<number, number[]>,
+  options?: LegacyClusteringOptions,
+): AarcStationClusteringResult
+export function buildAarcStationComponents(
+  points: AarcStationPointInput[],
+  memberships: Map<number, number[]>,
+  rawPointLinks: unknown,
+  options: LegacyClusteringOptions,
+): AarcStationClusteringResult
 /**
  * Build AARC's automatic station components.
  *

@@ -57,6 +57,10 @@ function sourcePoints(project: ActualRouteProject): RawAarcPoint[] {
   const raw = sourceSave(project).points
   return Array.isArray(raw) ? raw.filter((item): item is RawAarcPoint => Boolean(item && typeof item === 'object')) : []
 }
+function nativeLineForSource(project: ActualRouteProject, sourceId: number | undefined) {
+  if (sourceId === undefined) return undefined
+  return project.lines.find(line => Number(line.source?.sourceLineId ?? line.source?.lineId) === sourceId)
+}
 
 /** Only explicit upstream isFake=true lines belong in this visual-only layer.
  * project.aarc.fakeLines also contains some non-passenger helper lines kept for
@@ -107,14 +111,16 @@ function resolveSourceStyleId(line: RawAarcLine, lines: RawAarcLine[], seen = ne
 }
 
 function FakeLineArtwork({ project, line }: { project: ActualRouteProject; line: RawAarcLine }) {
+  const sourceId = idValue(line.id)
+  const native = nativeLineForSource(project, sourceId)
+  if (native && !native.visible) return null
   const path = buildAarcFakeLinePath(project, line)
   if (!path) return null
   const config = project.aarc?.config ?? {}
   const bodyWidth = Math.max(0.01, (numberValue(config.lineWidth) ?? 14) * Math.max(0.01, numberValue(line.width) ?? 1))
   const carpetWiden = Math.max(0, numberValue(config.lineCarpetWiden) ?? 7)
   const bg = colorValue(config.bgColor, '#ffffff')
-  const color = colorValue(line.color)
-  const sourceId = idValue(line.id)
+  const color = colorValue(native?.color ?? line.color)
   const isTerrain = numberValue(line.type) === 1
   const lineCap = line.cap === 'round' || line.cap === 'square' || line.cap === 'butt' ? line.cap : isTerrain ? 'round' : 'butt'
   const allLines = sourceLines(project)
@@ -171,6 +177,7 @@ function FakeOnlyStations({ project }: { project: ActualRouteProject }) {
     const pointId = idValue(point.id), pos = pairValue(point.pos)
     if (pointId === undefined || !onlyFake.has(pointId) || numberValue(point.sta) !== 1 || !pos) return []
     const memberships = lines.filter(line => Array.isArray(line.pts) && line.pts.some(value => idValue(value) === pointId))
+    if (memberships.length && memberships.every(line => nativeLineForSource(project, idValue(line.id))?.visible === false)) return []
     const sizeRatio = memberships.length ? Math.max(...memberships.map(line => resolveAarcLineMetrics(line, config).ptSize)) : 1
     const radius = baseRadius * sizeRatio
     const nameP = pairValue(point.nameP), primary = textValue(point.name), secondary = textValue(point.nameS)

@@ -1,3 +1,5 @@
+import { formalizeAarcControlPoints } from '../geometry/aarcFormalize'
+
 export interface AarcGeometryPoint {
   id: number
   x: number
@@ -59,29 +61,47 @@ const VECTORS: Record<AarcOrientation, Vector> = {
 
 export function reconstructAarcLineGeometry(points: AarcGeometryPoint[]): AarcGeometryResult {
   if (!points.length) return { orientations: [], nodes: [], stats: emptyStats() }
-  const anchors = points.map((point, sourceIndex) => ({ point, sourceIndex })).filter(value => value.point.station)
-  if (!anchors.length) return explicitOnlyGeometry(points)
-  const intervals = buildStationIntervals(points, anchors)
-  const runCount = detectLegalCollinearRuns(intervals)
-  const stationDirections = resolveStationAnchorDirections(anchors, intervals)
-  const orientations: Array<AarcOrientation | null> = points.map(() => null)
-  anchors.forEach((anchor, index) => { orientations[anchor.sourceIndex] = stationDirections[index] })
-  // Reconstruct the complete source chain.  The previous implementation
-  // solved only station-to-station intervals and then selected one
-  // orientation per station, which could insert a corner even when the
-  // source pair was already a legal H/V/45 degree edge.  Source points
-  // (including sta:0 controls) are now always emitted in source order and
-  // implicit points are inserted only for an illegal adjacent pair.
-  const chain = reconstructSourceChain(points)
-  const nodes: AarcSkeletonNode[] = chain.nodes
+
+  // IMPORTANT: AARC itself does not use sta to decide how geometry is formalized.
+  // Transit lines and terrain must therefore share this exact control-point path.
+  const formal = formalizeAarcControlPoints(points.map(point => ({
+    id: point.id,
+    x: point.x,
+    y: point.y,
+    dir: point.dir,
+    free: point.free === true,
+  })))
+  const nodes: AarcSkeletonNode[] = formal.map(point => ({
+    x: point.x,
+    y: point.y,
+    ...(point.sourcePointIndex !== undefined ? { sourcePointIndex: point.sourcePointIndex } : {}),
+    implicit: point.sourcePointIndex === undefined,
+    ...(point.free ? { free: true } : {}),
+  }))
+
   const stats = measureNodes(nodes)
-  stats.legalCollinearRunCount = runCount
-  stats.lockedDirectEdgeCount = intervals.filter(interval => interval.lockedDirect).length
   stats.sourceLegCount = Math.max(0, points.length - 1)
-  stats.directLegCount = chain.directLegCount
-  stats.oneImplicitReconstructionCount = chain.oneImplicitReconstructionCount
-  stats.twoImplicitReconstructionCount = chain.twoImplicitReconstructionCount
-  stats.unresolvedCount = chain.unresolvedCount
+  const implicitBySourceLeg = new Map<number, number>()
+  for (const point of formal) {
+    if (point.sourcePointIndex !== undefined) continue
+    implicitBySourceLeg.set(point.afterIdxEqv, (implicitBySourceLeg.get(point.afterIdxEqv) ?? 0) + 1)
+  }
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const implicit = implicitBySourceLeg.get(index) ?? 0
+    if (implicit === 0) stats.directLegCount += 1
+    else if (implicit === 1) stats.oneImplicitReconstructionCount += 1
+    else if (implicit === 2) stats.twoImplicitReconstructionCount += 1
+  }
+
+  // Preserve the historical orientation diagnostics, but they no longer decide
+  // where geometry points are inserted. Geometry is exclusively AARC formalize.
+  const orientations = resolveAarcDirections(points)
+  const anchors = points.map((point, sourceIndex) => ({ point, sourceIndex })).filter(value => value.point.station)
+  if (anchors.length >= 2) {
+    const intervals = buildStationIntervals(points, anchors)
+    stats.legalCollinearRunCount = detectLegalCollinearRuns(intervals)
+    stats.lockedDirectEdgeCount = intervals.filter(interval => interval.lockedDirect).length
+  }
   return { orientations, nodes, stats }
 }
 

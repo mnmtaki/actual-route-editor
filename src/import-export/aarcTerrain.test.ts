@@ -5,6 +5,9 @@ import rawMinimal from './__fixtures__/测试.aarc (1).json'
 import { convertAarcToActualRouteProject } from './aarc'
 import { parseProjectJson, serializeProject } from './projectJson'
 import { isValidAarcTerrainColor, parseAarcTerrainWidth, resolveAarcTerrainAppearance, resolveAarcTerrainPreset, resolveAarcTerrainSourceMetrics } from './aarcTerrain'
+import { getBasemapPathD } from '../data/basemapPaths'
+import { formalizeAarcBasemapPoints } from '../data/aarcBasemapGeometry'
+import { reconstructAarcLineGeometry } from './aarcGeometry'
 
 describe('AARC terrain calibration', () => {
   it('resolves known presets before raw colors', () => {
@@ -54,6 +57,45 @@ describe('AARC type=1 terrain importer', () => {
     expect(project.basemapPaths?.[0]?.points.map(point => [point.x, point.y])).toEqual([[0, 0], [10, 0], [20, 0]])
   })
 
+  it('preserves AARC dir/free semantics and reconstructs implicit terrain geometry', () => {
+    const raw = {
+      cvsSize: [100, 100],
+      config: { lineWidth: 10, lineTurnAreaRadius: 30, lineCarpetWiden: 6, bgColor: '#f5f5f5' },
+      points: [
+        { id: 1, pos: [0, 0], sta: 0, dir: 0 },
+        { id: 2, pos: [20, 10], sta: 0, dir: 0 },
+      ],
+      lines: [{ id: 20, name: 'T', type: 1, pts: [1, 2], width: 1, color: '#123456', cap: 'butt' }],
+    }
+    const { project } = convertAarcToActualRouteProject(raw)
+    const path = project.basemapPaths![0]
+    expect(path.points).toMatchObject([
+      { aarcPointId: 1, aarcDir: 0 },
+      { aarcPointId: 2, aarcDir: 0 },
+    ])
+    expect(path.geometry).toEqual({ kind: 'aarc', lineTurnAreaRadius: 30, lineWidthBase: 10, lineCarpetWiden: 6, backgroundColor: '#f5f5f5' })
+    expect(path.lineCap).toBe('butt')
+    expect(formalizeAarcBasemapPoints(path.points).map(point => [point.x, point.y])).toEqual([[0, 0], [5, 0], [15, 10], [20, 10]])
+    expect(getBasemapPathD(path)).toContain(' A ')
+    expect(getBasemapPathD(path)).not.toBe('M 0 0 L 20 10')
+  })
+
+  it('keeps free-point terrain legs direct while retaining arbitrary-angle rounding', () => {
+    const raw = {
+      cvsSize: [120, 120],
+      points: [
+        { id: 1, pos: [0, 0], sta: 0, dir: 0 },
+        { id: 2, pos: [23, 17], sta: 0, dir: 1, free: true },
+        { id: 3, pos: [80, 17], sta: 0, dir: 0 },
+      ],
+      lines: [{ id: 20, name: 'free terrain', type: 1, pts: [1, 2, 3], width: 1, color: '#123456' }],
+    }
+    const path = convertAarcToActualRouteProject(raw).project.basemapPaths![0]
+    expect(path.points[1]).toMatchObject({ aarcPointId: 2, aarcDir: 1, aarcFree: true })
+    expect(formalizeAarcBasemapPoints(path.points).map(point => [point.x, point.y])).toEqual([[0, 0], [23, 17], [80, 17]])
+    expect(getBasemapPathD(path)).toContain(' A ')
+  })
+
   it('preserves 平岚 terrain colors, widths, stacking and every source point', () => {
     const { project } = convertAarcToActualRouteProject(rawPinglan, '平岚.aarc (9).json')
     const sourcePoints = new Map((rawPinglan.points as unknown as Array<{ id: number; pos: [number, number] }>).map(point => [point.id, point.pos]))
@@ -97,4 +139,15 @@ describe('AARC type=1 terrain importer', () => {
     const restored = parseProjectJson(serializeProject(original))
     expect(restored.basemapPaths).toEqual(original.basemapPaths)
   })
+  it('uses identical AARC formalize geometry for transit lines and terrain', () => {
+    const controls = [
+      { id: 1, x: 0, y: 0, dir: 0 as const, station: true },
+      { id: 2, x: 20, y: 10, dir: 0 as const, station: false },
+      { id: 3, x: 30, y: 10, dir: 1 as const, station: true },
+    ]
+    const line = reconstructAarcLineGeometry(controls).nodes.map(point => [point.x, point.y])
+    const terrain = formalizeAarcBasemapPoints(controls.map(point => ({ id: String(point.id), x: point.x, y: point.y, aarcPointId: point.id, aarcDir: point.dir }))).map(point => [point.x, point.y])
+    expect(line).toEqual(terrain)
+  })
+
 })

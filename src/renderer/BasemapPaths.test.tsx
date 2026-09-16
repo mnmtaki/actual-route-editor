@@ -30,4 +30,18 @@ describe('BasemapPathsLayer', () => {
     expect(path.getAttribute('stroke')).toBe('none')
     expect(path.getAttribute('stroke-width')).toBe('0')
   })
+
+  it('renders AARC terrain carpet and explicit endpoint cap from preserved source semantics', () => {
+    const project = createEmptyProject()
+    project.basemapPaths = [{ id: 'aarc-stroke', category: 'water', points: [{ id: 'a', x: 0, y: 0, aarcPointId: 1, aarcDir: 0 }, { id: 'b', x: 40, y: 0, aarcPointId: 2, aarcDir: 0 }], color: '#123456', width: 20, opacity: 1, closed: false, isFilled: false, zIndex: 0, visible: true, locked: false, lineCap: 'butt', geometry: { kind: 'aarc', lineTurnAreaRadius: 30, lineWidthBase: 10, lineCarpetWiden: 7, backgroundColor: '#eeeeee' }, source: { format: 'aarc', sourceLineId: 20 } }]
+    const { container } = render(createElement('svg', null, createElement(BasemapPathsLayer, { project })))
+    const group = container.querySelector('[data-basemap-path-id="aarc-stroke"]')!
+    const carpet = group.querySelector('[data-aarc-terrain-carpet="true"]')!
+    const body = group.querySelector('path:not([data-aarc-terrain-carpet])')!
+    expect(carpet.getAttribute('stroke')).toBe('#eeeeee')
+    expect(carpet.getAttribute('stroke-width')).toBe('27')
+    expect(carpet.getAttribute('stroke-linecap')).toBe('round')
+    expect(body.getAttribute('stroke-linecap')).toBe('butt')
+  })
+
 })

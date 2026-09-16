@@ -119,7 +119,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
       const point = pointMap.get(pointId), position = point ? validPosition(point.pos) : null
       if (!point) { warnings.push(`AARC 底图路径 ${sourceLineId} 引用了不存在的 Point ${pointId}`); return [] }
       if (!position) { warnings.push(`AARC 底图路径 ${sourceLineId} 的 Point ${pointId} 缺少有效 pos，已跳过`); return [] }
-      return [{ id: `aarc-basemap-point-${sourceLineId}-${pointId}-${pointIndex}`, x: position[0], y: position[1] }]
+      return [{ id: `aarc-basemap-point-${sourceLineId}-${pointId}-${pointIndex}`, x: position[0], y: position[1], aarcPointId: pointId, aarcDir: point.dir === 1 ? 1 as const : 0 as const, ...(point.free === true ? { aarcFree: true } : {}) }]
     })
     if (points.length < 2) { warnings.push(`AARC 底图路径 ${sourceLineId} 少于两个有效路径点，已跳过`); return [] }
     const repeated = points[0].id === points.at(-1)?.id || (points[0].x === points.at(-1)?.x && points[0].y === points.at(-1)?.y)
@@ -131,7 +131,11 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
     if (rawLine.zIndex !== undefined && rawLine.zIndex !== null && !Number.isFinite(rawZIndex)) warnings.push(`AARC 地形路径 ${sourceLineId} 的 zIndex 无效，已使用默认层级 0`)
     const closed = rawLine.isFilled === true || repeated
     const terrainMetrics = resolveAarcTerrainSourceMetrics(width.raw, source.config.lineWidth)
-    const path: BasemapPath = { id: `aarc-basemap-${sourceLineId}`, ...(typeof rawLine.name === 'string' && rawLine.name ? { name: rawLine.name } : {}), category: appearance.category, points, color: appearance.color, width: terrainMetrics.sourcePhysicalWidth, opacity: 1, closed, isFilled: rawLine.isFilled === true, zIndex, visible: true, locked: false, source: { format: 'aarc', sourceLineId, sourceWidthRatio: terrainMetrics.widthRatio, sourcePhysicalWidth: terrainMetrics.sourcePhysicalWidth, sourceColor: typeof rawLine.color === 'string' ? rawLine.color : undefined, sourceColorPre: finiteNumber(rawLine.colorPre), sourceStyleId: finiteNumber(rawLine.style), sourceZIndex: zIndex, kind: 'terrain', raw: cloneRecord(rawLine) } }
+    const sourceTurnRadius = finiteNumber(source.config.lineTurnAreaRadius)
+    const sourceLineWidthBase = finiteNumber(source.config.lineWidth)
+    const sourceCarpetWiden = finiteNumber(source.config.lineCarpetWiden)
+    const terrainGeometry = { kind: 'aarc' as const, lineTurnAreaRadius: sourceTurnRadius !== undefined && sourceTurnRadius >= 0 ? sourceTurnRadius : 30, lineWidthBase: sourceLineWidthBase !== undefined && sourceLineWidthBase > 0 ? sourceLineWidthBase : 14, lineCarpetWiden: sourceCarpetWiden !== undefined && sourceCarpetWiden >= 0 ? sourceCarpetWiden : 7, backgroundColor: typeof source.config.bgColor === 'string' && source.config.bgColor ? source.config.bgColor : '#ffffff', ...(rawLine.removeCarpet === true ? { removeCarpet: true } : {}) }
+    const path: BasemapPath = { id: `aarc-basemap-${sourceLineId}`, ...(typeof rawLine.name === 'string' && rawLine.name ? { name: rawLine.name } : {}), category: appearance.category, points, color: appearance.color, width: terrainMetrics.sourcePhysicalWidth, opacity: 1, closed, isFilled: rawLine.isFilled === true, zIndex, visible: true, locked: false, ...(rawLine.cap === 'butt' || rawLine.cap === 'round' || rawLine.cap === 'square' ? { lineCap: rawLine.cap } : {}), geometry: terrainGeometry, source: { format: 'aarc', sourceLineId, sourceWidthRatio: terrainMetrics.widthRatio, sourcePhysicalWidth: terrainMetrics.sourcePhysicalWidth, sourceColor: typeof rawLine.color === 'string' ? rawLine.color : undefined, sourceColorPre: finiteNumber(rawLine.colorPre), sourceStyleId: finiteNumber(rawLine.style), sourceZIndex: zIndex, kind: 'terrain', raw: cloneRecord(rawLine) } }
     return [path]
   })
   const stations: Station[] = []
@@ -160,6 +164,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
         id: `aarc-station-${pointId}`,
         name: text(point.name) || `未命名站 ${pointId}`,
         ...(typeof point.nameS === 'string' && point.nameS.length ? { nameS: point.nameS } : {}),
+        ...(point.free === true ? { free: true } : {}),
         x: position[0], y: position[1],
         labelOffsetX: nameP?.[0] ?? 14,
         labelOffsetY: nameP?.[1] ?? -14,
@@ -179,7 +184,10 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
       // source point ids in component metadata.
       createStation(component.canonicalPointId)
       const canonical = stationByPoint.get(component.canonicalPointId)
-      if (canonical) for (const pointId of component.pointIds) stationByPoint.set(pointId, canonical)
+      if (canonical) {
+        if (component.pointIds.some(pointId => pointMap.get(pointId)?.free === true)) canonical.free = true
+        for (const pointId of component.pointIds) stationByPoint.set(pointId, canonical)
+      }
     }
   }  // Compound interchanges group passenger identity only. Every source
   // occurrence remains its own Station so the rail geometry stays intact.
@@ -248,12 +256,12 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
           const interval = previousStationSourceIndex === undefined || sourcePointIndex === undefined
             ? { openedAt, closedAt }
             : aggregateAarcInterval(atomicDates, previousStationSourceIndex, sourcePointIndex, { openedAt, closedAt })
-          const sourceFromPointId = previousStation.source?.pointId
+          const sourceFromPointId = previousStationSourceIndex === undefined ? previousStation.source?.pointId : geometryPoints[previousStationSourceIndex]?.id
           const sourceLineForSlices = rawLine as unknown as { id?: unknown; pts?: unknown[] }
           const styleSlice = sourceFromPointId === undefined ? undefined : resolveAarcStyleSliceForInterval(sourceLineForSlices, styleSlices, sourceFromPointId, sourcePoint.id)
           const timeSlice = sourceFromPointId === undefined ? undefined : resolveAarcTimeSliceForInterval(sourceLineForSlices, timeSlices, sourceFromPointId, sourcePoint.id)
           const segmentStyleId = resolveAarcSegmentStyleId(styleSlice?.styleId)
-          const segmentSource = { format: 'aarc' as const, lineId: sourceLineId, sourceLineId, ...(timeSlice?.id !== null && timeSlice?.id !== undefined ? { sourceTimeSliceId: timeSlice.id } : {}), ...(styleSlice?.id !== null && styleSlice?.id !== undefined ? { sourceStyleSliceId: styleSlice.id } : {}), ...(styleSlice?.styleId !== null && styleSlice?.styleId !== undefined ? { sourceStyleId: styleSlice.styleId } : {}), raw: { sourceSegmentIndex: segmentIndex } }
+          const segmentSource = { format: 'aarc' as const, lineId: sourceLineId, sourceLineId, ...(sourceFromPointId !== undefined ? { pointIds: [sourceFromPointId, sourcePoint.id] } : {}), ...(timeSlice?.id !== null && timeSlice?.id !== undefined ? { sourceTimeSliceId: timeSlice.id } : {}), ...(styleSlice?.id !== null && styleSlice?.id !== undefined ? { sourceStyleSliceId: styleSlice.id } : {}), ...(styleSlice?.styleId !== null && styleSlice?.styleId !== undefined ? { sourceStyleId: styleSlice.styleId } : {}), raw: { sourceSegmentIndex: segmentIndex } }
           segments.push({ id: `aarc-segment-${sourceLineId}-${segmentIndex}`, lineId, ...(segmentStyleId !== undefined ? { lineStyleId: segmentStyleId } : {}), fromStationId: previousStation.id, toStationId: station.id, mode: pendingWaypoints.length ? 'rounded' : 'straight', ...(pendingWaypoints.length ? { cornerRadius: 42 } : {}), structureType: 'underground', structureNodes: [], waypoints: pendingWaypoints, openedAt: interval.openedAt, closedAt: interval.closedAt, source: segmentSource })
           segmentIndex += 1
         } else if (pendingWaypoints.length) warnings.push(`AARC 线路 ${sourceLineId} 在首站前的 ${pendingWaypoints.length} 个几何点无法归属区间，已忽略`)

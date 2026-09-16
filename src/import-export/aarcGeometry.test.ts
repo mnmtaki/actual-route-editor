@@ -164,13 +164,13 @@ describe('AARC octilinear chain reconstruction', () => {
     expect(spans.every(span=>[span.start,span.control1,span.control2,span.end].every(point=>point.x>=0&&point.x<=40&&point.y>=0&&point.y<=20))).toBe(true)
   })
 
-  it('renders 禹庄 → 宗盛 as horizontal, compact 45° fillet, then diagonal', () => {
-    const project=imported(),segment=segmentBetween(project,39,40),spans=getSegmentPathSpans(project,segment)
+  it('renders 禹庄 → 宗盛 with the AARC 45° corner radius, then diagonal', () => {
+    const project=imported(),segment=segmentBetween(project,39,40),spans=getSegmentPathSpans(project,segment),line=project.lines.find(item=>item.id===segment.lineId)!
     expect(coordinates(segment)).toEqual([[6350,4500]])
     expect(spans.map(span=>span.linear)).toEqual([true,false,true])
-    expect(spans[0].end.x).toBeCloseTo(6332.60303,5);expect(spans[0].end.y).toBe(4500)
-    expect(spans[1].control1.x-spans[1].start.x).toBeCloseTo(11.13909,4)
-    expect(spans[1].end.x-6350).toBeCloseTo(12.30152,4)
+    const config=project.aarc?.config??{},widthRatio=Number(line.source?.sourceWidthRatio??1),base=(Number(config.lineTurnAreaRadius??30)+Number(config.lineWidth??14)/2)*widthRatio,trim=base/(2.4142135*.618)
+    expect(spans[0].end.x).toBeCloseTo(6350-trim,6);expect(spans[0].end.y).toBe(4500)
+    expect(spans[1].end.x-6350).toBeCloseTo(trim/Math.SQRT2,6)
     expect(spans.at(-1)?.end).toMatchObject({x:6450,y:4600})
   })
   it('produces only horizontal, vertical, or diagonal skeleton legs for the full real sample', () => {

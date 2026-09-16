@@ -1,5 +1,6 @@
 import type { ActualRouteProject, BasemapPath, BasemapPathCategory, BasemapPathPoint } from './model'
 import { uid } from './model'
+import { buildAarcBasemapPathD } from './aarcBasemapGeometry'
 
 export interface LineDraftPoint { id: string; x: number; y: number }
 export type DrawingMode = { kind: 'line'; lineId: string; anchorStationId: string | null; phaseId?: string; draftPoints?: LineDraftPoint[]; lastCreatedStationId?: string } | { kind: 'basemap'; pathId: string } | { kind: 'road'; roadId: string; styleId: string } | { kind?: 'line'; lineId: string; anchorStationId: string | null; phaseId?: string; draftPoints?: LineDraftPoint[]; lastCreatedStationId?: string }
@@ -22,17 +23,22 @@ export function normalizeBasemapPaths(value: unknown): BasemapPath[] | undefined
       if (!point || typeof point !== 'object') return []
       const p = point as Record<string, unknown>, pid = typeof p.id === 'string' && p.id ? p.id : ''
       const x = Number(p.x), y = Number(p.y)
-      return pid && Number.isFinite(x) && Number.isFinite(y) ? [{ id: pid, x, y } satisfies BasemapPathPoint] : []
+      const aarcPointId = Number(p.aarcPointId)
+      const aarcDir = p.aarcDir === 1 || p.aarcDir === '1' ? 1 : p.aarcDir === 0 || p.aarcDir === '0' ? 0 : undefined
+      return pid && Number.isFinite(x) && Number.isFinite(y) ? [{ id: pid, x, y, ...(Number.isFinite(aarcPointId) ? { aarcPointId } : {}), ...(aarcDir !== undefined ? { aarcDir } : {}), ...(p.aarcFree === true ? { aarcFree: true } : {}) } satisfies BasemapPathPoint] : []
     }) : []
     const category = raw.category === 'water' || raw.category === 'terrain' ? raw.category : 'other'
     const color = typeof raw.color === 'string' && /^#[0-9a-f]{6}$/i.test(raw.color) ? raw.color : DEFAULT_BASEMAP_COLORS[category]
     const width = finitePositive(raw.width, 3), opacity = clamp(Number(raw.opacity), 0, 1, 1), closed = raw.closed === true || raw.isFilled === true
     const isFilled = raw.isFilled === true && closed
     const zIndex = Number.isFinite(Number(raw.zIndex)) ? Number(raw.zIndex) : 0
+    const rawGeometry = raw.geometry && typeof raw.geometry === 'object' ? raw.geometry as Record<string, unknown> : undefined
+    const geometry = rawGeometry?.kind === 'aarc' ? { kind: 'aarc' as const, lineTurnAreaRadius: finiteNonNegative(rawGeometry.lineTurnAreaRadius, 30), lineWidthBase: finitePositive(rawGeometry.lineWidthBase, 14), lineCarpetWiden: finiteNonNegative(rawGeometry.lineCarpetWiden, 7), backgroundColor: typeof rawGeometry.backgroundColor === 'string' && rawGeometry.backgroundColor ? rawGeometry.backgroundColor : '#ffffff', ...(rawGeometry.removeCarpet === true ? { removeCarpet: true } : {}) } : undefined
+    const lineCap = raw.lineCap === 'butt' || raw.lineCap === 'round' || raw.lineCap === 'square' ? raw.lineCap : undefined
     const rawSource = raw.source && typeof raw.source === 'object' ? raw.source as Record<string, unknown> : undefined
     const sourceLineId = rawSource?.sourceLineId
     const source = rawSource?.format === 'aarc' && (typeof sourceLineId === 'string' || Number.isFinite(Number(sourceLineId))) ? { format: 'aarc' as const, sourceLineId: typeof sourceLineId === 'string' ? sourceLineId : Number(sourceLineId), sourceWidthRatio: rawSource.sourceWidthRatio as number | undefined, sourcePhysicalWidth: rawSource.sourcePhysicalWidth as number | undefined, sourceColor: rawSource.sourceColor as string | undefined, sourceColorPre: rawSource.sourceColorPre as number | undefined, sourceStyleId: rawSource.sourceStyleId as number | undefined, sourceZIndex: rawSource.sourceZIndex as number | undefined, kind: rawSource.kind as 'terrain' | 'line-style' | undefined, raw: rawSource.raw as Record<string, unknown> | undefined } : undefined
-    const normalized = { id, ...(typeof raw.name === 'string' && raw.name ? { name: raw.name } : {}), category, points, color, width, opacity, closed, isFilled, zIndex, visible: raw.visible !== false, locked: raw.locked === true, ...(raw.smooth === true ? { smooth: true } : {}), ...(source ? { source } : {}) } as NativeBasemapPath
+    const normalized = { id, ...(typeof raw.name === 'string' && raw.name ? { name: raw.name } : {}), category, points, color, width, opacity, closed, isFilled, zIndex, visible: raw.visible !== false, locked: raw.locked === true, ...(lineCap ? { lineCap } : {}), ...(geometry ? { geometry } : {}), ...(raw.smooth === true ? { smooth: true } : {}), ...(source ? { source } : {}) } as NativeBasemapPath
     const isAarcSource = raw.source && typeof raw.source === 'object' && (raw.source as Record<string, unknown>).format === 'aarc'
     return [isAarcSource ? normalized : removeRepeatedTerminalPoint(normalized)]
   })
@@ -45,6 +51,7 @@ export function sortedBasemapPaths(paths: BasemapPath[] | undefined): BasemapPat
 
 export function getBasemapPathD(path: BasemapPath): string {
   if (!path.points.length) return ''
+  if (path.geometry?.kind === 'aarc') return buildAarcBasemapPathD(path)
   if ((path as NativeBasemapPath).smooth === true && (!path.closed || path.points.length >= 3)) return getSmoothBasemapPathD(path)
   const first = path.points[0]
   const commands = [`M ${first.x} ${first.y}`]
@@ -150,4 +157,5 @@ function projectToLine(point: { x: number; y: number }, a: BasemapPathPoint, b: 
 }
 
 function finitePositive(value: unknown, fallback: number) { const n = Number(value); return Number.isFinite(n) && n > 0 ? n : fallback }
+function finiteNonNegative(value: unknown, fallback: number) { const n = Number(value); return Number.isFinite(n) && n >= 0 ? n : fallback }
 function clamp(value: number, min: number, max: number, fallback: number) { return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback }

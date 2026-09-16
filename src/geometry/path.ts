@@ -1,5 +1,6 @@
 import type { ActualRouteProject, Segment, Waypoint } from '../data/model'
 import { getStationAnchorForLine } from '../data/stationAnchor'
+import { getAarcImportedSegmentPathSpans } from './aarcLinePath'
 
 export interface Point { x: number; y: number }
 export interface PathSpan { start: Point; control1: Point; control2: Point; end: Point; linear: boolean }
@@ -32,6 +33,8 @@ export function getSegmentPath(project: ActualRouteProject, segment: Segment, re
 }
 
 export function getSegmentPathSpans(project: ActualRouteProject, segment: Segment, resolvedLineId = segment.lineId): PathSpan[] {
+  const aarcSpans = getAarcImportedSegmentPathSpans(project, segment, resolvedLineId)
+  if (aarcSpans !== undefined) return aarcSpans
   const points = getSegmentPoints(project, segment, resolvedLineId)
   if (points.length < 2) return []
   if (segment.mode === 'rounded') return buildRoundedPolylineSpans(points, segment.cornerRadius ?? DEFAULT_CORNER_RADIUS)
@@ -156,7 +159,8 @@ function nearestInnerPoint(project: ActualRouteProject, segment: Segment, statio
 
 export function getSegmentCurveSamples(project: ActualRouteProject, segment: Segment, samplesPerSpan = 18, resolvedLineId = segment.lineId): Point[] {
   const points = getSegmentPoints(project, segment, resolvedLineId)
-  if (points.length < 2 || (segment.mode !== 'smooth' && segment.mode !== 'rounded')) return points
+  const usesAarcGeometry = segment.source?.format === 'aarc'
+  if (points.length < 2 || (!usesAarcGeometry && segment.mode !== 'smooth' && segment.mode !== 'rounded')) return points
   const result: Point[] = []
   for (const span of getSegmentPathSpans(project, segment, resolvedLineId)) {
     if (!result.length) result.push(span.start)
@@ -246,7 +250,7 @@ export function getSegmentSubpathSamples(project: ActualRouteProject, segment: S
 export function sampleSegmentNearStation(project: ActualRouteProject, segment: Segment, stationId: string, epsilon = 0.025, resolvedLineId = segment.lineId): Point | null {
   const points = getSegmentPoints(project, segment, resolvedLineId)
   if (points.length < 2 || (segment.fromStationId !== stationId && segment.toStationId !== stationId)) return null
-  if (segment.mode !== 'smooth' && segment.mode !== 'rounded') {
+  if (segment.source?.format !== 'aarc' && segment.mode !== 'smooth' && segment.mode !== 'rounded') {
     const start = segment.fromStationId === stationId ? points[0] : points.at(-1)!
     const inner = segment.fromStationId === stationId ? points[1] : points.at(-2)!
     return lerp(start, inner, epsilon)

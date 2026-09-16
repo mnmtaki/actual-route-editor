@@ -16,6 +16,7 @@ export function parseProjectJson(text: string): ActualRouteProject {
   }
   for (const segment of project.geometry.segments) {
     const rawSegment = rawSegmentById.get(segment.id)
+    if (rawSegment?.mode === 'corner') segment.mode = 'straight'
     const rawNodes = Array.isArray(rawSegment?.structureNodes) ? rawSegment!.structureNodes as unknown[] : []
     const rawNodeById = new Map<string, Record<string, unknown>>()
     for (const value of rawNodes) {

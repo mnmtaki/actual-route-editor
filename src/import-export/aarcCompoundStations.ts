@@ -77,9 +77,9 @@ export function detectAarcCompoundGroups(
 
   const dsu = new DisjointSet()
   for (const point of sourcePoints) dsu.add(point.id)
-  for (const component of automatic.components) {
-    for (let i = 1; i < component.pointIds.length; i += 1) dsu.union(component.pointIds[0], component.pointIds[i])
-  }
+  // Use the raw automatic proximity edges, not the importer-filtered component
+  // list, so helper-only automatic clusters remain available as bridges.
+  for (const edge of automatic.edges) dsu.union(edge.a, edge.b)
   for (const edge of explicit) dsu.union(edge.a, edge.b)
 
   const edgeList: AarcCompoundEdge[] = automatic.edges.map(edge => {

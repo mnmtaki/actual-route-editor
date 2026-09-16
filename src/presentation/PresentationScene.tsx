@@ -13,6 +13,7 @@ import { resolveSideMarkerPlacement } from '../geometry/sideMarker'
 import { StationLabel } from '../renderer/StationLabel'
 import { MapElementsLayer } from '../renderer/MapElements'
 import { AarcTextTagsLayer } from '../renderer/AarcTextTags'
+import { AarcPointLinksLayer } from '../renderer/AarcPointLinks'
 import { LineLegendLayer } from '../renderer/LineLegend'
 import { LineBadgesLayer } from '../renderer/LineBadges'
 import { VectorBasemapLayer } from '../renderer/VectorBasemap'
@@ -74,8 +75,13 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
           : <g opacity={stationState.opacity} transform={`translate(${station.x} ${station.y}) scale(${stationState.scale}) translate(${-station.x} ${-station.y})`}>{ordinaryArtwork}</g>
       return <g key={station.id} data-station-id={station.id} data-station-opacity={stationState.opacity.toFixed(4)} data-label-opacity={stationState.labelOpacity.toFixed(4)} data-transfer-progress={stationState.transferProgress.toFixed(4)} data-historical-state={stationState.historicalState} data-visible-line-ids={stationState.lineIds.join(',')} data-visible-relation-ids={stationState.visibleRelationIds.join(',')}>
         {transferArtwork}
-        {sequence.settings.showLabels && project.settings.labelsVisible && !station.labelHidden && <StationLabel station={station} settings={project.settings} showForeign={sequence.settings.showForeignStationNames && project.settings.showForeignStationNames} presentation opacity={stationState.labelOpacity} {...getStationNameAt(station,state.historyDate)} />}
       </g>
+    })}</g>
+    <AarcPointLinksLayer project={project} />
+    <g data-presentation-layer="station-labels">{project.stations.filter(station => isCompoundStationCanonical(project, station)).map(station => {
+      const stationState = state.stationStates[station.id]
+      if (!stationState || stationState.opacity <= 0 || !sequence.settings.showLabels || !project.settings.labelsVisible || station.labelHidden) return null
+      return <StationLabel key={station.id} station={station} settings={project.settings} showForeign={sequence.settings.showForeignStationNames && project.settings.showForeignStationNames} presentation opacity={stationState.labelOpacity} {...getStationNameAt(station,state.historyDate)} />
     })}</g>
     <LineBadgesLayer project={project} presentation visibleLineIds={visibleLineIds} />
     <AarcTextTagsLayer project={project} presentation visibleLineIds={visibleLineIds} />

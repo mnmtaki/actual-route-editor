@@ -233,10 +233,10 @@ export function buildAarcStationComponents(
     if (isHelperOnly) helperOnlyComponentCount += 1
     const componentId = `aarc-station-component-${pointIds.join('-')}`
     for (const point of group) pointToComponent.set(point.id, componentId)
-    if (isHelperOnly) continue
 
     const namedReferenced = referenced.filter(point => Boolean(point.name))
-    const canonicalPool = namedReferenced.length ? namedReferenced : referenced
+    const namedAny = group.filter(point => Boolean(point.name))
+    const canonicalPool = namedReferenced.length ? namedReferenced : referenced.length ? referenced : namedAny.length ? namedAny : group
     const canonical = [...canonicalPool].sort((a, b) => {
       const lineCount = (memberships.get(b.id)?.length ?? 0) - (memberships.get(a.id)?.length ?? 0)
       return lineCount || a.sourceOrder - b.sourceOrder || a.id - b.id

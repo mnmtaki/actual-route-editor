@@ -12,12 +12,12 @@ import {
 const point = (id: number, x: number, y: number, sourceOrder = id, name?: string): AarcStationPointInput => ({ id, x, y, sourceOrder, ...(name ? { name } : {}) })
 
 describe('AARC station connectivity graph', () => {
-  it('uses AARC clinging distance and epsilon*10 tolerance', () => {
+  it('uses the exact AARC clinging radius before the floating-point distance tolerance', () => {
     const result = buildAarcStationComponents([
       point(1, 0, 0),
-      point(2, AARC_STATION_SNAP_DISTANCE + 0.0005, 0),
+      point(2, AARC_STATION_SNAP_DISTANCE - 0.0005, 0),
       point(3, 0, 100),
-      point(4, AARC_STATION_SNAP_DISTANCE + 0.01, 100),
+      point(4, AARC_STATION_SNAP_DISTANCE + 0.0005, 100),
     ], new Map([[1, [10]], [2, [11]], [3, [10]], [4, [11]]]))
     expect(result.components.find(component => component.pointIds.includes(1))?.pointIds).toEqual([1, 2])
     expect(result.components.find(component => component.pointIds.includes(3))?.pointIds).toEqual([3])

@@ -5,7 +5,7 @@ import { convertAarcVisualStyle } from './aarcVisualStyle'
 import { convertAarcLineStyles, resolveAarcSegmentStyleId } from './aarcStyle'
 import { parseAarcTerrainWidth, resolveAarcTerrainAppearance, resolveAarcTerrainSourceMetrics } from './aarcTerrain'
 import { aggregateAarcInterval, decodeAarcTimestamp, resolveAarcAtomicDates, resolveAarcStyleSliceForInterval, resolveAarcTimeSliceForInterval, type AarcStyleSlice, type AarcTemporalSlice } from './aarcTime'
-import { buildAarcStationComponents, createAarcFreeSnapCandidateResolver, type AarcStationPointInput } from './aarcStationClustering'
+import { buildAarcStationComponents, createAarcFreeSnapCandidateResolver, resolveAarcStationName, type AarcStationPointInput } from './aarcStationClustering'
 import { detectAarcCompoundGroups, type AarcCompoundPoint } from './aarcCompoundStations'
 import { getAarcCompoundGroupId } from '../data/compoundStation'
 import { normalizeStationAnchor } from '../data/stationAnchor'
@@ -57,24 +57,20 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
   const realLineById = new Map(realLines.map(line => [finiteId(line.id), line]).filter((entry): entry is [number, AarcLine] => entry[0] !== null))
   const sourceLineRecords = rawLines as unknown as Array<Record<string, unknown>>
   const sourceConfig = source.config as Record<string, unknown>
-  const terrainPointIds = new Set<number>()
-  for (const rawLine of rawLines.filter(isAarcTerrainPath)) for (const rawId of Array.isArray(rawLine.pts) ? rawLine.pts : []) {
-    const pointId = finiteId(rawId)
-    if (pointId !== null) terrainPointIds.add(pointId)
-  }
-  const realStationPointIds = new Set<number>()
-  for (const rawLine of realLines) for (const rawId of Array.isArray(rawLine.pts) ? rawLine.pts : []) {
-    const pointId = finiteId(rawId), point = pointId === null ? undefined : pointMap.get(pointId)
-    if (pointId !== null && point?.sta === 1) realStationPointIds.add(pointId)
-  }
+
+  // AARC automatic staClusters start from every valid sta=1 point. A point may
+  // be terrain-only or otherwise unreferenced by an operating line and still
+  // act as a geometric helper/bridge inside the automatic cluster graph.
   const stationPointInputs: AarcStationPointInput[] = [...pointMap.entries()].flatMap(([id, point], sourceOrder) => {
-    if (terrainPointIds.has(id) && !realStationPointIds.has(id)) return []
     if (point.sta !== 1) return []
     const position = validPosition(point.pos)
     if (!position) return []
     const nameP = validPair(point.nameP)
     return [{ id, x: position[0], y: position[1], ...(text(point.name) ? { name: text(point.name)! } : {}), ...(typeof point.nameS === 'string' && point.nameS.length ? { nameS: point.nameS } : {}), ...(nameP ? { nameP } : {}), sourceOrder, ...(point.free === true ? { free: true } : {}) }]
   })
+
+  // Passenger/service memberships intentionally remain operating-line only.
+  // These decide which clustered source points become ActualRoute stations.
   const stationMemberships = new Map<number, number[]>()
   for (const [lineOrder, rawLine] of realLines.entries()) {
     const sourceLineId = finiteId(rawLine.id) ?? lineOrder
@@ -87,24 +83,53 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
       stationMemberships.set(pointId, current)
     }
   }
-  const snapSizesByPoint = new Map<number, number>(stationPointInputs.map(point => [point.id, aggregateAarcPointMetrics(point.id, sourceLineRecords, stationMemberships, sourceConfig).ptSnapSize]))
+
+  // AARC snap/render sizes are derived from every source line occurrence,
+  // including terrain lines; fake/common lines are also part of saveStore's
+  // point-to-line relation. Keep this separate from passenger memberships.
+  const sourcePointMemberships = new Map<number, number[]>()
+  for (const [lineOrder, rawLine] of rawLines.entries()) {
+    const sourceLineId = finiteId(rawLine.id) ?? lineOrder
+    if (finiteId(rawLine.id) === null) continue
+    for (const rawId of Array.isArray(rawLine.pts) ? rawLine.pts : []) {
+      const pointId = finiteId(rawId)
+      if (pointId === null || pointMap.get(pointId)?.sta !== 1) continue
+      const current = sourcePointMemberships.get(pointId) ?? []
+      if (!current.includes(sourceLineId)) current.push(sourceLineId)
+      sourcePointMemberships.set(pointId, current)
+    }
+  }
+
+  const snapSizesByPoint = new Map<number, number>(stationPointInputs.map(point => [point.id, aggregateAarcPointMetrics(point.id, sourceLineRecords, sourcePointMemberships, sourceConfig).ptSnapSize]))
   const sourcePointPositions = new Map<number, { x: number; y: number }>([...pointMap.entries()].flatMap(([id, point]) => { const position = validPosition(point.pos); return position ? [[id, { x: position[0], y: position[1] }] as [number, { x: number; y: number }]] : [] }))
-  const sourceLineChains = realLines.map(line => ({ pts: (Array.isArray(line.pts) ? line.pts : []).map(finiteId).filter((id): id is number => id !== null) }))
+  // freePtDirectionStore.adjacentSegs scans save.lines in source order and uses
+  // the first occurrence, so the candidate resolver must see all source lines.
+  const sourceLineChains = rawLines.map(line => ({ pts: (Array.isArray(line.pts) ? line.pts : []).map(finiteId).filter((id): id is number => id !== null) }))
   const freeSnapCandidates = createAarcFreeSnapCandidateResolver(sourcePointPositions, sourceLineChains, id => (snapSizesByPoint.get(id) ?? 1) * (finiteNumber(sourceConfig.snapOctaClingPtPtDist) ?? 25))
-  const snapThresholdsByPoint = new Map<number, number>(stationPointInputs.map(point => {
-    const widths = (stationMemberships.get(point.id) ?? []).map(lineId => { const line = rawLines.find(item => finiteId(item.id) === lineId); return Math.min(1, Math.max(0, finiteNumber(line?.width) ?? 1)) })
-    return [point.id, (finiteNumber(sourceConfig.snapOctaClingPtPtThrs) ?? 10) * (widths.length ? Math.min(...widths) : 1)] as [number, number]
-  }))
-  const stationClustering = buildAarcStationComponents(stationPointInputs, stationMemberships, source.pointLinks, { configClingingDist: finiteNumber(sourceConfig.snapOctaClingPtPtDist) ?? 25, getSnapSize: id => snapSizesByPoint.get(id) ?? 1, getSnapCandidates: freeSnapCandidates, getSnapThreshold: id => snapThresholdsByPoint.get(id) ?? 10, freeClusterMode: sourceConfig.freePtClusterMode === 'off' || sourceConfig.freePtClusterMode === 'strict' ? sourceConfig.freePtClusterMode : 'loose' })
+
+  const stationClustering = buildAarcStationComponents(stationPointInputs, stationMemberships, {
+    configClingingDist: finiteNumber(sourceConfig.snapOctaClingPtPtDist) ?? 25,
+    getSnapSize: id => snapSizesByPoint.get(id) ?? 1,
+    getSnapCandidates: freeSnapCandidates,
+  })
   warnings.push(...stationClustering.warnings)
+
   const compoundPoints: AarcCompoundPoint[] = stationPointInputs.map(point => ({ id: point.id, x: point.x, y: point.y, sta: 1, ...(point.name ? { name: point.name } : {}), sourceOrder: point.sourceOrder, ...(point.free ? { free: true } : {}) }))
   const compoundDetection = detectAarcCompoundGroups(
     compoundPoints,
     sourceLineRecords.map(line => ({ id: finiteId(line.id) ?? -1, pts: Array.isArray(line.pts) ? line.pts.map(value => finiteId(value)).filter((value): value is number => value !== null) : [], ...(finiteId(line.parent) !== null ? { parent: finiteId(line.parent)! } : {}), ...(line.isFake === true ? { isFake: true } : {}) })),
     stationMemberships,
-    { configClingingDist: finiteNumber(sourceConfig.snapOctaClingPtPtDist) ?? 25, getSnapSize: id => snapSizesByPoint.get(id) ?? 1, getSnapCandidates: freeSnapCandidates, getSnapThreshold: id => snapThresholdsByPoint.get(id) ?? 10, freeClusterMode: sourceConfig.freePtClusterMode === 'off' || sourceConfig.freePtClusterMode === 'strict' ? sourceConfig.freePtClusterMode : 'loose', pointLinks: source.pointLinks },
+    { configClingingDist: finiteNumber(sourceConfig.snapOctaClingPtPtDist) ?? 25, getSnapSize: id => snapSizesByPoint.get(id) ?? 1, getSnapCandidates: freeSnapCandidates, pointLinks: source.pointLinks },
   )
   warnings.push(...compoundDetection.warnings)
+
+  // AARC getStaName() builds its lookup graph from every save point, not only
+  // sta=1 points. Plain control points can therefore bridge pointLinks during
+  // fallback name lookup even though they never participate in auto-clustering.
+  const allNamePoints = [...pointMap.entries()].map(([id, point], sourceOrder) => ({ id, ...(typeof point.name === 'string' && point.name.length ? { name: point.name } : {}), ...(typeof point.nameS === 'string' && point.nameS.length ? { nameS: point.nameS } : {}), sourceOrder }))
+  const resolvedStationNames = new Map<number, ReturnType<typeof resolveAarcStationName>>()
+  for (const point of stationPointInputs) resolvedStationNames.set(point.id, resolveAarcStationName(point.id, allNamePoints, source.pointLinks, stationClustering.components))
+
   const timeSlices = (Array.isArray(source.timeSlices) ? source.timeSlices : []) as AarcTemporalSlice[]
   const styleSlices = (Array.isArray(source.styleSlices) ? source.styleSlices : []) as AarcStyleSlice[]
   const terrainLines = rawLines.filter(isAarcTerrainPath)
@@ -160,28 +185,29 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
       const position = point ? validPosition(point.pos) : null
       if (!point || !position) { warnings.push(`AARC Station Point ${pointId} 缺少有效 pos，已跳过`); return }
       const nameP = validPair(point.nameP)
+      const resolvedName = resolvedStationNames.get(pointId)
+      const ownName = text(point.name)
+      const ownNameS = typeof point.nameS === 'string' && point.nameS.length ? point.nameS : undefined
+      const borrowedName = resolvedName?.name && !resolvedName.name.startsWith('#') ? resolvedName.name : undefined
       const station: Station = {
         id: `aarc-station-${pointId}`,
-        name: text(point.name) || `未命名站 ${pointId}`,
-        ...(typeof point.nameS === 'string' && point.nameS.length ? { nameS: point.nameS } : {}),
+        // Preserve the source point's own text exactly when present (including
+        // line breaks). AARC fallback name lookup supplies only an unnamed
+        // source point's display name; it must not overwrite source identity.
+        name: ownName ?? borrowedName ?? `未命名站 ${pointId}`,
+        ...(ownNameS !== undefined ? { nameS: ownNameS } : resolvedName?.nameSub ? { nameS: resolvedName.nameSub } : {}),
         ...(point.free === true ? { free: true } : {}),
         x: position[0], y: position[1],
         labelOffsetX: nameP?.[0] ?? 14,
         labelOffsetY: nameP?.[1] ?? -14,
-        source: { format: 'aarc', pointId, pointIds: referencedIds, stationNameFontWeight, raw: cloneRecord(point), ...(nameP ? { nameP, labelAnchorMode: 'aarc-block' as const } : {}) },
+        source: { format: 'aarc', pointId, pointIds: referencedIds, stationNameFontWeight, raw: cloneRecord(point), ...(resolvedName && resolvedName.pointId !== pointId ? { resolvedNameSourcePointId: resolvedName.pointId } : {}), ...(nameP ? { nameP, labelAnchorMode: 'aarc-block' as const } : {}) },
       }
       stations.push(station)
       stationByPoint.set(pointId, station)
     }
     if (hasRepeatedLineOccurrence) {
-      // A same-line repeated source occurrence (for example a named point
-      // plus a nearby auxiliary anchor) must stay as separate geometric
-      // Stations; the passenger identity is attached by compoundGroupId.
       referencedIds.forEach(createStation)
     } else {
-      // Ordinary cross-line clustering can retain the historical canonical
-      // Station representation used by ActualRoute, while preserving all
-      // source point ids in component metadata.
       createStation(component.canonicalPointId)
       const canonical = stationByPoint.get(component.canonicalPointId)
       if (canonical) {
@@ -189,8 +215,11 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
         for (const pointId of component.pointIds) stationByPoint.set(pointId, canonical)
       }
     }
-  }  // Compound interchanges group passenger identity only. Every source
-  // occurrence remains its own Station so the rail geometry stays intact.
+  }
+
+  // ActualRoute has one passenger identity primitive, so automatic AARC
+  // staClusters and explicit type=4 forced-interchange links both map to a
+  // shared compoundGroupId while retaining distinct source-edge provenance.
   for (const group of compoundDetection.groups) {
     const memberStations = [...new Set(group.pointIds.map(pointId => stationByPoint.get(pointId)?.id).filter((id): id is string => Boolean(id)))]
     if (memberStations.length < 2) continue

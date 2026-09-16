@@ -1,15 +1,17 @@
 /**
- * Import-time connectivity for AARC station points.
+ * Import-time mirror of AARC's automatic station-cluster semantics.
  *
- * AARC uses more than one point for a visual interchange: points may be
- * shared by id, placed within the station snap radius, or joined explicitly
- * by pointLinks.  This module deliberately has no dependency on the actual
- * route data model; it produces only the deterministic components needed by
- * the importer.
+ * Important source distinction:
+ * - automatic staClusters come only from sta=1 points that cling by AARC's
+ *   distance / snap-size / free-point candidate rules;
+ * - pointLinks are NOT edges in that automatic cluster graph. A type=4
+ *   pointLink is an explicit forced-interchange relation rendered separately
+ *   by AARC, while every pointLink type may participate in fallback name lookup.
  */
 
 export const AARC_STATION_SNAP_DISTANCE = 25
 export const AARC_STATION_SNAP_EPSILON = 1e-4
+export const AARC_STATION_PREFILTER_MULTIPLIER = 2.5
 
 export interface AarcStationPointInput {
   id: number
@@ -22,6 +24,13 @@ export interface AarcStationPointInput {
   free?: boolean
 }
 
+export interface AarcNamePointInput {
+  id: number
+  name?: string
+  nameS?: string
+  sourceOrder: number
+}
+
 export interface AarcStationSnapInfo {
   candidates: Array<[number, number]>
   reach?: number
@@ -31,8 +40,8 @@ export interface AarcStationSnapInfo {
 export interface AarcStationConnectivityEdge {
   a: number
   b: number
-  reason: 'proximity' | 'pointLinks'
-  distance?: number
+  reason: 'proximity'
+  distance: number
 }
 
 export interface AarcStationComponent {
@@ -50,7 +59,6 @@ export interface AarcStationClusteringMetrics {
   referencedSta1Count: number
   helperCount: number
   proximityEdgeCount: number
-  pointLinksEdgeCount: number
   multiPointComponentCount: number
   interchangeStationCount: number
   helperOnlyComponentCount: number
@@ -65,25 +73,42 @@ export interface AarcStationClusteringResult {
   warnings: string[]
 }
 
+export interface AarcStationClusteringOptions {
+  configClingingDist?: number
+  getSnapSize?: (id: number) => number
+  getSnapCandidates?: (point: AarcStationPointInput) => AarcStationSnapInfo | undefined
+}
+
+type LegacyClusteringOptions = AarcStationClusteringOptions & {
+  getSnapThreshold?: (id: number) => number
+  freeClusterMode?: 'off' | 'strict' | 'loose'
+}
+
+export interface AarcExplicitClusterLinkEdge {
+  a: number
+  b: number
+  linkIndex: number
+}
+
+export interface AarcResolvedStationName {
+  name: string
+  nameSub: string
+  pointId: number
+}
+
 class DisjointSet {
   private readonly parent = new Map<number, number>()
-
   add(id: number) { if (!this.parent.has(id)) this.parent.set(id, id) }
-
   find(id: number): number {
     const parent = this.parent.get(id)
-    if (parent === undefined) return id
-    if (parent === id) return id
+    if (parent === undefined || parent === id) return id
     const root = this.find(parent)
     this.parent.set(id, root)
     return root
   }
-
   union(a: number, b: number) {
     const rootA = this.find(a), rootB = this.find(b)
     if (rootA === rootB) return
-    // Stable roots are useful for deterministic diagnostics.  Component ids
-    // themselves are based on sorted source point ids below.
     if (rootA < rootB) this.parent.set(rootB, rootA)
     else this.parent.set(rootA, rootB)
   }
@@ -93,99 +118,109 @@ function numericId(value: unknown): number | null {
   const id = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(id) ? id : null
 }
-
 function linkGroups(raw: unknown): unknown[] {
   if (Array.isArray(raw)) return raw
   if (raw && typeof raw === 'object') return [raw]
   return []
 }
-
-function validPointIds(raw: unknown, points: Map<number, AarcStationPointInput>, warnings: string[], linkIndex: number): number[] {
-  if (!Array.isArray(raw)) return []
-  const ids: number[] = []
-  for (const value of raw) {
-    const id = numericId(value)
-    if (id === null || !points.has(id) || !points.get(id)) {
-      warnings.push(`AARC pointLinks 第 ${linkIndex + 1} 项引用了不存在或非 sta=1 Point ${String(value)}`)
-      continue
-    }
-    if (!ids.includes(id)) ids.push(id)
+function linkEndpoints(link: unknown): [number, number] | null {
+  if (!link || typeof link !== 'object') return null
+  const pts = (link as { pts?: unknown }).pts
+  if (!Array.isArray(pts) || pts.length < 2) return null
+  const a = numericId(pts[0]), b = numericId(pts[1])
+  return a === null || b === null ? null : [a, b]
+}
+function looksLikeOptions(value: unknown): value is LegacyClusteringOptions {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const record = value as Record<string, unknown>
+  return 'configClingingDist' in record || 'getSnapSize' in record || 'getSnapCandidates' in record || 'getSnapThreshold' in record || 'freeClusterMode' in record
+}
+function bboxOf(candidates: Array<[number, number]>) {
+  return candidates.reduce(
+    (box, point) => ({
+      minX: Math.min(box.minX, point[0]), maxX: Math.max(box.maxX, point[0]),
+      minY: Math.min(box.minY, point[1]), maxY: Math.max(box.maxY, point[1]),
+    }),
+    { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity },
+  )
+}
+function normalizeSnapInfo(point: AarcStationPointInput, supplied?: AarcStationSnapInfo): Required<AarcStationSnapInfo> {
+  const candidates = supplied?.candidates?.length ? supplied.candidates : [[point.x, point.y] as [number, number]]
+  let reach = supplied?.reach
+  if (reach === undefined) {
+    reach = 0
+    for (const candidate of candidates) reach = Math.max(reach, Math.abs(candidate[0] - point.x), Math.abs(candidate[1] - point.y))
   }
-  return ids
+  return { candidates, reach, bbox: supplied?.bbox ?? bboxOf(candidates) }
+}
+function bboxesCouldCling(a: Required<AarcStationSnapInfo>['bbox'], b: Required<AarcStationSnapInfo>['bbox'], distance: number) {
+  if (a.minX - b.maxX > distance || b.minX - a.maxX > distance) return false
+  if (a.minY - b.maxY > distance || b.minY - a.maxY > distance) return false
+  return true
+}
+function candidateSetsCling(a: Required<AarcStationSnapInfo>, b: Required<AarcStationSnapInfo>, distance: number) {
+  if (!bboxesCouldCling(a.bbox, b.bbox, distance)) return false
+  const compareSq = (distance + AARC_STATION_SNAP_EPSILON * 10) ** 2
+  for (const ca of a.candidates) {
+    for (const cb of b.candidates) {
+      const dx = ca[0] - cb[0]
+      const dxSq = dx * dx
+      if (dxSq > compareSq) continue
+      const dy = ca[1] - cb[1]
+      if (dxSq + dy * dy < compareSq) return true
+    }
+  }
+  return false
 }
 
 export function buildAarcStationComponents(
   points: AarcStationPointInput[],
   memberships: Map<number, number[]>,
+  options?: LegacyClusteringOptions,
+): AarcStationClusteringResult
+export function buildAarcStationComponents(
+  points: AarcStationPointInput[],
+  memberships: Map<number, number[]>,
   rawPointLinks: unknown,
-  options: { configClingingDist?: number; getSnapSize?: (id: number) => number; getSnapCandidates?: (point: AarcStationPointInput) => AarcStationSnapInfo | undefined; getSnapThreshold?: (id: number) => number; freeClusterMode?: 'off' | 'strict' | 'loose' } = {},
+  options: LegacyClusteringOptions,
+): AarcStationClusteringResult
+/**
+ * Build AARC's automatic station components.
+ *
+ * For source compatibility this accepts both the new 3-argument form and the
+ * old 4-argument form. In the old form raw pointLinks, snap thresholds and
+ * freeClusterMode are intentionally ignored: upstream automatic staClusters
+ * do not use them.
+ */
+export function buildAarcStationComponents(
+  points: AarcStationPointInput[],
+  memberships: Map<number, number[]>,
+  rawPointLinksOrOptions: unknown | LegacyClusteringOptions = {},
+  legacyOptions?: LegacyClusteringOptions,
 ): AarcStationClusteringResult {
-  const pointMap = new Map(points.map(point => [point.id, point]))
+  const options: AarcStationClusteringOptions = legacyOptions ?? (looksLikeOptions(rawPointLinksOrOptions) ? rawPointLinksOrOptions : {})
   const dsu = new DisjointSet()
   for (const point of points) dsu.add(point.id)
   const edges: AarcStationConnectivityEdge[] = []
-
   const warnings: string[] = []
-  const componentLines = new Map<number, Set<number>>(points.map(point => [point.id, new Set(memberships.get(point.id) ?? [])]))
-  const tryUnion = (a: number, b: number, reason: 'proximity' | 'pointLinks') => {
-    const rootA = dsu.find(a), rootB = dsu.find(b)
-    if (rootA === rootB) return true
-    // AARC clustering is source-point based, not a passenger/business rule:
-    // points from the same line may still be clustered when the upstream
-    // snap oracle says they cling (for example a named point plus an
-    // auxiliary station anchor).  Keep the line memberships only as derived
-    // metadata; never reject a geometric union because of a shared line.
-    dsu.union(a, b)
-    const root = dsu.find(a), merged = new Set([...(componentLines.get(rootA) ?? []), ...(componentLines.get(rootB) ?? [])])
-    componentLines.delete(rootA); componentLines.delete(rootB); componentLines.set(root, merged)
-    return true
-  }
-  // AARC's implicit station snap is an undirected proximity relation.  Keep
-  // the exact Euclidean distance for diagnostics, but never alter coordinates.
-  for (let i = 0; i < points.length; i += 1) {
-    for (let j = i + 1; j < points.length; j += 1) {
-      const a = points[i], b = points[j]
-      // The upstream oracle does not require a cross-line membership.  Same
-      // line auxiliary anchors therefore remain eligible; line identity is
-      // resolved later by the importer, not used to veto geometry clusters.
-      if (options.freeClusterMode === 'off' && (a.free || b.free)) continue
-      const distance = Math.hypot(a.x - b.x, a.y - b.y)
-      const sizeA = Math.max(0, options.getSnapSize?.(a.id) ?? 1), sizeB = Math.max(0, options.getSnapSize?.(b.id) ?? 1)
-      const baseDistance = options.configClingingDist ?? AARC_STATION_SNAP_DISTANCE
-      const threshold = baseDistance * ((sizeA + sizeB) / 2)
-      const aSnap = options.getSnapCandidates?.(a), bSnap = options.getSnapCandidates?.(b)
-      if (aSnap?.bbox && bSnap?.bbox && (a.free || b.free)) {
-        // Match upstream's bbox prefilter: free candidates can be farther from
-        // the source position than the ordinary clinging radius. Candidate
-        // providers that only return coordinates remain backward compatible.
-        const candidateSpan = threshold + (aSnap.reach ?? 0) + (bSnap.reach ?? 0) + AARC_STATION_SNAP_EPSILON
-        if (Math.abs(a.x - b.x) > candidateSpan || Math.abs(a.y - b.y) > candidateSpan) continue
-      }
-      const directCling = distance <= threshold + AARC_STATION_SNAP_EPSILON
-      let candidateCling = false
-      if (aSnap && bSnap && (a.free || b.free)) {
-        const candidateThresholdA = options.freeClusterMode === 'strict' ? 0 : (options.getSnapThreshold?.(a.id) ?? threshold)
-        const candidateThresholdB = options.freeClusterMode === 'strict' ? 0 : (options.getSnapThreshold?.(b.id) ?? threshold)
-        const candidateDistance = (from: [number, number], to: [number, number]) => Math.hypot(from[0] - to[0], from[1] - to[1])
-        candidateCling = bSnap.candidates.some(candidate => candidateDistance([a.x, a.y], candidate) <= candidateThresholdA + AARC_STATION_SNAP_EPSILON)
-          || aSnap.candidates.some(candidate => candidateDistance([b.x, b.y], candidate) <= candidateThresholdB + AARC_STATION_SNAP_EPSILON)
-      }
-      if (directCling || candidateCling) {
-        if (tryUnion(a.id, b.id, 'proximity')) edges.push({ a: a.id, b: b.id, reason: 'proximity', distance })
-      }    }
-  }
+  const baseDistance = options.configClingingDist ?? AARC_STATION_SNAP_DISTANCE
+  const skipThreshold = AARC_STATION_PREFILTER_MULTIPLIER * baseDistance
+  const snapInfo = new Map(points.map(point => [point.id, normalizeSnapInfo(point, options.getSnapCandidates?.(point))]))
 
-  for (const [linkIndex, link] of linkGroups(rawPointLinks).entries()) {
-    // AARC uses pointLinks for several visual/editor purposes (fat/thin/dot
-    // links). Only explicit `cluster` links participate in station
-    // connectivity. Untyped links are kept as a legacy compatibility path;
-    // known non-cluster types must never create an interchange.
-    const rawType = link && typeof link === 'object' ? (link as { type?: unknown }).type : undefined
-    const linkType = rawType === undefined || rawType === null || rawType === '' ? undefined : numericId(rawType)
-    if (linkType !== undefined && linkType !== null && linkType !== 4) continue
-    const ids = validPointIds((link as { pts?: unknown })?.pts, pointMap, warnings, linkIndex)
-    for (let index = 1; index < ids.length; index += 1) {
-      if (tryUnion(ids[0], ids[index], 'pointLinks')) edges.push({ a: ids[0], b: ids[index], reason: 'pointLinks' })
+  if (skipThreshold > 0) {
+    for (let i = 0; i < points.length; i += 1) {
+      for (let j = i + 1; j < points.length; j += 1) {
+        const a = points[i], b = points[j]
+        const aSnap = snapInfo.get(a.id)!, bSnap = snapInfo.get(b.id)!
+        const prefilter = skipThreshold + aSnap.reach + bSnap.reach
+        if (Math.abs(a.x - b.x) > prefilter || Math.abs(a.y - b.y) > prefilter) continue
+        const sizeA = options.getSnapSize?.(a.id) ?? 1
+        const sizeB = options.getSnapSize?.(b.id) ?? 1
+        const clingingDistance = baseDistance * ((sizeA + sizeB) / 2)
+        if (!candidateSetsCling(aSnap, bSnap, clingingDistance)) continue
+        dsu.union(a.id, b.id)
+        edges.push({ a: a.id, b: b.id, reason: 'proximity', distance: Math.hypot(a.x - b.x, a.y - b.y) })
+      }
     }
   }
 
@@ -209,32 +244,26 @@ export function buildAarcStationComponents(
     if (isHelperOnly) helperOnlyComponentCount += 1
     const componentId = `aarc-station-component-${pointIds.join('-')}`
     for (const point of group) pointToComponent.set(point.id, componentId)
-    if (isHelperOnly) continue
 
-    // A named, line-referenced source is preferred over helpers.  Among
-    // equally valid sources, more line memberships and then source order give
-    // a stable result independent of object/map insertion details.
     const namedReferenced = referenced.filter(point => Boolean(point.name))
-    const canonicalPool = namedReferenced.length ? namedReferenced : referenced
+    const namedAny = group.filter(point => Boolean(point.name))
+    const canonicalPool = namedReferenced.length ? namedReferenced : referenced.length ? referenced : namedAny.length ? namedAny : group
     const canonical = [...canonicalPool].sort((a, b) => {
       const lineCount = (memberships.get(b.id)?.length ?? 0) - (memberships.get(a.id)?.length ?? 0)
       return lineCount || a.sourceOrder - b.sourceOrder || a.id - b.id
     })[0]
     if (!canonical) continue
     const lineIds = [...new Set(referenced.flatMap(point => memberships.get(point.id) ?? []))].sort((a, b) => a - b)
-    const named = referenced
-      .filter(point => Boolean(point.name))
-      .map(point => ({ pointId: point.id, name: point.name! }))
+    const named = group.filter(point => Boolean(point.name)).map(point => ({ pointId: point.id, name: point.name! }))
     const names = [...new Set(named.map(entry => entry.name))]
     const conflictingNames = names.length > 1 ? named : []
     if (conflictingNames.length) {
       ambiguousNameCount += 1
-      warnings.push(`AARC 站点连接组件 ${pointIds.join('、')} 包含冲突站名：${conflictingNames.map(entry => `${entry.pointId}:${entry.name}`).join('；')}；已按稳定顺序选择 ${canonical.id}`)
+      warnings.push(`AARC 自动车站团 ${pointIds.join('、')} 包含冲突站名：${conflictingNames.map(entry => `${entry.pointId}:${entry.name}`).join('；')}；几何基准点为 ${canonical.id}`)
     }
     components.push({ id: componentId, pointIds, referencedPointIds, helperPointIds, lineIds, canonicalPointId: canonical.id, conflictingNames })
   }
 
-  const multiPointComponentCount = allComponents.filter(group => group.length > 1).length
   return {
     components: components.sort((a, b) => a.pointIds[0] - b.pointIds[0]),
     pointToComponent,
@@ -243,9 +272,8 @@ export function buildAarcStationComponents(
       sta1Total: points.length,
       referencedSta1Count: points.filter(point => (memberships.get(point.id)?.length ?? 0) > 0).length,
       helperCount: points.filter(point => (memberships.get(point.id)?.length ?? 0) === 0).length,
-      proximityEdgeCount: edges.filter(edge => edge.reason === 'proximity').length,
-      pointLinksEdgeCount: edges.filter(edge => edge.reason === 'pointLinks').length,
-      multiPointComponentCount,
+      proximityEdgeCount: edges.length,
+      multiPointComponentCount: allComponents.filter(group => group.length > 1).length,
       interchangeStationCount: components.filter(component => component.lineIds.length > 1).length,
       helperOnlyComponentCount,
       ambiguousNameCount,
@@ -254,17 +282,65 @@ export function buildAarcStationComponents(
   }
 }
 
+/** Read only AARC's explicit type=4 "车站团" links. */
+export function readAarcExplicitClusterLinks(rawPointLinks: unknown, validStationPointIds: Set<number>, warnings: string[] = []): AarcExplicitClusterLinkEdge[] {
+  const edges: AarcExplicitClusterLinkEdge[] = []
+  for (const [linkIndex, link] of linkGroups(rawPointLinks).entries()) {
+    if (!link || typeof link !== 'object') continue
+    if (numericId((link as { type?: unknown }).type) !== 4) continue
+    const endpoints = linkEndpoints(link)
+    if (!endpoints) continue
+    const [a, b] = endpoints
+    if (!validStationPointIds.has(a) || !validStationPointIds.has(b)) {
+      warnings.push(`AARC pointLinks 第 ${linkIndex + 1} 项的显式车站团连接引用了不存在或非 sta=1 Point`)
+      continue
+    }
+    if (a !== b) edges.push({ a, b, linkIndex })
+  }
+  return edges
+}
+
+/** Mirror AARC getStaName(): automatic cluster first, then ANY pointLink type. */
+export function resolveAarcStationName(pointId: number, points: AarcNamePointInput[], rawPointLinks: unknown, automaticComponents: AarcStationComponent[]): AarcResolvedStationName {
+  const pointById = new Map(points.map(point => [point.id, point]))
+  const own = pointById.get(pointId)
+  if (own?.name) return { name: own.name.replaceAll('\n', ''), nameSub: own.nameS?.replaceAll('\n', '') ?? '', pointId }
+
+  const clusters: number[][] = automaticComponents.map(component => [...component.pointIds])
+  const clustered = new Set(clusters.flat())
+  for (const point of [...points].sort((a, b) => a.sourceOrder - b.sourceOrder || a.id - b.id)) if (!clustered.has(point.id)) clusters.push([point.id])
+  const pointToCluster = new Map<number, number>()
+  clusters.forEach((cluster, index) => cluster.forEach(id => pointToCluster.set(id, index)))
+  const adjacency = new Map<number, Set<number>>()
+  for (const link of linkGroups(rawPointLinks)) {
+    const endpoints = linkEndpoints(link)
+    if (!endpoints) continue
+    const a = pointToCluster.get(endpoints[0]), b = pointToCluster.get(endpoints[1])
+    if (a === undefined || b === undefined || a === b) continue
+    const aSet = adjacency.get(a) ?? new Set<number>(), bSet = adjacency.get(b) ?? new Set<number>()
+    aSet.add(b); bSet.add(a); adjacency.set(a, aSet); adjacency.set(b, bSet)
+  }
+  const start = pointToCluster.get(pointId)
+  if (start !== undefined) {
+    const visited = new Set<number>([start]), queue = [start]
+    while (queue.length) {
+      const current = queue.shift()!
+      const named = clusters[current].map(id => pointById.get(id)).find((point): point is AarcNamePointInput => Boolean(point?.name))
+      if (named?.name) return { name: named.name.replaceAll('\n', ''), nameSub: named.nameS?.replaceAll('\n', '') ?? '', pointId: named.id }
+      for (const next of adjacency.get(current) ?? []) if (!visited.has(next)) { visited.add(next); queue.push(next) }
+    }
+  }
+  return { name: `#${pointId}`, nameSub: '', pointId }
+}
+
 export function getAarcComponentEdgeReasons(component: AarcStationComponent, edges: AarcStationConnectivityEdge[]) {
   const pointSet = new Set(component.pointIds)
-  return edges
-    .filter(edge => pointSet.has(edge.a) && pointSet.has(edge.b))
-    .map(edge => ({ ...edge }))
+  return edges.filter(edge => pointSet.has(edge.a) && pointSet.has(edge.b)).map(edge => ({ ...edge }))
 }
 
 export interface AarcSourcePointPosition { x: number; y: number }
 export interface AarcSourceLineChain { pts: number[] }
 type Vec2 = [number, number]
-
 function unitVector(from: Vec2, to: Vec2): Vec2 | undefined {
   const dx = to[0] - from[0], dy = to[1] - from[1], length = Math.hypot(dx, dy)
   return length > AARC_STATION_SNAP_EPSILON ? [dx / length, dy / length] : undefined
@@ -275,7 +351,6 @@ function add2(a: Vec2, b: Vec2): Vec2 { return [a[0] + b[0], a[1] + b[1]] }
 function scale2(a: Vec2, scalar: number): Vec2 { return [a[0] * scalar, a[1] * scalar] }
 function sub2(a: Vec2, b: Vec2): Vec2 { return [a[0] - b[0], a[1] - b[1]] }
 function negate2(a: Vec2): Vec2 { return [-a[0], -a[1]] }
-function same2(a: Vec2, b: Vec2) { return Math.hypot(a[0] - b[0], a[1] - b[1]) <= AARC_STATION_SNAP_EPSILON }
 function perpendicularCCW(v: Vec2): Vec2 { return [-v[1], v[0]] }
 function innerNormal2(lineDir: Vec2, towards: Vec2): Vec2 {
   const perp = perpendicularCCW(lineDir), length = Math.hypot(perp[0], perp[1]), unit = [perp[0] / length, perp[1] / length] as Vec2
@@ -287,62 +362,57 @@ function rayIntersection(sourceA: Vec2, directionA: Vec2, sourceB: Vec2, directi
   const delta = sub2(sourceB, sourceA), scale = cross2(delta, directionB) / denominator
   return add2(sourceA, scale2(directionA, scale))
 }
-function candidateBbox(candidates: Vec2[]) {
-  return candidates.reduce((box, point) => ({ minX: Math.min(box.minX, point[0]), maxX: Math.max(box.maxX, point[0]), minY: Math.min(box.minY, point[1]), maxY: Math.max(box.maxY, point[1]) }), { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity })
-}
-function freeCandidatesAt(position: Vec2, snapDist: number, adjacent: Array<{ prev?: Vec2; next?: Vec2 }>) {
-  const all: Vec2[] = []
-  const add = (candidate: Vec2) => { if (!all.some(existing => same2(existing, candidate))) all.push(candidate) }
-  const addForOccurrence = ({ prev, next }: { prev?: Vec2; next?: Vec2 }) => {
-    const prevDir = prev ? unitVector(position, prev) : undefined, nextDir = next ? unitVector(position, next) : undefined
-    if (!prevDir && !nextDir) { add(position); return }
-    if (!prevDir || !nextDir) {
-      const direction = nextDir ?? prevDir!, side = scale2(perpendicularCCW(direction), snapDist)
-      add(position); add(add2(position, side)); add(add2(position, negate2(side))); return
-    }
-    const turnCross = cross2(prevDir, nextDir)
-    if (Math.abs(turnCross) <= AARC_STATION_SNAP_EPSILON) {
-      const side = scale2(perpendicularCCW(nextDir), snapDist)
-      add(position); add(add2(position, side)); add(add2(position, negate2(side))); return
-    }
-    const nPrev = innerNormal2(prevDir, nextDir), nNext = innerNormal2(nextDir, prevDir)
-    add(position)
-    const angleDeg = Math.acos(Math.max(-1, Math.min(1, dot2(prevDir, nextDir)))) * 180 / Math.PI
-    if (angleDeg >= 80) {
-      add(rayIntersection(add2(position, scale2(nPrev, snapDist)), prevDir, add2(position, scale2(nNext, snapDist)), nextDir) ?? position)
-      add(rayIntersection(add2(position, scale2(negate2(nPrev), snapDist)), prevDir, add2(position, scale2(negate2(nNext), snapDist)), nextDir) ?? position)
-    }
-    add(add2(position, scale2(negate2(nPrev), snapDist)))
-    add(add2(position, scale2(negate2(nNext), snapDist)))
+function freeCandidatesAt(position: Vec2, snapDist: number, adjacent?: { prev?: Vec2; next?: Vec2 }) {
+  if (!adjacent) return [position]
+  const { prev, next } = adjacent
+  const prevDir = prev ? unitVector(position, prev) : undefined, nextDir = next ? unitVector(position, next) : undefined
+  if (!prevDir && !nextDir) return [position]
+  if (!prevDir || !nextDir) {
+    const direction = nextDir ?? prevDir!, side = scale2(perpendicularCCW(direction), snapDist)
+    return [position, add2(position, side), add2(position, negate2(side))]
   }
-  if (!adjacent.length) add(position)
-  else adjacent.forEach(addForOccurrence)
-  return all
+  const turnCross = cross2(prevDir, nextDir)
+  if (Math.abs(turnCross) <= AARC_STATION_SNAP_EPSILON) {
+    const side = scale2(perpendicularCCW(nextDir), snapDist)
+    return [position, add2(position, side), add2(position, negate2(side))]
+  }
+  const nPrev = innerNormal2(prevDir, nextDir), nNext = innerNormal2(nextDir, prevDir)
+  const result: Vec2[] = [position]
+  const angleDeg = Math.acos(Math.max(-1, Math.min(1, dot2(prevDir, nextDir)))) * 180 / Math.PI
+  if (angleDeg >= 80) {
+    result.push(
+      rayIntersection(add2(position, scale2(nPrev, snapDist)), prevDir, add2(position, scale2(nNext, snapDist)), nextDir) ?? position,
+      rayIntersection(add2(position, scale2(negate2(nPrev), snapDist)), prevDir, add2(position, scale2(negate2(nNext), snapDist)), nextDir) ?? position,
+    )
+  }
+  result.push(add2(position, scale2(negate2(nPrev), snapDist)), add2(position, scale2(negate2(nNext), snapDist)))
+  return result
 }
 
-/** Build the same free-point candidate oracle used by AARC's snap engine. */
+/** AARC intentionally uses only the first adjacent line occurrence for free-point snap candidates. */
 export function createAarcFreeSnapCandidateResolver(
   pointPositions: Map<number, AarcSourcePointPosition>,
   lines: AarcSourceLineChain[],
   getSnapDistance: (pointId: number) => number,
 ): (point: AarcStationPointInput) => AarcStationSnapInfo {
-  const adjacent = new Map<number, Array<{ prev?: Vec2; next?: Vec2 }>>()
+  const firstAdjacent = new Map<number, { prev?: Vec2; next?: Vec2 }>()
   for (const line of lines) {
     for (let index = 0; index < line.pts.length; index += 1) {
-      const pointId = line.pts[index], position = pointPositions.get(pointId)
-      if (!position) continue
+      const pointId = line.pts[index]
+      if (firstAdjacent.has(pointId) || !pointPositions.has(pointId)) continue
       const prevPosition = index > 0 ? pointPositions.get(line.pts[index - 1]) : undefined
       const nextPosition = index + 1 < line.pts.length ? pointPositions.get(line.pts[index + 1]) : undefined
-      const entries = adjacent.get(pointId) ?? []
-      entries.push({ ...(prevPosition ? { prev: [prevPosition.x, prevPosition.y] as Vec2 } : {}), ...(nextPosition ? { next: [nextPosition.x, nextPosition.y] as Vec2 } : {}) })
-      adjacent.set(pointId, entries)
+      firstAdjacent.set(pointId, {
+        ...(prevPosition ? { prev: [prevPosition.x, prevPosition.y] as Vec2 } : {}),
+        ...(nextPosition ? { next: [nextPosition.x, nextPosition.y] as Vec2 } : {}),
+      })
     }
   }
   return point => {
     const position: Vec2 = [point.x, point.y]
-    const candidates = point.free ? freeCandidatesAt(position, Math.max(0, getSnapDistance(point.id)), adjacent.get(point.id) ?? []) : [position]
+    const candidates = point.free ? freeCandidatesAt(position, Math.max(0, getSnapDistance(point.id)), firstAdjacent.get(point.id)) : [position]
     let reach = 0
     for (const candidate of candidates) reach = Math.max(reach, Math.abs(candidate[0] - position[0]), Math.abs(candidate[1] - position[1]))
-    return { candidates, reach, bbox: candidateBbox(candidates) }
+    return { candidates, reach, bbox: bboxOf(candidates) }
   }
 }

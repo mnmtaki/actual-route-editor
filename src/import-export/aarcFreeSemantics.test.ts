@@ -16,19 +16,30 @@ describe('AARC free-point semantics', () => {
     expect(result.nodes.map(node => [node.x, node.y, node.free])).toEqual([[0, 0, undefined], [23, 17, true], [80, 17, undefined]])
   })
 
-  it('supports free cluster off/strict/loose modes and candidate positions', () => {
-    const points = [{ id: 1, x: 0, y: 0, sourceOrder: 0, free: true }, { id: 2, x: 100, y: 0, sourceOrder: 1 }]
+  it('clusters free stations when any candidate pair falls inside the AARC clinging radius', () => {
+    const points = [{ id: 1, x: 0, y: 0, sourceOrder: 0, free: true }, { id: 2, x: 100, y: 0, sourceOrder: 1, free: true }]
     const memberships = new Map([[1, [1]], [2, [2]]])
-    const candidates = (point: { id: number }) => point.id === 1 ? { candidates: [[100, 0] as [number, number]] } : { candidates: [[100, 0] as [number, number]] }
-    expect(buildAarcStationComponents(points, memberships, [], { configClingingDist: 25, getSnapSize: () => 1, freeClusterMode: 'off', getSnapCandidates: candidates }).components).toHaveLength(2)
-    expect(buildAarcStationComponents(points, memberships, [], { configClingingDist: 25, getSnapSize: () => 1, freeClusterMode: 'loose', getSnapCandidates: candidates, getSnapThreshold: () => 0 }).components).toHaveLength(1)
-    const strictCandidates = (point: { id: number }) => point.id === 1 ? { candidates: [[99, 0] as [number, number]] } : { candidates: [[99, 0] as [number, number]] }
-    expect(buildAarcStationComponents(points, memberships, [], { configClingingDist: 25, getSnapSize: () => 1, freeClusterMode: 'strict', getSnapCandidates: strictCandidates, getSnapThreshold: () => 0 }).components).toHaveLength(2)
+    const candidates = (point: { id: number }) => point.id === 1
+      ? { candidates: [[0, 0], [50, 0]] as Array<[number, number]> }
+      : { candidates: [[100, 0], [50, 0]] as Array<[number, number]> }
+    const result = buildAarcStationComponents(points, memberships, { configClingingDist: 25, getSnapSize: () => 1, getSnapCandidates: candidates })
+    expect(result.components).toHaveLength(1)
+    expect(result.components[0].pointIds).toEqual([1, 2])
   })
-  it('generates upstream-style free-point candidates from each source occurrence', () => {
-    const resolver = createAarcFreeSnapCandidateResolver(new Map([[1, { x: 0, y: 0 }], [2, { x: 0, y: 100 }], [3, { x: 100, y: 0 }]]), [{ pts: [2, 1, 3] }], () => 10)
+
+  it('generates upstream-style free-point candidates from only the first source-line occurrence', () => {
+    const positions = new Map([
+      [1, { x: 0, y: 0 }],
+      [2, { x: 0, y: 100 }],
+      [3, { x: 100, y: 0 }],
+      [4, { x: 0, y: -100 }],
+      [5, { x: -100, y: 0 }],
+    ])
+    const resolver = createAarcFreeSnapCandidateResolver(positions, [{ pts: [2, 1, 3] }, { pts: [4, 1, 5] }], () => 10)
     const info = resolver({ id: 1, x: 0, y: 0, sourceOrder: 0, free: true })
     expect(info.candidates).toEqual(expect.arrayContaining([[0, 0], [10, 10], [-10, -10], [-10, 0], [0, -10]]))
+    // Candidates specific to the second occurrence must not leak in.
+    expect(info.candidates).not.toContainEqual([10, 0])
     expect(info.bbox!.minX).toBe(-10)
     expect(info.bbox!.maxY).toBe(10)
   })
@@ -142,5 +153,4 @@ describe('AARC free-point semantics', () => {
     expect(l2First.source?.pointIds).toEqual([1, 3])
     expect(project.stations.find(station => station.id === l1First.toStationId)?.free).toBe(true)
   })
-
 })

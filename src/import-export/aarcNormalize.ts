@@ -7,7 +7,6 @@ export interface AarcNormalizedConfig extends Record<string, unknown> {
   lineWidthMapped: Record<string, Record<string, unknown>>
   snapOctaClingPtPtDist: number
   snapOctaClingPtPtThrs: number
-  freePtClusterMode: 'off' | 'strict' | 'loose'
 }
 export interface AarcNormalizedSave extends Record<string, unknown> {
   idIncre: number
@@ -51,7 +50,6 @@ export const DEFAULT_AARC_CONFIG: AarcNormalizedConfig = {
   lineWidthMapped: {},
   snapOctaClingPtPtDist: 25,
   snapOctaClingPtPtThrs: 10,
-  freePtClusterMode: 'loose',
 }
 
 function normalizeConfig(value: unknown): AarcNormalizedConfig {
@@ -59,7 +57,6 @@ function normalizeConfig(value: unknown): AarcNormalizedConfig {
   const mappedRaw = object(raw.lineWidthMapped)
   const lineWidthMapped: Record<string, Record<string, unknown>> = {}
   for (const [key, item] of Object.entries(mappedRaw)) if (item && typeof item === 'object' && !Array.isArray(item)) lineWidthMapped[key] = { ...object(item) }
-  const mode = raw.freePtClusterMode === 'off' || raw.freePtClusterMode === 'strict' ? raw.freePtClusterMode : 'loose'
   return {
     ...DEFAULT_AARC_CONFIG,
     ...raw,
@@ -68,7 +65,6 @@ function normalizeConfig(value: unknown): AarcNormalizedConfig {
     lineTurnAreaRadius: positive(raw.lineTurnAreaRadius) ?? DEFAULT_AARC_CONFIG.lineTurnAreaRadius,
     snapOctaClingPtPtDist: positive(raw.snapOctaClingPtPtDist) ?? DEFAULT_AARC_CONFIG.snapOctaClingPtPtDist,
     snapOctaClingPtPtThrs: finite(raw.snapOctaClingPtPtThrs) ?? DEFAULT_AARC_CONFIG.snapOctaClingPtPtThrs,
-    freePtClusterMode: mode,
     lineWidthMapped,
   }
 }
@@ -150,7 +146,7 @@ export interface AarcLineMetrics { widthRatio: number; bodyWidth: number; ptSize
 const mappedFor = (config: AarcNormalizedConfig, ratio: number) => config.lineWidthMapped[String(ratio)] ?? config.lineWidthMapped[String(Number(ratio))]
 const mappedValue = (mapped: Record<string, unknown> | undefined, key: string): number | undefined => mapped && positive(mapped[key]) !== undefined ? positive(mapped[key]) : undefined
 
-/** Upstream saveStore precedence, including its intentional `||` fallback for ptSize/ptNameSize. */
+/** Upstream common-line saveStore precedence. */
 export function resolveAarcLineMetrics(line: Record<string, unknown>, config: AarcNormalizedConfig | Record<string, unknown>): AarcLineMetrics {
   const cfg = normalizeConfig(config), ratio = positive(line.width) ?? 1, mapped = mappedFor(cfg, ratio)
   const mappedSize = mappedValue(mapped, 'staSize'), mappedName = mappedValue(mapped, 'staNameSize')
@@ -160,17 +156,43 @@ export function resolveAarcLineMetrics(line: Record<string, unknown>, config: Aa
   const ptNameSize = (positive(line.ptNameSize) ?? mappedName ?? ratio) || 1
   const ptSnapFallback = positive(line.ptSize) ?? mappedSize ?? ratio
   const ptNameSnapFallback = positive(line.ptSize) ?? mappedSize ?? ratio
-  // Upstream keeps an explicitly present mapped sta*SnapSize, including 0;
-  // only a missing value falls through to the normal size/width fallback.
   const ptSnapSize = positive(line.ptSnapSize) ?? (mappedSnap !== undefined ? mappedSnap : ptSnapFallback)
   const ptNameSnapSize = positive(line.ptNameSnapSize) ?? (mappedNameSnap !== undefined ? mappedNameSnap : ptNameSnapFallback)
   return { widthRatio: ratio, bodyWidth: cfg.lineWidth * ratio, ptSize, ptNameSize, ptSnapSize, ptNameSnapSize }
 }
 
+/**
+ * Mirror AARC saveStore's per-point metric aggregation.
+ * - common lines use the normal ptSize / mapped size / width precedence;
+ * - terrain lines contribute min(width || 1, 1) to station render/snap size;
+ * - station-name metrics only consider common lines.
+ */
 export function aggregateAarcPointMetrics(pointId: number, lines: Array<Record<string, unknown>>, memberships: Map<number, number[]>, config: AarcNormalizedConfig | Record<string, unknown>) {
   const ids = memberships.get(pointId) ?? [], byId = new Map(lines.map(line => [finite(line.id), line]))
-  const metrics = ids.map(id => byId.get(id)).filter((line): line is Record<string, unknown> => Boolean(line)).map(line => resolveAarcLineMetrics(line, config))
-  return { ptSize: metrics.length ? Math.max(...metrics.map(item => item.ptSize)) : 1, ptNameSize: metrics.length ? Math.max(...metrics.map(item => item.ptNameSize)) : 1, ptSnapSize: metrics.length ? Math.max(...metrics.map(item => item.ptSnapSize)) : 1, ptNameSnapSize: metrics.length ? Math.max(...metrics.map(item => item.ptNameSnapSize)) : 1 }
+  const common: AarcLineMetrics[] = []
+  const ptSizes: number[] = []
+  const ptSnapSizes: number[] = []
+  for (const id of ids) {
+    const line = byId.get(id)
+    if (!line) continue
+    const width = positive(line.width) ?? 1
+    if (finite(line.type) === 1) {
+      const terrainSize = Math.min(width, 1)
+      ptSizes.push(terrainSize)
+      ptSnapSizes.push(terrainSize)
+      continue
+    }
+    const metrics = resolveAarcLineMetrics(line, config)
+    common.push(metrics)
+    ptSizes.push(metrics.ptSize)
+    ptSnapSizes.push(metrics.ptSnapSize)
+  }
+  return {
+    ptSize: ptSizes.length ? Math.max(...ptSizes) : 1,
+    ptNameSize: common.length ? Math.max(...common.map(item => item.ptNameSize)) : 1,
+    ptSnapSize: ptSnapSizes.length ? Math.max(...ptSnapSizes) : 1,
+    ptNameSnapSize: common.length ? Math.max(...common.map(item => item.ptNameSnapSize)) : 1,
+  }
 }
 
 export function readAarcTextOptions(value: unknown): AarcTextOptions | undefined {

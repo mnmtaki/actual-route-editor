@@ -28,15 +28,15 @@ describe('AARC per-line station occurrence anchors', () => {
     expect(project.stations).toHaveLength(437)
   })
 
-  it('follows AARC pointLinks transitively without a same-line business veto', () => {
+  it('keeps a helper sta point inside a transitive automatic proximity cluster', () => {
     const point = (id: number, x: number, y: number, sourceOrder = id): AarcStationPointInput => ({ id, x, y, sourceOrder })
     const result = buildAarcStationComponents(
       [point(1, 0, 0), point(2, 24, 0), point(3, 48, 0)],
       new Map([[1, [10]], [2, []], [3, [10]]]),
-      [{ pts: [1, 2, 3] }],
     )
     expect(result.components).toHaveLength(1)
+    expect(result.components[0].pointIds).toEqual([1, 2, 3])
     expect(result.components[0].referencedPointIds).toEqual([1, 3])
-    expect(result.warnings).toEqual([])
+    expect(result.components[0].helperPointIds).toEqual([2])
   })
 })

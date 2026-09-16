@@ -3,6 +3,7 @@ import { collapseLinesByServiceFamily, getRootLineId } from '../data/lineIdentit
 import { getCompoundStationCanonical, getCompoundStationMemberIds, getCompoundStationRelations } from '../data/compoundStation'
 import { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import { isLineOperationalAt, isRelationOperationalAt, isSegmentOperationalAt } from '../data/operationEvents'
+import { isFakeLine } from '../data/fakeLines'
 export { isLineOperationalAt, isRelationOperationalAt, isSegmentOperationalAt } from '../data/operationEvents'
 
 /** Legacy single-interval helper retained for import/tests. New runtime visibility uses operation-history aware helpers below. */
@@ -18,23 +19,18 @@ function compareRelations(project: ActualRouteProject, stationId: string, a: str
 
 /**
  * Effective passenger service at one Station×Line relation.
- *
- * Hierarchy is intentionally asymmetric:
- * - a relation-level closure may suppress an otherwise open line/segment;
- * - a relation-level opening can never resurrect a closed parent line or a station
- *   whose every incident segment in the same passenger service family is closed.
- * A later network operation event must reopen the parent service first.
+ * Fake lines remain visible artwork but never create passenger service.
  */
 export function isStationLineServiceActiveAt(project: ActualRouteProject, relation: StationLineRelation, time: string) {
   const line = project.lines.find(item => item.id === relation.lineId)
-  if (!line?.visible || !isLineOperationalAt(line, time) || !isRelationOperationalAt(relation, time)) return false
+  if (!line?.visible || isFakeLine(line) || !isLineOperationalAt(line, time) || !isRelationOperationalAt(relation, time)) return false
   const memberIds = new Set(getCompoundStationMemberIds(project, relation.stationId))
   const relationFamily = getRootLineId(project, line)
   return project.geometry.segments.some(segment => {
     if (!memberIds.has(segment.fromStationId) && !memberIds.has(segment.toStationId)) return false
     if (!isSegmentOperationalAt(segment, time)) return false
     const effectiveLine = project.lines.find(item => item.id === resolveSegmentLineAt(segment, time))
-    return Boolean(effectiveLine && getRootLineId(project, effectiveLine) === relationFamily)
+    return Boolean(effectiveLine && !isFakeLine(effectiveLine) && getRootLineId(project, effectiveLine) === relationFamily)
   })
 }
 
@@ -46,7 +42,7 @@ export function getActiveLinesAtStation(project: ActualRouteProject, stationId: 
   for (const relation of getCompoundStationRelations(project, stationId)) if (!relationByLine.has(relation.lineId) && isStationLineServiceActiveAt(project, relation, time)) relationByLine.set(relation.lineId, relation)
   return [...relationByLine.values()]
     .map(relation => project.lines.find(line => line.id === relation.lineId))
-    .filter((line): line is Line => Boolean(line))
+    .filter((line): line is Line => Boolean(line) && !isFakeLine(line))
     .sort((a, b) => compareRelations(project, stationId, a.id, b.id))
 }
 export function getPassengerLinesAtStation(project: ActualRouteProject, stationId: string, time: string): Line[] {
@@ -54,26 +50,28 @@ export function getPassengerLinesAtStation(project: ActualRouteProject, stationI
 }
 export function getPassengerVisibleRelationIds(project: ActualRouteProject, stationId: string, time: string, lineIds?: string[]): string[] {
   const ids = lineIds ?? getActiveLinesAtStation(project, stationId, time).map(line => line.id)
-  const representativeFamilies = new Set(ids.map(id => project.lines.find(line => line.id === id)).filter((line): line is Line => Boolean(line)).map(line => getRootLineId(project, line)))
+  const representativeFamilies = new Set(ids.map(id => project.lines.find(line => line.id === id)).filter((line): line is Line => Boolean(line) && !isFakeLine(line)).map(line => getRootLineId(project, line)))
   return getCompoundStationRelations(project, stationId)
     .filter(relation => {
       const relationLine = project.lines.find(line => line.id === relation.lineId)
-      return Boolean(relationLine && representativeFamilies.has(getRootLineId(project, relationLine)) && isStationLineServiceActiveAt(project, relation, time))
+      return Boolean(relationLine && !isFakeLine(relationLine) && representativeFamilies.has(getRootLineId(project, relationLine)) && isStationLineServiceActiveAt(project, relation, time))
     })
     .map(relation => relation.id)
 }
 export function getFirstLineAtStation(project: ActualRouteProject, stationId: string) {
   const ids = getCompoundStationRelations(project, stationId).map(relation => relation.lineId)
-  return project.lines.filter(line => ids.includes(line.id)).sort((a, b) => compareRelations(project, stationId, a.id, b.id))[0]
+  return project.lines.filter(line => ids.includes(line.id) && !isFakeLine(line)).sort((a, b) => compareRelations(project, stationId, a.id, b.id))[0]
 }
 export function getOrientationAnchorLine(project: ActualRouteProject, stationId: string, time: string) {
   const station = project.stations.find(item => item.id === stationId)
-  const anchor = station?.orientationAnchorLineId ? project.lines.find(line => line.id === station.orientationAnchorLineId) : getFirstLineAtStation(project, stationId)
+  const anchor = station?.orientationAnchorLineId ? project.lines.find(line => line.id === station.orientationAnchorLineId && !isFakeLine(line)) : getFirstLineAtStation(project, stationId)
   if (anchor && getCompoundStationRelations(project, stationId).some(relation => relation.lineId === anchor.id && isStationLineServiceActiveAt(project, relation, time))) return anchor
   return getActiveLinesAtStation(project, stationId, time)[0]
 }
 export type ActiveSegment = Segment & { effectiveLineIdAtCurrentDate: string }
 export function getActiveNetworkAtTime(project: ActualRouteProject, time: string) {
+  // Keep fake lines/segments in the drawable network. Passenger relations and
+  // station identity are filtered through isStationLineServiceActiveAt above.
   const lines = project.lines.filter(line => line.visible && isLineOperationalAt(line, time))
   const lineIds = new Set(lines.map(line => line.id))
   const relations = project.stationLineRelations.filter(relation => lineIds.has(relation.lineId) && isStationLineServiceActiveAt(project, relation, time))

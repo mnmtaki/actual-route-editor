@@ -22,6 +22,10 @@ export interface AarcCompoundDetectionOptions {
   getSnapSize?: (pointId: number) => number
   getSnapCandidates?: (point: AarcStationPointInput) => AarcStationSnapInfo | undefined
   pointLinks?: unknown
+  /** Legacy caller compatibility only; upstream automatic clusters do not use this. */
+  getSnapThreshold?: (pointId: number) => number
+  /** Legacy caller compatibility only; this is not an upstream AARC config. */
+  freeClusterMode?: 'off' | 'strict' | 'loose'
 }
 
 class DisjointSet {
@@ -71,8 +75,6 @@ export function detectAarcCompoundGroups(
   const validIds = new Set(sourcePoints.map(point => point.id))
   const explicit = readAarcExplicitClusterLinks(options.pointLinks ?? [], validIds, warnings)
 
-  // Passenger grouping is the union of automatic cluster membership and
-  // explicit type=4 forced-interchange links. Keep edge reason provenance.
   const dsu = new DisjointSet()
   for (const point of sourcePoints) dsu.add(point.id)
   for (const component of automatic.components) {

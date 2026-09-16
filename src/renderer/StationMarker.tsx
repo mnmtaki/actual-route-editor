@@ -12,15 +12,19 @@ import { effectiveStationStyle } from '../data/style'
 import { lineWithEffectiveColor } from '../data/lineIdentity'
 import { getCompoundStationCanonical, isCompoundStationCanonical } from '../data/compoundStation'
 
-export function StationMarker({ project, station, time, selected, hitRadius = 24, onPointerDown, onLabelPointerDown }: {
+export function StationMarker({ project, station, time, selected, hitRadius = 24, onPointerDown, onLabelPointerDown, part = 'all' }: {
   project: ActualRouteProject; station: Station; time: string; selected: boolean; hitRadius?: number
   onPointerDown: (event: React.PointerEvent) => void; onLabelPointerDown: (event: React.PointerEvent) => void
+  part?: 'all' | 'marker' | 'label'
 }) {
   const canonical = getCompoundStationCanonical(project, station)
-  if (canonical && !isCompoundStationCanonical(project, station)) return <g className="compound-station-member-hit" data-compound-member-id={station.id} onPointerDown={onPointerDown}>
+  if (canonical && !isCompoundStationCanonical(project, station)) return part === 'label' ? null : <g className="compound-station-member-hit" data-compound-member-id={station.id} onPointerDown={onPointerDown}>
     <circle className="station-hit-target" cx={station.x} cy={station.y} r={hitRadius} fill="transparent" pointerEvents="all" />
   </g>
   const renderStation = canonical ?? station
+  if (part === 'label') return project.settings.labelsVisible && !renderStation.labelHidden
+    ? <StationLabel station={renderStation} settings={project.settings} showForeign={project.settings.showForeignStationNames} onPointerDown={onLabelPointerDown} />
+    : null
   const lines = getPassengerLinesAtStation(project, renderStation.id, time)
   const renderLines = lines.length > 1
     ? sortTransferLinesForSpatialOrder(project, renderStation.id, lines, time).map(line => lineWithEffectiveColor(project, line))
@@ -51,6 +55,6 @@ export function StationMarker({ project, station, time, selected, hitRadius = 24
       {selected && <circle className="station-selection-ring" cx={station.x} cy={station.y} r={selectionRadius} fill="none" stroke={selectionColor} strokeWidth={1.5} opacity={.58} vectorEffect="non-scaling-stroke" pointerEvents="none" />}
       <circle className="station-hit-target" cx={station.x} cy={station.y} r={hitRadius} fill="transparent" pointerEvents="all" />
     </g>
-    {project.settings.labelsVisible && !renderStation.labelHidden && <StationLabel station={renderStation} settings={project.settings} showForeign={project.settings.showForeignStationNames} onPointerDown={onLabelPointerDown} />}
+    {part === 'all' && project.settings.labelsVisible && !renderStation.labelHidden && <StationLabel station={renderStation} settings={project.settings} showForeign={project.settings.showForeignStationNames} onPointerDown={onLabelPointerDown} />}
   </g>
 }

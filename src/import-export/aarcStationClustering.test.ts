@@ -43,7 +43,7 @@ describe('AARC station connectivity graph', () => {
   it('does not add pointLinks to the automatic cluster graph', () => {
     const points = [point(1, 0, 0), point(2, 200, 0)]
     const memberships = new Map([[1, [10]], [2, [11]]])
-    const result = buildAarcStationComponents(points, memberships, [{ pts: [1, 2], type: 4 }])
+    const result = buildAarcStationComponents(points, memberships, [{ pts: [1, 2], type: 4 }], {})
     expect(result.components).toHaveLength(2)
     expect(result.edges).toHaveLength(0)
   })

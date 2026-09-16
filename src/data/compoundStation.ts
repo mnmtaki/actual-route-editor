@@ -4,6 +4,14 @@ export function isPlaceholderStationName(name: unknown): boolean {
   return typeof name === 'string' && /^未命名站\s+\d+$/.test(name.trim())
 }
 
+function hasOwnSourceStationName(station: Station): boolean {
+  const rawName = station.source?.raw && typeof station.source.raw === 'object' ? (station.source.raw as Record<string, unknown>).name : undefined
+  if (typeof rawName === 'string' && rawName.trim()) return true
+  // Native/non-AARC stations do not carry borrowed-name provenance, so their
+  // normal non-placeholder name remains authoritative.
+  return station.source?.format !== 'aarc' && Boolean(station.name?.trim()) && !isPlaceholderStationName(station.name)
+}
+
 export function getCompoundStationMembers(project: ActualRouteProject, stationOrId: Station | string): Station[] {
   const station = typeof stationOrId === 'string' ? project.stations.find(item => item.id === stationOrId) : stationOrId
   if (!station) return []
@@ -16,9 +24,14 @@ export function getCompoundStationMembers(project: ActualRouteProject, stationOr
 export function getCompoundStationCanonical(project: ActualRouteProject, stationOrId: Station | string): Station | undefined {
   const members = getCompoundStationMembers(project, stationOrId)
   return [...members].sort((a, b) => {
+    const aOwnNamed = hasOwnSourceStationName(a)
+    const bOwnNamed = hasOwnSourceStationName(b)
     const aNamed = Boolean(a.name?.trim()) && !isPlaceholderStationName(a.name)
     const bNamed = Boolean(b.name?.trim()) && !isPlaceholderStationName(b.name)
-    return Number(bNamed) - Number(aNamed) || project.stations.indexOf(a) - project.stations.indexOf(b) || a.id.localeCompare(b.id)
+    return Number(bOwnNamed) - Number(aOwnNamed)
+      || Number(bNamed) - Number(aNamed)
+      || project.stations.indexOf(a) - project.stations.indexOf(b)
+      || a.id.localeCompare(b.id)
   })[0]
 }
 

@@ -5,6 +5,7 @@ import { getTransferMarkerLayout } from '../geometry/tangent'
 import { sortTransferLinesForSpatialOrder } from '../geometry/transferOrdering'
 import { SegmentArtwork, StructureRunArtwork } from '../renderer/segmentStyles'
 import { compileElevatedRuns, getSegmentStyleIntervals } from '../data/structure'
+import { sortByAarcCommonLineZIndex } from '../data/aarcLineZIndex'
 import { getStationStyle } from '../renderer/stationStyles'
 import { resolveStationStyle } from '../data/stationStyles'
 import { resolveTransferStyle } from '../data/transferStyles'
@@ -32,7 +33,7 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
   const defaultTransferDefinition = getStationStyle('default')
   const lineMap = useMemo(() => new Map(project.lines.map(line => [line.id, line])), [project.lines])
   const historicalProject = useMemo(() => ({ ...project, geometry: { ...project.geometry, segments: project.geometry.segments.map(segment => ({ ...segment, lineId: state.segmentStates[segment.id]?.lineId ?? segment.lineId })) } }), [project, state.segmentStates])
-  const segmentArtwork = useMemo(() => project.geometry.segments.map(segment => { const lineId = state.segmentStates[segment.id]?.lineId ?? segment.lineId; const historicalSegment = historicalProject.geometry.segments.find(item => item.id === segment.id) ?? segment; const line = lineMap.get(lineId); return { segment, historicalSegment, line: line ? lineWithEffectiveColor(project, line) : undefined } }), [project, state.segmentStates, historicalProject, lineMap])
+  const segmentArtwork = useMemo(() => sortByAarcCommonLineZIndex(project, project.geometry.segments.map(segment => { const lineId = state.segmentStates[segment.id]?.lineId ?? segment.lineId; const historicalSegment = historicalProject.geometry.segments.find(item => item.id === segment.id) ?? segment; const line = lineMap.get(lineId); return { segment, historicalSegment, line: line ? lineWithEffectiveColor(project, line) : undefined, lineId } }), item => item.lineId), [project, state.segmentStates, historicalProject, lineMap])
   const transferLayouts = useMemo(() => new Map(project.stations.filter(station => isCompoundStationCanonical(project, station)).map(station => { const visibleRelationIds = state.stationStates[station.id]?.visibleRelationIds; const stationStyle = effectiveStationStyle(station, project.settings); return [station.id, getTransferMarkerLayout(project, station.id, state.historyDate, visibleRelationIds, stationStyle.transferEndPadding)] as const })), [project, state.historyDate, state.stationStates])
   const elevatedRuns = useMemo(() => compileElevatedRuns(historicalProject, new Set(historicalProject.geometry.segments.filter(segment => lineMap.get(segment.lineId)?.visible).map(segment => segment.id)), Object.fromEntries(Object.entries(state.segmentStates).map(([id, value]) => [id, { revealProgress: value.revealProgress, revealFrom: value.revealFrom, opacity: value.opacity }]))), [historicalProject, lineMap, state.segmentStates])
   const visibleLineIds = new Set(segmentArtwork.filter(({ segment, line }) => line?.visible && (state.segmentStates[segment.id]?.revealProgress ?? 0) > 0).map(({ segment }) => state.segmentStates[segment.id]?.lineId ?? segment.lineId))

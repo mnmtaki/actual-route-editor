@@ -1,5 +1,7 @@
 import type { ActualRouteProject, Line } from './model'
 
+export type AarcCommonLineCap = 'butt' | 'round' | 'square'
+
 function rootLine(project: ActualRouteProject, line: Line): Line {
   const byId = new Map(project.lines.map(item => [item.id, item]))
   const seen = new Set<string>()
@@ -58,4 +60,11 @@ export function sortByAarcCommonLineZIndex<T>(
   const result = values.slice()
   slots.forEach((slot, index) => { result[slot] = sorted[index].value })
   return result
+}
+
+/** AARC common lines default to butt caps; native ActualRoute lines stay round. */
+export function resolveAarcCommonLineCap(line: Line): AarcCommonLineCap {
+  if (line.source?.format !== 'aarc') return 'round'
+  const cap = line.source.raw?.cap
+  return cap === 'round' || cap === 'square' || cap === 'butt' ? cap : 'butt'
 }

@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { createEmptyProject } from './storage'
 import type { Line, Segment } from './model'
-import { sortByAarcCommonLineZIndex } from './aarcLineZIndex'
+import { resolveAarcCommonLineCap, sortByAarcCommonLineZIndex } from './aarcLineZIndex'
 import { getActiveNetworkAtTime } from '../timeline/active'
 
-const source = (lineId: number, sourceZIndex: number, sourceParentId?: number) => ({
+const source = (lineId: number, sourceZIndex: number, sourceParentId?: number, raw?: Record<string, unknown>) => ({
   format: 'aarc' as const,
   lineId,
   sourceLineId: lineId,
   sourceZIndex,
   ...(sourceParentId !== undefined ? { sourceParentId } : {}),
+  ...(raw ? { raw } : {}),
 })
 
 const line = (id: string, order: number, z?: number, parentLineId?: string): Line => ({
@@ -67,5 +68,22 @@ describe('AARC common-line zIndex', () => {
     const active = getActiveNetworkAtTime(project, project.timeline.currentDate)
     expect(active.lines.map(item => item.id)).toEqual(['line-2', 'line-1'])
     expect(active.segments.map(item => item.id)).toEqual(['seg-2', 'seg-1'])
+  })
+})
+
+describe('AARC common-line cap', () => {
+  it('uses butt by default for AARC common lines and preserves native round caps', () => {
+    const native = line('native', 0)
+    const imported = line('line-1', 1, 0)
+    expect(resolveAarcCommonLineCap(native)).toBe('round')
+    expect(resolveAarcCommonLineCap(imported)).toBe('butt')
+  })
+
+  it('honors an explicit AARC source cap', () => {
+    const imported = line('line-1', 0, 0)
+    imported.source = source(1, 0, undefined, { cap: 'square' })
+    expect(resolveAarcCommonLineCap(imported)).toBe('square')
+    imported.source.raw = { cap: 'round' }
+    expect(resolveAarcCommonLineCap(imported)).toBe('round')
   })
 })

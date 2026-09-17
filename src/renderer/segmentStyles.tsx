@@ -14,7 +14,10 @@ export function LineStyleArtwork({ style, line, path, lineWidth, revealProgress 
   const layers = resolveLineStyleLayers(style, line.color, lineWidth), baseCap = resolveAarcCommonLineCap(line)
   return <g data-line-style-id={style.id} data-line-style-layers={layers.length}>
     {style.hideBaseLine !== true && <path {...common} className="line-style-base" data-line-style-base="true" stroke={line.color} strokeWidth={lineWidth} strokeLinecap={baseCap} strokeLinejoin="round" />}
-    {layers.map((layer, index) => <path key={layer.id} {...common} className={index === layers.length - 1 ? className : 'line-style-layer line-style-layer-' + index} data-line-style-layer={layer.id} stroke={layer.resolvedColor} strokeWidth={layer.resolvedWidth} strokeOpacity={layer.resolvedOpacity} strokeLinecap={layer.lineCap ?? baseCap} strokeLinejoin={layer.lineJoin ?? 'round'} strokeDasharray={reveal >= 1 && layer.resolvedDash ? layer.resolvedDash : common.strokeDasharray} />)}
+    {layers.map((layer, index) => {
+      const cap = line.source?.format === 'aarc' && style.id === BUILTIN_NORMAL_STYLE_ID && layer.id === 'normal-main' ? baseCap : (layer.lineCap ?? baseCap)
+      return <path key={layer.id} {...common} className={index === layers.length - 1 ? className : 'line-style-layer line-style-layer-' + index} data-line-style-layer={layer.id} stroke={layer.resolvedColor} strokeWidth={layer.resolvedWidth} strokeOpacity={layer.resolvedOpacity} strokeLinecap={cap} strokeLinejoin={layer.lineJoin ?? 'round'} strokeDasharray={reveal >= 1 && layer.resolvedDash ? layer.resolvedDash : common.strokeDasharray} />
+    })}
   </g>
 }
 
@@ -29,7 +32,7 @@ export function SegmentArtwork({ segment, line, path, lineWidth, revealProgress 
     return <g data-segment-artwork="elevated" data-segment-id={segment.id} data-reveal-progress={reveal}><path {...common} className="segment-elevated-outer" stroke={legacy.outerColor} strokeWidth={legacy.outerWidth} /><path {...common} className="segment-elevated-separator" stroke={legacy.separatorColor} strokeWidth={legacy.separatorWidth} /><path {...common} className="segment-main" stroke={legacy.mainColor} strokeWidth={legacy.mainWidth} /></g>
   }
   if (style === null) return <g data-segment-artwork="base" data-segment-id={segment.id}><PlainLineArtwork line={line} path={path} lineWidth={lineWidth} revealProgress={revealProgress} revealFrom={revealFrom} opacity={opacity} /></g>
-  const effectiveStyle = style ?? { id: BUILTIN_NORMAL_STYLE_ID, name: '普通', hideBaseLine: true, layers: [{ id: 'normal-main', colorMode: 'followLine' as const, width: 1, widthMode: 'ratio' as const, lineCap: resolveAarcCommonLineCap(line) }], builtin: true }, reveal = Math.min(1, Math.max(0, revealProgress)), dashOffset = Number(((revealFrom === 'from' ? 1 : -1) * (1 - reveal) * PRESENTATION_PATH_LENGTH).toFixed(3))
+  const effectiveStyle = style ?? { id: BUILTIN_NORMAL_STYLE_ID, name: '普通', hideBaseLine: true, layers: [{ id: 'normal-main', colorMode: 'followLine' as const, width: 1, widthMode: 'ratio' as const }], builtin: true }, reveal = Math.min(1, Math.max(0, revealProgress)), dashOffset = Number(((revealFrom === 'from' ? 1 : -1) * (1 - reveal) * PRESENTATION_PATH_LENGTH).toFixed(3))
   return <g data-segment-artwork="base" data-segment-id={segment.id} data-reveal-progress={reveal} data-stroke-dashoffset={dashOffset}><LineStyleArtwork style={effectiveStyle} line={line} path={path} lineWidth={lineWidth} revealProgress={revealProgress} revealFrom={revealFrom} opacity={opacity} /></g>
 }
 
@@ -58,4 +61,4 @@ function TerminalCaps({ run, radius, fill, layer }: { run: StructureRun; radius:
 function halfCapPath(radius: number) { return `M 0 ${-radius} A ${radius} ${radius} 0 0 1 0 ${radius} L 0 ${-radius} Z` }
 function angle(value: { x: number; y: number }) { return Math.atan2(value.y, value.x) * 180 / Math.PI }
 function mixHex(source: string, target: string, amount: number) { const a = parseHex(source) ?? parseHex('#555555')!, b = parseHex(target)!; const channel = (from: number, to: number) => Math.round(from + (to - from) * amount).toString(16).padStart(2, '0'); return `#${channel(a[0], b[0])}${channel(a[1], b[1])}${channel(a[2], b[2])}` }
-function parseHex(value: string): [number, number, number] | null { const match = /^#([0-9a-f]{6})$/i.exec(value); return match ? [Number.parseInt(match[1].slice(0, 2), 16), Number.parseInt(match[1].slice(2, 4), 16)] as never : null }
+function parseHex(value: string): [number, number, number] | null { const match = /^#([0-9a-f]{6})$/i.exec(value); return match ? [Number.parseInt(match[1].slice(0, 2), 16), Number.parseInt(match[1].slice(2, 4), 16), Number.parseInt(match[1].slice(4, 6), 16)] : null }

@@ -1,5 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import css from '../ui-system.css?raw'
+
+const css = readFileSync(fileURLToPath(new URL('../ui-system.css', import.meta.url)), 'utf8')
 
 describe('unified editor visual system', () => {
   it('defines one shared set of editor tokens', () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { demoProject } from './demo'
 import { getEffectiveLineColor, getRootLineId, collapseLinesByServiceFamily } from './lineIdentity'
 import { getLineParentIdAt, projectWithLineParentsAt, updateLineParentHistoryEntry, validateLineParentHistory } from './lineParentHistory'
+import { deleteLineAndOrphans } from './operations'
 import { parseProjectJson, serializeProject } from '../import-export/projectJson'
 import { compileHistoryEvents } from '../presentation/compiler'
 
@@ -108,5 +109,39 @@ describe('line parent history', () => {
     const snapshot = projectWithLineParentsAt(project, '2015-01-01')
     expect(snapshot.lines.find(item => item.id === 'line-branch')?.parentLineId).toBe('line-a')
     expect(project.lines.find(item => item.id === 'line-branch')?.parentLineId).toBeUndefined()
+  })
+
+  it('does not mutate the project when a parent-history edit is rejected', () => {
+    const project = projectWithHistory()
+    project.lines.push({
+      id: 'line-subbranch',
+      name: '子支线',
+      color: '#000',
+      parentLineId: 'line-branch',
+      stationSequence: ['s1'],
+      lineOrder: 4,
+      visible: true,
+      locked: false,
+    })
+    const before = structuredClone(project)
+    expect(() => updateLineParentHistoryEntry(project, 'line-a', {
+      id: 'cycle',
+      effectiveAt: '2015-01-01',
+      parentLineId: 'line-subbranch',
+    })).toThrow('循环')
+    expect(project).toEqual(before)
+  })
+
+  it('clears surviving historical references to a deleted former parent line', () => {
+    const project = projectWithHistory()
+    const next = deleteLineAndOrphans(project, 'line-a')
+    const branch = next.lines.find(item => item.id === 'line-branch')!
+    expect(branch).toBeTruthy()
+    expect(branch.parentHistory?.map(entry => [entry.effectiveAt, entry.parentLineId])).toEqual([
+      [null, null],
+      ['2010-01-01', null],
+      ['2020-01-01', null],
+    ])
+    expect(validateLineParentHistory(next)).toEqual([])
   })
 })

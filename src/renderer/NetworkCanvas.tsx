@@ -23,6 +23,7 @@ import { isSegmentGeometryLocked, isStationGeometryLocked, lockedStationMessage 
 import { translateStationWithAnchors } from '../data/stationAnchor'
 import { lineWithEffectiveColor } from '../data/lineIdentity'
 import { projectWithLineParentsAt } from '../data/lineParentHistory'
+import { projectWithLineColorsAt } from '../data/lineColorHistory'
 import { getCompoundStationCanonical, isCompoundStationCanonical } from '../data/compoundStation'
 import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, demoteTerminalStationToDrawingPoint } from '../data/operations'
 
@@ -61,7 +62,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
   const shown = preview ?? project
   const active = useMemo(() => getActiveNetworkAtTime(shown, shown.timeline.currentDate), [shown])
-  const historicalIdentityProject = useMemo(() => projectWithLineParentsAt(shown, shown.timeline.currentDate), [shown])
+  const historicalIdentityProject = useMemo(() => projectWithLineColorsAt(projectWithLineParentsAt(shown, shown.timeline.currentDate), shown.timeline.currentDate), [shown])
   const activeProject = useMemo(() => {
     const effectiveById = new Map(active.segments.map(segment => [segment.id, segment]))
     return { ...historicalIdentityProject, geometry: { ...shown.geometry, segments: shown.geometry.segments.map(segment => effectiveById.get(segment.id) ?? segment) } }

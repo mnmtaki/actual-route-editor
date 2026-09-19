@@ -6,6 +6,7 @@ import { splitSegmentStructure } from './structure'
 import { appendSegmentLineHistory } from './segmentLineHistory'
 import { labelOffsetFor } from './style'
 import { isLineLocked, isSegmentGeometryLocked, isStationGeometryLocked } from './lineLock'
+import { getEffectiveLineColor } from './lineIdentity'
 
 export interface Point { x: number; y: number }
 
@@ -41,6 +42,38 @@ export function createLine(project: ActualRouteProject, input: NewLineInput): { 
     lineBadges: [],
     lineOrder: next.lines.length,
     openedAt: input.openedAt || null,
+    closedAt: null,
+    visible: true,
+    locked: false,
+  })
+  return { project: next, lineId }
+}
+
+export interface NewBranchLineInput {
+  name?: string
+  openedAt?: ISODate
+}
+
+/**
+ * Create a native child Line without mutating the parent topology.
+ * The child owns its stations/segments/timeline state, while its visible color
+ * follows the parent service family through getEffectiveLineColor().
+ */
+export function createBranchLine(project: ActualRouteProject, parentLineId: string, input: NewBranchLineInput = {}): { project: ActualRouteProject; lineId: string | null; error?: string } {
+  const parent = project.lines.find(line => line.id === parentLineId)
+  if (!parent) return { project, lineId: null, error: '未找到主线' }
+  if (parent.isFake) return { project, lineId: null, error: '伪线不能作为原生支线的主线' }
+  const next = structuredClone(project)
+  const lineId = uid('line')
+  next.lines.push({
+    id: lineId,
+    name: input.name?.trim() || '',
+    color: getEffectiveLineColor(project, parent),
+    parentLineId,
+    stationSequence: [],
+    lineBadges: [],
+    lineOrder: next.lines.length,
+    openedAt: input.openedAt || parent.openedAt || next.timeline.currentDate || null,
     closedAt: null,
     visible: true,
     locked: false,

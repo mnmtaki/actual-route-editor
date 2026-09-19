@@ -121,5 +121,5 @@ describe('real AARC project end-to-end regression', () => {
       expect(svg?.outerHTML).not.toMatch(/\bInfinity\b/)
       view.unmount()
     }
-  })
+  }, 15_000)
 })

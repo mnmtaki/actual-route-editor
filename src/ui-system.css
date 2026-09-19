@@ -69,6 +69,9 @@
   --ui-hover: var(--ui-surface-muted);
   --ui-selected: var(--ui-accent-soft);
   --ui-muted: var(--ui-text-muted);
+  --text: var(--ui-text);
+  --muted: var(--ui-text-muted);
+  --accent-soft: var(--ui-accent-soft);
   --ui-radius-button: var(--ui-radius-sm);
   --ui-radius-input: var(--ui-radius-sm);
   --ui-radius-panel: var(--ui-radius-lg);
@@ -95,6 +98,7 @@ textarea {
 }
 
 button {
+  cursor: pointer;
   min-height: var(--ui-control-h);
   border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius-sm);
@@ -711,3 +715,14 @@ summary:focus-visible,
     border-radius: var(--ui-radius-xl) var(--ui-radius-xl) 0 0;
   }
 }
+
+
+/* Semantic states kept out of legacy component styles. */
+.fatal-error{background:var(--ui-surface-muted);color:var(--ui-text)}
+.fatal-error h1,.phase-error,.raster-warning{color:var(--ui-danger)}
+.fatal-error pre,.raster-warning{border-color:var(--ui-danger-border);background:var(--ui-danger-soft)}
+.phase-warning,.deferred-opening-note{color:#956b22}
+.phase-preview-copy,.presentation-message{color:var(--ui-success)}
+.station-count,.style-range output,.build-version{color:var(--ui-text-muted)!important}
+.style-range,.style-select,.structure-control{color:var(--ui-text-secondary)}
+.opening-phases-title strong,.station-opening-row strong,.visual-style-panel h4,.typography-section-title{color:var(--ui-text)}

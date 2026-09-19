@@ -19,6 +19,21 @@ function isAarcLine(line: Line | undefined): line is Line {
   return line?.source?.format === 'aarc'
 }
 
+function lineDepth(project: ActualRouteProject, line: Line): number {
+  const byId = new Map(project.lines.map(item => [item.id, item]))
+  const seen = new Set<string>()
+  let current = line
+  let depth = 0
+  while (current.parentLineId && !seen.has(current.id)) {
+    seen.add(current.id)
+    const parent = byId.get(current.parentLineId)
+    if (!parent) break
+    depth += 1
+    current = parent
+  }
+  return depth
+}
+
 /**
  * AARC sorts top-level common lines by zIndex and then renders each root line
  * together with its child lines. Only AARC-derived items are reordered here;
@@ -49,6 +64,10 @@ export function sortByAarcCommonLineZIndex<T>(
       const rootIndexA = lineIndex.get(rootA.id) ?? Number.MAX_SAFE_INTEGER
       const rootIndexB = lineIndex.get(rootB.id) ?? Number.MAX_SAFE_INTEGER
       if (rootIndexA !== rootIndexB) return rootIndexA - rootIndexB
+
+      const depthA = lineDepth(project, a.line)
+      const depthB = lineDepth(project, b.line)
+      if (depthA !== depthB) return depthA - depthB
 
       const lineIndexA = lineIndex.get(a.line.id) ?? Number.MAX_SAFE_INTEGER
       const lineIndexB = lineIndex.get(b.line.id) ?? Number.MAX_SAFE_INTEGER

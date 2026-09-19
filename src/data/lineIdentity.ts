@@ -1,5 +1,6 @@
 import type { ActualRouteProject, Line } from './model'
 import { getLineParentIdAt } from './lineParentHistory'
+import { getLineOwnColorAt } from './lineColorHistory'
 
 export function getRootLineId(project: ActualRouteProject, lineOrId: string | Line, date?: string | null): string {
   const start = typeof lineOrId === 'string' ? lineOrId : lineOrId.id
@@ -42,7 +43,7 @@ export function getEffectiveLineColor(project: ActualRouteProject, lineOrId: str
     if (!parent) break
     line = parent
   }
-  return line.color
+  return getLineOwnColorAt(line, date)
 }
 
 export function lineWithEffectiveColor(project: ActualRouteProject, line: Line, date?: string | null): Line {

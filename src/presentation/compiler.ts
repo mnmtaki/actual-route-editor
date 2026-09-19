@@ -6,6 +6,7 @@ import { getBeatRevealFronts, ORIGIN_HOLD_DURATION, ORIGIN_REVEAL_DURATION } fro
 import { getStationNameAt, normalizeStationNameHistory } from '../data/stationNameHistory'
 import { getLineNameAt, normalizeLineNameHistory } from '../data/lineNameHistory'
 import { getLineParentIdAt, normalizeLineParentHistory } from '../data/lineParentHistory'
+import { getLineOwnColorAt, normalizeLineColorHistory } from '../data/lineColorHistory'
 import { resolveSegmentLineAt, normalizeSegmentLineHistory } from '../data/segmentLineHistory'
 import { resolveMetersPerWorldUnit } from '../data/distance'
 import { getCompoundStationMemberIds } from '../data/compoundStation'
@@ -122,6 +123,12 @@ export function compileHistoryEvents(project: ActualRouteProject, settings: Pres
       const newParentLineId = entry.parentLineId || undefined
       events.push({ id: `${entry.effectiveAt}-line-parent-${line.id}-${entry.id}`, type: 'LINE_PARENT_CHANGE', eventTypes: ['LINE_PARENT_CHANGE'], historyDate: entry.effectiveAt, lineId: line.id, segmentIds: [], stationIds: [], interchangeStationIds: [], branches: [], lineParentChange: { lineId: line.id, ...(oldParentLineId ? { oldParentLineId } : {}), ...(newParentLineId ? { newParentLineId } : {}) } })
     }
+    const colorHistory = normalizeLineColorHistory(line)
+    if (colorHistory) for (const entry of colorHistory) {
+      if (!validDate(entry.effectiveAt) || entry.effectiveAt < start || entry.effectiveAt > end) continue
+      const oldColor = getLineOwnColorAt(line, previousDate(entry.effectiveAt))
+      events.push({ id: `${entry.effectiveAt}-line-color-${line.id}-${entry.id}`, type: 'LINE_COLOR_CHANGE', eventTypes: ['LINE_COLOR_CHANGE'], historyDate: entry.effectiveAt, lineId: line.id, segmentIds: [], stationIds: [], interchangeStationIds: [], branches: [], lineColorChange: { lineId: line.id, oldColor, newColor: entry.color } })
+    }
   }
   return events.sort((a, b) => a.historyDate.localeCompare(b.historyDate) || lineOrder(project, a.lineId) - lineOrder(project, b.lineId) || a.id.localeCompare(b.id))
 }
@@ -134,8 +141,8 @@ export function compilePresentationBeats(project: ActualRouteProject, events: Hi
     const totalPathLength = Math.max(0, ...branchLengths)
     const primaryBranchIndex = branchLengths.length ? branchLengths.indexOf(totalPathLength) : 0
     const opening = event.eventTypes.includes('SEGMENT_OPENING')
-    const revealDuration = event.type === 'LINE_REASSIGNMENT' || event.type === 'LINE_PARENT_CHANGE' ? 0.001 : opening ? totalPathLength / speed : event.type.includes('CLOSURE') ? PRESENTATION_ANIMATION.closureFadeDuration : settings.stationOpeningDuration
-    const cameraTransitionDuration = index === 0 || event.type === 'LINE_REASSIGNMENT' || event.type === 'LINE_PARENT_CHANGE' ? 0 : PRESENTATION_ANIMATION.cameraTransitionDuration
+    const revealDuration = event.type === 'LINE_REASSIGNMENT' || event.type === 'LINE_PARENT_CHANGE' || event.type === 'LINE_COLOR_CHANGE' ? 0.001 : opening ? totalPathLength / speed : event.type.includes('CLOSURE') ? PRESENTATION_ANIMATION.closureFadeDuration : settings.stationOpeningDuration
+    const cameraTransitionDuration = index === 0 || event.type === 'LINE_REASSIGNMENT' || event.type === 'LINE_PARENT_CHANGE' || event.type === 'LINE_COLOR_CHANGE' ? 0 : PRESENTATION_ANIMATION.cameraTransitionDuration
     const constructionStart = cursor + cameraTransitionDuration
     const originStationId = opening ? event.branches[primaryBranchIndex]?.[0]?.fromStationId : undefined
     const needsOriginReveal = Boolean(opening && originStationId && !stationWasVisibleBeforeBeat(project, events, index, originStationId, event.historyDate))

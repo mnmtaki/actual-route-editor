@@ -47,7 +47,7 @@ describe('常陵 AARC rail geometry audit', () => {
     const second = reconstructRailLines().map(item => item.result)
     expect(second).toEqual(first)
     const imported = convertAarcToActualRouteProject(rawSample, '常陵.aarc (9).json')
-    expect(imported.project.lines.filter(line => line.source?.format === 'aarc')).toHaveLength(19)
+    expect(imported.project.lines.filter(line => line.source?.format === 'aarc' && !line.isFake)).toHaveLength(19)
     expect(imported.project.geometry.segments.every(segment => segment.waypoints.every(waypoint => waypoint.source?.format === 'aarc'))).toBe(true)
     expect(imported.project.stations.every(station => station.source?.pointId === undefined || sourcePoints.get(station.source.pointId)?.sta === 1)).toBe(true)
     for (const waypoint of imported.project.geometry.segments.flatMap(segment => segment.waypoints)) {

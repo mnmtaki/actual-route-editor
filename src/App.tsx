@@ -302,7 +302,7 @@ export default function App() {
           openedAt,
         });
     if (!r.lineId) {
-      setNotice(r.error ?? "无法创建支线");
+      setNotice(('error' in r && r.error) || "无法创建支线");
       return;
     }
     const phase = createOpeningPhase(r.project, {

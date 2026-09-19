@@ -14,10 +14,11 @@ describe('AARC importer with the real 木阳 sample', () => {
 
   it('imports only the four real lines and ignores helper artwork', () => {
     const { project, summary } = imported()
-    expect(project.lines.map(line => line.name)).toEqual(['1', '3', '4', '6'])
+    expect(project.lines.filter(line => !line.isFake).map(line => line.name)).toEqual(['1', '3', '4', '6'])
     expect(summary.realLineCount).toBe(4)
     expect(summary.ignoredHelperCount).toBe(22)
     expect(project.lines.every(line => line.source?.format === 'aarc')).toBe(true)
+    expect(project.lines.filter(line => line.isFake)).toHaveLength(summary.ignoredHelperCount)
   })
 
   it('preserves AARC world coordinates and bilingual names exactly', () => {
@@ -88,12 +89,12 @@ describe('AARC importer with the real 木阳 sample', () => {
     expect(project.basemapPaths?.[0]).toMatchObject({ source: { format: 'aarc', sourceLineId: 127, sourceWidthRatio: 12, sourcePhysicalWidth: 168 }, closed: true, isFilled: true, zIndex: 0, color: '#2B5D52', width: 168 })
     expect(project.basemapPaths?.[0].points.at(-1)?.id).not.toBe(project.basemapPaths?.[0].points[0].id)
     expect(project.basemapPaths?.[0].points).toHaveLength(9)
-    expect(project.lines.map(line => line.name)).toEqual(['1', '3', '4', '6'])
+    expect(project.lines.filter(line => !line.isFake).map(line => line.name)).toEqual(['1', '3', '4', '6'])
   })
 
   it('does not invent dates from the sample non-standard numeric time.open values', () => {
     const { project, summary } = imported()
-    expect(project.lines.every(line => line.openedAt === null)).toBe(true)
+    expect(project.lines.filter(line => !line.isFake).every(line => line.openedAt === null)).toBe(true)
     expect(summary.warnings.filter(warning => warning.includes('time.open'))).toHaveLength(4)
   })
 })

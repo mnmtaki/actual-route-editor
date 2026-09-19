@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { demoProject } from './demo'
-import { addLineBadge, addWaypointToSegment, appendStationToLine, batchDeleteLines, connectExistingStation, createLine, deleteLineAndOrphans, deleteLineBadge, insertStationIntoSegment } from './operations'
+import { addLineBadge, addWaypointToSegment, appendStationToLine, batchDeleteLines, connectExistingStation, createBranchLine, createLine, deleteLineAndOrphans, deleteLineBadge, insertStationIntoSegment } from './operations'
 
 describe('line-driven editing operations', () => {
   it('adds multiple independent badges to one Line and deletes only the requested badge',()=>{let project=structuredClone(demoProject);const first=addLineBadge(project,'line-a',{x:10,y:20}),second=addLineBadge(first.project,'line-a',{x:30,y:40});project=second.project;expect(project.lines.find(line=>line.id==='line-a')?.lineBadges).toHaveLength(2);const next=deleteLineBadge(project,'line-a',first.badgeId!);expect(next.lines.find(line=>line.id==='line-a')?.lineBadges?.map(badge=>badge.id)).toEqual([second.badgeId]);expect(next.lines.some(line=>line.id==='line-a')).toBe(true)})
@@ -62,6 +62,38 @@ describe('line-driven editing operations', () => {
     expect(insertStationIntoSegment(project, 'a-1', { x: 280, y: 430 })).toMatchObject({ project, stationId: null })
     expect(deleteLineAndOrphans(project, 'line-a')).toEqual(project)
     expect(JSON.stringify(project)).toBe(before)
+  })
+  it('creates a native child line with independent topology and inherited service color', () => {
+    const created = createBranchLine(structuredClone(demoProject), 'line-a', { name: '机场支线', openedAt: '2026-01-01' })
+    expect(created.lineId).toBeTruthy()
+    const branch = created.project.lines.find(line => line.id === created.lineId)!
+    expect(branch).toMatchObject({ name: '机场支线', parentLineId: 'line-a', stationSequence: [], openedAt: '2026-01-01', visible: true, locked: false })
+    expect(branch.color).toBe(demoProject.lines.find(line => line.id === 'line-a')?.color)
+    expect(created.project.geometry.segments.filter(segment => segment.lineId === branch.id)).toHaveLength(0)
+    expect(created.project.stationLineRelations.filter(relation => relation.lineId === branch.id)).toHaveLength(0)
+  })
+
+  it('reuses a parent station as the branch seed without duplicating the Station object', () => {
+    const created = createBranchLine(structuredClone(demoProject), 'line-a', {})
+    const before = created.project.stations.length
+    const seeded = connectExistingStation(created.project, created.lineId!, 's2')
+    expect(seeded.stations).toHaveLength(before)
+    expect(seeded.lines.find(line => line.id === created.lineId)?.stationSequence).toEqual(['s2'])
+    expect(seeded.stationLineRelations.some(relation => relation.stationId === 's2' && relation.lineId === created.lineId)).toBe(true)
+  })
+
+  it('rejects fake parents and cascades native child deletion with its main line', () => {
+    const fakeParent = structuredClone(demoProject)
+    fakeParent.lines[0].isFake = true
+    expect(createBranchLine(fakeParent, 'line-a').lineId).toBeNull()
+
+    const created = createBranchLine(structuredClone(demoProject), 'line-a', { name: '支线' })
+    const seeded = connectExistingStation(created.project, created.lineId!, 's2')
+    const extended = appendStationToLine(seeded, created.lineId!, { x: 520, y: 620 }, 's2')
+    const deleted = deleteLineAndOrphans(extended.project, 'line-a')
+    expect(deleted.lines.some(line => line.id === created.lineId)).toBe(false)
+    expect(deleted.geometry.segments.some(segment => segment.lineId === created.lineId)).toBe(false)
+    expect(deleted.stationLineRelations.some(relation => relation.lineId === created.lineId)).toBe(false)
   })
 })
 

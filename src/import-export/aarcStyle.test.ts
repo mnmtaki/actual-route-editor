@@ -37,12 +37,16 @@ describe('AARC line style semantic resolver', () => {
     expect(converted[0]).toMatchObject({ id: '10', name: 'parent' })
     expect(converted[0].layers[0]).toMatchObject({ width: 1, widthMode: 'ratio', dash: [2, 1], dashMode: 'ratio', lineCap: 'butt' })
     expect(converted[1]).toMatchObject({ id: '11', hideBaseLine: true })
-    expect(converted[1].layers[0]).toMatchObject({ colorMode: 'followLine', sourcePatternId: '4' })
+    expect(converted[1].layers[0]).toMatchObject({ colorMode: 'followLine', sourcePatternId: '4', lineCap: 'butt' })
   })
 
   it('treats an omitted source colorMode as the upstream fixed default', () => {
     const converted = convertAarcLineStyles([{ id: '12', layers: [{ color: '#abcdef', width: 1 }] }])
-    expect(converted[0].layers[0]).toMatchObject({ colorMode: 'custom', color: '#abcdef' })
+    expect(converted[0].layers[0]).toMatchObject({ colorMode: 'custom', color: '#abcdef', lineCap: 'butt' })
   })
 
+  it('preserves explicit round and square caps from AARC style layers', () => {
+    const converted = convertAarcLineStyles([{ id: '13', layers: [{ width: 1, cap: 'round' }, { width: .5, cap: 'square' }] }])
+    expect(converted[0].layers.map(layer => layer.lineCap)).toEqual(['square', 'round'])
+  })
 })

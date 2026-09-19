@@ -31,7 +31,7 @@ export function resolveAarcStyleLayers(
 ): ResolvedAarcStyleLayer[] {
   const style = resolveAarcStyle(styleId, styles, parentStyleId)
   if (!style) return []
-  // AARC's layer array is authored in reverse paint order.  Keep the
+  // AARC's layer array is authored in reverse paint order. Keep the
   // resolved presentation order deterministic while leaving the source
   // registry untouched.
   return style.layers.slice().reverse().map(layer => ({ ...structuredClone(layer), sourceStyleId: style.id, inherited: styleId === -1 || styleId === '-1' }))
@@ -53,9 +53,9 @@ export function chooseAarcStyleId(rawStyle: unknown): string | undefined {
 }
 
 /** Map an AARC style-slice reference into the shared Segment style override.
- *  The three sentinel meanings are intentionally distinct: 0 is an explicit
- *  no-style/base-line-only override, -1 inherits the already resolved Line
- *  style, and positive ids select a concrete imported style.
+ * The three sentinel meanings are intentionally distinct: 0 is an explicit
+ * no-style/base-line-only override, -1 inherits the already resolved Line
+ * style, and positive ids select a concrete imported style.
  */
 export function resolveAarcSegmentStyleId(styleId: number | null | undefined): string | null | undefined {
   if (styleId === undefined || styleId === null || styleId === -1) return undefined
@@ -66,7 +66,8 @@ export function resolveAarcSegmentStyleId(styleId: number | null | undefined): s
 import type { LineStyle, LineStyleLayer } from '../data/model'
 
 function mapLineCap(value: string | undefined): LineStyleLayer['lineCap'] {
-  return value === 'butt' || value === 'square' ? value : 'round'
+  if (value === 'round' || value === 'square' || value === 'butt') return value
+  return 'butt'
 }
 function mapLineJoin(value: string | undefined): LineStyleLayer['lineJoin'] {
   return value === 'miter' || value === 'bevel' ? value : 'round'
@@ -79,7 +80,7 @@ function parseAarcDash(value: string | undefined): number[] | undefined {
 
 /** Convert the source style registry into the shared ActualRoute style model.
  * Width and dash values remain ratios so they follow each line's calibrated
- * body width at render time.  The original registry is still retained in
+ * body width at render time. The original registry is still retained in
  * project.aarc for lossless provenance.
  */
 export function convertAarcLineStyles(styles: AarcLineStyle[] | undefined): LineStyle[] {
@@ -95,7 +96,7 @@ export function convertAarcLineStyles(styles: AarcLineStyle[] | undefined): Line
       const converted: LineStyleLayer = {
         id: `aarc-${id}-${index + 1}`,
         // Upstream AARC treats an omitted colorMode as the fixed/default
-        // layer color.  Only an explicit "line" value follows the line.
+        // layer color. Only an explicit "line" value follows the line.
         colorMode: layer.colorMode === 'line' ? 'followLine' : 'custom',
         ...(layer.color ? { color: layer.color } : {}),
         width,

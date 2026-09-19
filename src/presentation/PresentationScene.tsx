@@ -5,6 +5,7 @@ import { getTransferMarkerLayout } from '../geometry/tangent'
 import { sortTransferLinesForSpatialOrder } from '../geometry/transferOrdering'
 import { SegmentArtwork, StructureRunArtwork } from '../renderer/segmentStyles'
 import { compileElevatedRuns, getSegmentStyleIntervals } from '../data/structure'
+import { sortByAarcCommonLineZIndex } from '../data/aarcLineZIndex'
 import { getStationStyle } from '../renderer/stationStyles'
 import { resolveStationStyle } from '../data/stationStyles'
 import { resolveTransferStyle } from '../data/transferStyles'
@@ -13,9 +14,12 @@ import { resolveSideMarkerPlacement } from '../geometry/sideMarker'
 import { StationLabel } from '../renderer/StationLabel'
 import { MapElementsLayer } from '../renderer/MapElements'
 import { AarcTextTagsLayer } from '../renderer/AarcTextTags'
+import { AarcPointLinksLayer } from '../renderer/AarcPointLinks'
 import { LineLegendLayer } from '../renderer/LineLegend'
 import { LineBadgesLayer } from '../renderer/LineBadges'
 import { VectorBasemapLayer } from '../renderer/VectorBasemap'
+import { AarcFakeLinesLayer } from '../renderer/AarcFakeLines'
+import { isFakeLine } from '../data/fakeLines'
 import { effectiveLineWidth, effectiveStationStyle } from '../data/style'
 import { getLineStyle, resolveLineStyle } from '../data/lineStyles'
 import { getStationNameAt } from '../data/stationNameHistory'
@@ -31,31 +35,38 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
   const defaultTransferDefinition = getStationStyle('default')
   const lineMap = useMemo(() => new Map(project.lines.map(line => [line.id, line])), [project.lines])
   const historicalProject = useMemo(() => ({ ...project, geometry: { ...project.geometry, segments: project.geometry.segments.map(segment => ({ ...segment, lineId: state.segmentStates[segment.id]?.lineId ?? segment.lineId })) } }), [project, state.segmentStates])
-  const segmentArtwork = useMemo(() => project.geometry.segments.map(segment => { const lineId = state.segmentStates[segment.id]?.lineId ?? segment.lineId; const historicalSegment = historicalProject.geometry.segments.find(item => item.id === segment.id) ?? segment; const line = lineMap.get(lineId); return { segment, historicalSegment, line: line ? lineWithEffectiveColor(project, line) : undefined } }), [project, state.segmentStates, historicalProject, lineMap])
+  const segmentArtwork = useMemo(() => sortByAarcCommonLineZIndex(project, project.geometry.segments.map(segment => { const lineId = state.segmentStates[segment.id]?.lineId ?? segment.lineId; const historicalSegment = historicalProject.geometry.segments.find(item => item.id === segment.id) ?? segment; const line = lineMap.get(lineId); return { segment, historicalSegment, line: line ? lineWithEffectiveColor(project, line) : undefined, lineId } }), item => item.lineId), [project, state.segmentStates, historicalProject, lineMap])
   const transferLayouts = useMemo(() => new Map(project.stations.filter(station => isCompoundStationCanonical(project, station)).map(station => { const visibleRelationIds = state.stationStates[station.id]?.visibleRelationIds; const stationStyle = effectiveStationStyle(station, project.settings); return [station.id, getTransferMarkerLayout(project, station.id, state.historyDate, visibleRelationIds, stationStyle.transferEndPadding)] as const })), [project, state.historyDate, state.stationStates])
   const elevatedRuns = useMemo(() => compileElevatedRuns(historicalProject, new Set(historicalProject.geometry.segments.filter(segment => lineMap.get(segment.lineId)?.visible).map(segment => segment.id)), Object.fromEntries(Object.entries(state.segmentStates).map(([id, value]) => [id, { revealProgress: value.revealProgress, revealFrom: value.revealFrom, opacity: value.opacity }]))), [historicalProject, lineMap, state.segmentStates])
-  const visibleLineIds = new Set(segmentArtwork.filter(({ segment, line }) => line?.visible && (state.segmentStates[segment.id]?.revealProgress ?? 0) > 0).map(({ segment }) => state.segmentStates[segment.id]?.lineId ?? segment.lineId))
+  const visibleLineIds = new Set([...segmentArtwork.filter(({ segment, line }) => line?.visible && (state.segmentStates[segment.id]?.revealProgress ?? 0) > 0).map(({ segment }) => state.segmentStates[segment.id]?.lineId ?? segment.lineId), ...project.lines.filter(line => line.visible && isFakeLine(line) && line.source?.format === 'aarc').map(line => line.id)])
+  const renderLineOrder = useMemo(() => sortByAarcCommonLineZIndex(project, project.lines, line => line.id), [project])
   const findLines = (ids: string[]) => ids.map(id => lineMap.get(id)).filter((line): line is Line => Boolean(line))
 
   return <svg ref={svgRef} className="presentation-scene" xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox={`${state.camera.x} ${state.camera.y} ${state.camera.width} ${state.camera.height}`} preserveAspectRatio="xMidYMid slice" data-presentation-time={time.toFixed(3)} data-beat-id={state.currentBeat?.beatId ?? ''} data-global-reveal-progress={state.globalRevealProgress.toFixed(4)}>
     <rect x={state.camera.x} y={state.camera.y} width={state.camera.width} height={state.camera.height} fill="#f3f0e9" />
     {sequence.settings.showBackground && project.background?.visible && <image href={project.background.dataUrl} x={project.background.x} y={project.background.y} width={project.background.width} height={project.background.height} opacity={project.background.opacity} />}
-    <VectorBasemapLayer project={project} presentation />
-    <g data-presentation-layer="segments">{segmentArtwork.map(({ segment, historicalSegment, line }) => {
-      const segmentState = state.segmentStates[segment.id]
-      if (!line?.visible || !segmentState || segmentState.revealProgress <= 0 || segmentState.opacity <= 0) return null
-      return <g key={segment.id}>{getSegmentStyleIntervals(historicalProject, historicalSegment).map((interval,index)=>{
-        const length = interval.end - interval.start
-        if (length <= 1e-5) return null
-        const revealProgress = segmentState.revealFrom === 'from'
-          ? clamp((segmentState.revealProgress - interval.start) / length)
-          : clamp((segmentState.revealProgress - (1 - interval.end)) / length)
-        if (revealProgress <= 0) return null
-        const spans=getSegmentSubpathSpans(historicalProject,historicalSegment,interval.start,interval.end)
-        if(!spans.length)return null
-        const intervalSegment={...historicalSegment,structureType:interval.structureType,lineStyleId:interval.lineStyleId}
-        return <SegmentArtwork key={`${segment.id}:${index}`} segment={intervalSegment} line={line} path={pathSpansToSvgPath(spans)} lineWidth={effectiveLineWidth(line, project.settings)} revealProgress={revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} style={resolveLineStyle(project,line,interval.lineStyleId===undefined?undefined:intervalSegment)}/>
-      })}</g>
+    <VectorBasemapLayer project={project} presentation visibleLineIds={visibleLineIds} />
+    <g data-presentation-layer="segments">{renderLineOrder.flatMap(renderLine => {
+      const sourceId = Number(renderLine.source?.sourceLineId ?? renderLine.source?.lineId)
+      if (renderLine.visible && isFakeLine(renderLine) && renderLine.source?.format === 'aarc' && Number.isFinite(sourceId)) {
+        return [<AarcFakeLinesLayer key={`presentation-fake-common-${renderLine.id}`} project={project} part="common" sourceLineId={sourceId} />]
+      }
+      return segmentArtwork.filter(item => item.lineId === renderLine.id).map(({ segment, historicalSegment, line }) => {
+        const segmentState = state.segmentStates[segment.id]
+        if (!line?.visible || !segmentState || segmentState.revealProgress <= 0 || segmentState.opacity <= 0) return null
+        return <g key={segment.id}>{getSegmentStyleIntervals(historicalProject, historicalSegment).map((interval,index)=>{
+          const length = interval.end - interval.start
+          if (length <= 1e-5) return null
+          const revealProgress = segmentState.revealFrom === 'from'
+            ? clamp((segmentState.revealProgress - interval.start) / length)
+            : clamp((segmentState.revealProgress - (1 - interval.end)) / length)
+          if (revealProgress <= 0) return null
+          const spans=getSegmentSubpathSpans(historicalProject,historicalSegment,interval.start,interval.end)
+          if(!spans.length)return null
+          const intervalSegment={...historicalSegment,structureType:interval.structureType,lineStyleId:interval.lineStyleId}
+          return <SegmentArtwork key={`${segment.id}:${index}`} segment={intervalSegment} line={line} path={pathSpansToSvgPath(spans)} lineWidth={effectiveLineWidth(line, project.settings)} revealProgress={revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} style={resolveLineStyle(project,line,interval.lineStyleId===undefined?undefined:intervalSegment)}/>
+        })}</g>
+      })
     })}</g>
     <g data-presentation-layer="structure-runs">{elevatedRuns.map(run => { const line = lineMap.get(run.lineId); return line ? <StructureRunArtwork key={run.id} run={run} line={lineWithEffectiveColor(project, line)} lineWidth={effectiveLineWidth(line, project.settings)} style={getLineStyle(project, 'elevated')} /> : null })}</g>
     <g data-presentation-layer="stations">{project.stations.filter(station => isCompoundStationCanonical(project, station)).map(station => {
@@ -74,8 +85,14 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
           : <g opacity={stationState.opacity} transform={`translate(${station.x} ${station.y}) scale(${stationState.scale}) translate(${-station.x} ${-station.y})`}>{ordinaryArtwork}</g>
       return <g key={station.id} data-station-id={station.id} data-station-opacity={stationState.opacity.toFixed(4)} data-label-opacity={stationState.labelOpacity.toFixed(4)} data-transfer-progress={stationState.transferProgress.toFixed(4)} data-historical-state={stationState.historicalState} data-visible-line-ids={stationState.lineIds.join(',')} data-visible-relation-ids={stationState.visibleRelationIds.join(',')}>
         {transferArtwork}
-        {sequence.settings.showLabels && project.settings.labelsVisible && !station.labelHidden && <StationLabel station={station} settings={project.settings} showForeign={sequence.settings.showForeignStationNames && project.settings.showForeignStationNames} presentation opacity={stationState.labelOpacity} {...getStationNameAt(station,state.historyDate)} />}
       </g>
+    })}</g>
+    <AarcFakeLinesLayer project={project} part="stations" />
+    <AarcPointLinksLayer project={project} />
+    <g data-presentation-layer="station-labels">{project.stations.filter(station => isCompoundStationCanonical(project, station)).map(station => {
+      const stationState = state.stationStates[station.id]
+      if (!stationState || stationState.opacity <= 0 || !sequence.settings.showLabels || !project.settings.labelsVisible || station.labelHidden) return null
+      return <StationLabel key={station.id} station={station} settings={project.settings} showForeign={sequence.settings.showForeignStationNames && project.settings.showForeignStationNames} presentation opacity={stationState.labelOpacity} {...getStationNameAt(station,state.historyDate)} />
     })}</g>
     <LineBadgesLayer project={project} presentation visibleLineIds={visibleLineIds} />
     <AarcTextTagsLayer project={project} presentation visibleLineIds={visibleLineIds} />

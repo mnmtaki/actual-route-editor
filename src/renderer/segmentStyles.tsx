@@ -1,6 +1,7 @@
 import type { Line, LineStyle, Segment } from '../data/model'
 import type { StructureRun } from '../data/structure'
 import { BUILTIN_ELEVATED_STYLE_ID, BUILTIN_NORMAL_STYLE_ID, resolveLineStyleLayers } from '../data/lineStyles'
+import { resolveAarcCommonLineCap } from '../data/aarcLineZIndex'
 
 export const ELEVATED_STYLE = { outerWidthRatio: 1.38, separatorWidthRatio: 1.18, mainWidthRatio: 1, outerColorTarget: '#283033', outerColorMix: .55, separatorColorTarget: '#f7f4ec', separatorColorMix: .82 } as const
 const PRESENTATION_PATH_LENGTH = 1000
@@ -10,16 +11,19 @@ export function getElevatedStrokeStyle(lineColor: string, lineWidth: number) { r
 export function LineStyleArtwork({ style, line, path, lineWidth, revealProgress = 1, revealFrom = 'from', opacity = 1, className = 'segment-main' }: { style: LineStyle; line: Line; path: string; lineWidth: number; revealProgress?: number; revealFrom?: 'from' | 'to'; opacity?: number; className?: string }) {
   const reveal = Math.min(1, Math.max(0, revealProgress)), dashOffset = Number(((revealFrom === 'from' ? 1 : -1) * (1 - reveal) * PRESENTATION_PATH_LENGTH).toFixed(3))
   const common = { d: path, fill: 'none', pathLength: PRESENTATION_PATH_LENGTH, strokeDasharray: PRESENTATION_PATH_LENGTH + ' ' + PRESENTATION_PATH_LENGTH, strokeDashoffset: dashOffset, opacity }
-  const layers = resolveLineStyleLayers(style, line.color, lineWidth)
+  const layers = resolveLineStyleLayers(style, line.color, lineWidth), baseCap = resolveAarcCommonLineCap(line)
   return <g data-line-style-id={style.id} data-line-style-layers={layers.length}>
-    {style.hideBaseLine !== true && <path {...common} className="line-style-base" data-line-style-base="true" stroke={line.color} strokeWidth={lineWidth} strokeLinecap="round" strokeLinejoin="round" />}
-    {layers.map((layer, index) => <path key={layer.id} {...common} className={index === layers.length - 1 ? className : 'line-style-layer line-style-layer-' + index} data-line-style-layer={layer.id} stroke={layer.resolvedColor} strokeWidth={layer.resolvedWidth} strokeOpacity={layer.resolvedOpacity} strokeLinecap={layer.lineCap ?? 'round'} strokeLinejoin={layer.lineJoin ?? 'round'} strokeDasharray={reveal >= 1 && layer.resolvedDash ? layer.resolvedDash : common.strokeDasharray} />)}
+    {style.hideBaseLine !== true && <path {...common} className="line-style-base" data-line-style-base="true" stroke={line.color} strokeWidth={lineWidth} strokeLinecap={baseCap} strokeLinejoin="round" />}
+    {layers.map((layer, index) => {
+      const cap = line.source?.format === 'aarc' && style.id === BUILTIN_NORMAL_STYLE_ID && layer.id === 'normal-main' ? baseCap : (layer.lineCap ?? baseCap)
+      return <path key={layer.id} {...common} className={index === layers.length - 1 ? className : 'line-style-layer line-style-layer-' + index} data-line-style-layer={layer.id} stroke={layer.resolvedColor} strokeWidth={layer.resolvedWidth} strokeOpacity={layer.resolvedOpacity} strokeLinecap={cap} strokeLinejoin={layer.lineJoin ?? 'round'} strokeDasharray={reveal >= 1 && layer.resolvedDash ? layer.resolvedDash : common.strokeDasharray} />
+    })}
   </g>
 }
 
 function PlainLineArtwork({ line, path, lineWidth, revealProgress = 1, revealFrom = 'from', opacity = 1, className = 'segment-main' }: { line: Line; path: string; lineWidth: number; revealProgress?: number; revealFrom?: 'from' | 'to'; opacity?: number; className?: string }) {
   const reveal = Math.min(1, Math.max(0, revealProgress)), dashOffset = Number(((revealFrom === 'from' ? 1 : -1) * (1 - reveal) * PRESENTATION_PATH_LENGTH).toFixed(3))
-  return <path d={path} fill="none" className={className} data-line-style-base="true" stroke={line.color} strokeWidth={lineWidth} strokeLinecap="round" strokeLinejoin="round" pathLength={PRESENTATION_PATH_LENGTH} strokeDasharray={PRESENTATION_PATH_LENGTH + ' ' + PRESENTATION_PATH_LENGTH} strokeDashoffset={dashOffset} opacity={opacity} />
+  return <path d={path} fill="none" className={className} data-line-style-base="true" stroke={line.color} strokeWidth={lineWidth} strokeLinecap={resolveAarcCommonLineCap(line)} strokeLinejoin="round" pathLength={PRESENTATION_PATH_LENGTH} strokeDasharray={PRESENTATION_PATH_LENGTH + ' ' + PRESENTATION_PATH_LENGTH} strokeDashoffset={dashOffset} opacity={opacity} />
 }
 
 export function SegmentArtwork({ segment, line, path, lineWidth, revealProgress = 1, revealFrom = 'from', opacity = 1, renderLegacyStructure = true, style }: { segment: Segment; line: Line; path: string; lineWidth: number; revealProgress?: number; revealFrom?: 'from' | 'to'; opacity?: number; renderLegacyStructure?: boolean; style?: LineStyle | null }) {

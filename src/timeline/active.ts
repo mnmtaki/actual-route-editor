@@ -3,6 +3,7 @@ import { collapseLinesByServiceFamily, getRootLineId } from '../data/lineIdentit
 import { getCompoundStationCanonical, getCompoundStationMemberIds, getCompoundStationRelations } from '../data/compoundStation'
 import { resolveSegmentLineAt } from '../data/segmentLineHistory'
 import { isLineOperationalAt, isRelationOperationalAt, isSegmentOperationalAt } from '../data/operationEvents'
+import { sortByAarcCommonLineZIndex } from '../data/aarcLineZIndex'
 import { isFakeLine } from '../data/fakeLines'
 export { isLineOperationalAt, isRelationOperationalAt, isSegmentOperationalAt } from '../data/operationEvents'
 
@@ -19,7 +20,12 @@ function compareRelations(project: ActualRouteProject, stationId: string, a: str
 
 /**
  * Effective passenger service at one Station×Line relation.
- * Fake lines remain visible artwork but never create passenger service.
+ *
+ * Hierarchy is intentionally asymmetric:
+ * - a relation-level closure may suppress an otherwise open line/segment;
+ * - a relation-level opening can never resurrect a closed parent line or a station
+ *   whose every incident segment in the same passenger service family is closed.
+ * A later network operation event must reopen the parent service first.
  */
 export function isStationLineServiceActiveAt(project: ActualRouteProject, relation: StationLineRelation, time: string) {
   const line = project.lines.find(item => item.id === relation.lineId)
@@ -70,16 +76,14 @@ export function getOrientationAnchorLine(project: ActualRouteProject, stationId:
 }
 export type ActiveSegment = Segment & { effectiveLineIdAtCurrentDate: string }
 export function getActiveNetworkAtTime(project: ActualRouteProject, time: string) {
-  // Keep fake lines available as drawable entities. Imported AARC fake lines use
-  // the dedicated source-faithful AarcFakeLines layer while fake; native/editor
-  // fake lines keep using their ordinary segment artwork.
-  const lines = project.lines.filter(line => line.visible && isLineOperationalAt(line, time))
+  const unsortedLines = project.lines.filter(line => line.visible && isLineOperationalAt(line, time))
+  const lines = sortByAarcCommonLineZIndex(project, unsortedLines, line => line.id)
   const lineIds = new Set(lines.map(line => line.id))
   const relations = project.stationLineRelations.filter(relation => lineIds.has(relation.lineId) && isStationLineServiceActiveAt(project, relation, time))
   const canonicalIds = new Set<string>()
   for (const relation of relations) canonicalIds.add(getCompoundStationCanonical(project, relation.stationId)?.id ?? relation.stationId)
   const stations = project.stations.filter(station => canonicalIds.has(station.id))
-  const segments = project.geometry.segments.flatMap(segment => {
+  const unsortedSegments = project.geometry.segments.flatMap(segment => {
     if (!isSegmentOperationalAt(segment, time)) return []
     const effectiveLineIdAtCurrentDate = resolveSegmentLineAt(segment, time)
     if (!lineIds.has(effectiveLineIdAtCurrentDate)) return []
@@ -87,5 +91,6 @@ export function getActiveNetworkAtTime(project: ActualRouteProject, time: string
     if (effectiveLine && isFakeLine(effectiveLine) && effectiveLine.source?.format === 'aarc') return []
     return [{ ...segment, lineId: effectiveLineIdAtCurrentDate, effectiveLineIdAtCurrentDate }]
   })
+  const segments = sortByAarcCommonLineZIndex(project, unsortedSegments, segment => segment.lineId)
   return { lines, stations, relations, segments }
 }

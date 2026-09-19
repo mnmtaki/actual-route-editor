@@ -20,13 +20,15 @@ export function materializeAarcFakeLineEntries(project: ActualRouteProject): Act
   const candidates = rawLines.filter(line => line.isFake === true && Number(line.type ?? 0) !== 1 && Array.isArray(line.pts) && line.pts.length >= 2)
   if (!candidates.length) return project
   const existingSourceIds = new Set(project.lines.map(line => finite(line.source?.sourceLineId ?? line.source?.lineId)).filter((id): id is number => id !== undefined))
+  const nativeIdBySourceId = new Map(project.lines.flatMap(line => { const sourceId = finite(line.source?.sourceLineId ?? line.source?.lineId); return sourceId === undefined ? [] : [[sourceId, line.id] as const] }))
+  for (const raw of candidates) { const sourceLineId = finite(raw.id); if (sourceLineId !== undefined && !nativeIdBySourceId.has(sourceLineId)) nativeIdBySourceId.set(sourceLineId, `aarc-line-${sourceLineId}`) }
   const additions: Line[] = []
   for (const [sourceOrder, raw] of rawLines.entries()) {
     if (!candidates.includes(raw)) continue
     const sourceLineId = finite(raw.id)
     if (sourceLineId === undefined || existingSourceIds.has(sourceLineId)) continue
     const parentSourceId = finite(raw.parent)
-    const parentLineId = parentSourceId === undefined ? undefined : project.lines.find(line => finite(line.source?.sourceLineId ?? line.source?.lineId) === parentSourceId)?.id
+    const parentLineId = parentSourceId === undefined ? undefined : nativeIdBySourceId.get(parentSourceId)
     additions.push({
       id: `aarc-line-${sourceLineId}`,
       name: typeof raw.name === 'string' ? raw.name : '',

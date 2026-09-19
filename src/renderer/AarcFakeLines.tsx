@@ -142,7 +142,7 @@ function FakeLineArtwork({ project, line }: { project: ActualRouteProject; line:
     {styleLayers.map((layer, index) => {
       const geometry = resolveAarcLayerGeometry(layer, bodyWidth)
       const stroke = layer.colorMode === 'line' ? color : colorValue(geometry.color, color)
-      return <path key={`${sourceId ?? 'fake'}-style-${index}`} d={path} fill="none" stroke={stroke} strokeWidth={geometry.width} strokeOpacity={geometry.opacity ?? 1} strokeDasharray={geometry.dash?.join(' ')} strokeLinecap={geometry.cap === 'butt' || geometry.cap === 'square' ? geometry.cap : 'round'} strokeLinejoin={geometry.join === 'miter' || geometry.join === 'bevel' ? geometry.join : 'round'} data-aarc-fake-line-style-layer={index} />
+      return <path key={`${sourceId ?? 'fake'}-style-${index}`} d={path} fill="none" stroke={stroke} strokeWidth={geometry.width} strokeOpacity={geometry.opacity ?? 1} strokeDasharray={geometry.dash?.join(' ')} strokeLinecap={geometry.cap === 'round' || geometry.cap === 'square' || geometry.cap === 'butt' ? geometry.cap : 'butt'} strokeLinejoin={geometry.join === 'miter' || geometry.join === 'bevel' ? geometry.join : 'round'} data-aarc-fake-line-style-layer={index} />
     })}
   </g>
 }
@@ -194,12 +194,18 @@ function FakeOnlyStations({ project }: { project: ActualRouteProject }) {
   })}</g>
 }
 
-export const AarcFakeLinesLayer = memo(function AarcFakeLinesLayer({ project }: { project: ActualRouteProject }) {
-  const fakeLines = getAarcFakeSourceLines(project)
+export type AarcFakeLineLayerPart = 'all' | 'terrain' | 'common' | 'stations'
+
+export const AarcFakeLinesLayer = memo(function AarcFakeLinesLayer({ project, part = 'all', sourceLineId }: { project: ActualRouteProject; part?: AarcFakeLineLayerPart; sourceLineId?: number }) {
+  const allFakeLines = getAarcFakeSourceLines(project)
+  const fakeLines = sourceLineId === undefined ? allFakeLines : allFakeLines.filter(line => idValue(line.id) === sourceLineId)
+  if (part === 'stations') return <g data-layer="aarc-fake-lines" data-aarc-fake-part="stations" pointerEvents="none"><FakeOnlyStations project={project} /></g>
   if (!fakeLines.length) return null
-  return <g data-layer="aarc-fake-lines" pointerEvents="none">
-    {fakeLines.filter(line => numberValue(line.type) === 1).map((line, index) => <FakeLineArtwork key={`fake-terrain-${idValue(line.id) ?? index}`} project={project} line={line} />)}
-    {fakeLines.filter(line => numberValue(line.type) !== 1).map((line, index) => <FakeLineArtwork key={`fake-common-${idValue(line.id) ?? index}`} project={project} line={line} />)}
-    <FakeOnlyStations project={project} />
+  const renderTerrain = part === 'all' || part === 'terrain'
+  const renderCommon = part === 'all' || part === 'common'
+  return <g data-layer="aarc-fake-lines" data-aarc-fake-part={part} data-aarc-fake-source-line-id={sourceLineId ?? ''} pointerEvents="none">
+    {renderTerrain && fakeLines.filter(line => numberValue(line.type) === 1).map((line, index) => <FakeLineArtwork key={`fake-terrain-${idValue(line.id) ?? index}`} project={project} line={line} />)}
+    {renderCommon && fakeLines.filter(line => numberValue(line.type) !== 1).map((line, index) => <FakeLineArtwork key={`fake-common-${idValue(line.id) ?? index}`} project={project} line={line} />)}
+    {part === 'all' && <FakeOnlyStations project={project} />}
   </g>
 })

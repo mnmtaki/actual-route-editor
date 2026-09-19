@@ -57,9 +57,19 @@ describe('AARC fake line visual fidelity', () => {
     expect(resolveAarcTextTagContent(tag, project)).toBe('图例线')
     expect(resolveAarcTextTagContent(tag, project, true)).toBe('LEGEND')
     const { container } = render(<svg><AarcTextTagsLayer project={project} /></svg>)
-    const node = container.querySelector('[data-aarc-fake-line-id="10"]')
+    const node = container.querySelector('[data-aarc-text-tag-id="fake-label"]')
     expect(node).not.toBeNull()
-    expect(node?.getAttribute('data-aarc-text-tag-kind')).toBe('FakeLineNameLabel')
+    expect(node).toHaveAttribute('data-aarc-text-tag-render-mode', 'line')
+    expect(node?.querySelector('[data-aarc-line-name-carpet="true"]')).not.toBeNull()
     expect(container.textContent).toContain('图例线')
+  })
+
+  it('uses AARC butt as the default cap for style layers that omit cap', () => {
+    const project = projectWithFakeLine()
+    project.aarc!.lineStyles = [{ id: '3', layers: [{ width: 1, colorMode: 'line' }] }]
+    const rawLine = (project.aarc!.raw!.lines as Array<Record<string, unknown>>)[0]
+    rawLine.style = 3
+    const { container } = render(<svg><AarcFakeLinesLayer project={project} part="common" sourceLineId={10} /></svg>)
+    expect(container.querySelector('[data-aarc-fake-line-style-layer="0"]')).toHaveAttribute('stroke-linecap', 'butt')
   })
 })

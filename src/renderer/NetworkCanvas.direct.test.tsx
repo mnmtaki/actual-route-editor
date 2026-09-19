@@ -49,6 +49,17 @@ describe('direct manipulation gestures', () => {
     const widths=[...container.querySelectorAll('.segment-main')].map(path=>path.getAttribute('stroke-width'))
     expect(widths).toContain('44');expect(widths).toContain('30');expect(widths).not.toContain('8')
   })
+  it('keeps station markers and labels visible when a native line is switched to fake', () => {
+    const project = structuredClone(demoProject)
+    project.lines.find(line => line.id === 'line-a')!.isFake = true
+    project.timeline.currentDate = '2005-01-01'
+    const { container } = render(<NetworkCanvas {...baseProps} project={project} />)
+    expect(container.querySelectorAll('[data-layer="stations"] [data-station-id]')).toHaveLength(4)
+    const labels = [...container.querySelectorAll('[data-layer="station-labels"] .station-label')].map(node => node.textContent)
+    expect(labels).toEqual(expect.arrayContaining(['云港', '市民广场', '青塔', '临江']))
+    expect(container.querySelectorAll('[data-layer="segments"] .segment-main').length).toBeGreaterThan(0)
+  })
+
   it('drags a station directly and commits the whole drag once', () => {
     const onPreview = vi.fn(), onDragCommit = vi.fn(), setView = vi.fn()
     const { container } = render(<NetworkCanvas {...baseProps} project={demoProject} onPreview={onPreview} onDragCommit={onDragCommit} setView={setView} />)

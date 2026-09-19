@@ -1,5 +1,5 @@
 import type { ActualRouteProject, Station } from '../data/model'
-import { getPassengerLinesAtStation, getPassengerVisibleRelationIds } from '../timeline/active'
+import { getEditorVisibleFakeLinesAtStation, getPassengerLinesAtStation, getPassengerVisibleRelationIds } from '../timeline/active'
 import { getTransferMarkerLayout } from '../geometry/tangent'
 import { sortTransferLinesForSpatialOrder } from '../geometry/transferOrdering'
 import { getStationStyle } from './stationStyles'
@@ -26,7 +26,9 @@ export function StationMarker({ project, station, time, selected, hitRadius = 24
   if (part === 'label') return project.settings.labelsVisible && !renderStation.labelHidden
     ? <StationLabel station={renderStation} settings={project.settings} showForeign={project.settings.showForeignStationNames} onPointerDown={onLabelPointerDown} />
     : null
-  const lines = getPassengerLinesAtStation(project, renderStation.id, time)
+  const passengerLines = getPassengerLinesAtStation(project, renderStation.id, time)
+  const fakeEditorLines = passengerLines.length ? [] : getEditorVisibleFakeLinesAtStation(project, renderStation.id, time)
+  const lines = passengerLines.length ? passengerLines : fakeEditorLines.slice(0, 1)
   const renderLine = (line: typeof lines[number]) => ({ ...lineWithEffectiveColor(project, line, time), displayCode: getLineDisplayCodeAt(line, time) })
   const renderLines = lines.length > 1
     ? sortTransferLinesForSpatialOrder(project, renderStation.id, lines, time).map(renderLine)

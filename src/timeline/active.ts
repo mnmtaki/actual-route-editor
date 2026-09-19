@@ -54,6 +54,23 @@ export function getActiveLinesAtStation(project: ActualRouteProject, stationId: 
 export function getPassengerLinesAtStation(project: ActualRouteProject, stationId: string, time: string): Line[] {
   return collapseLinesByServiceFamily(project, getActiveLinesAtStation(project, stationId, time), time)
 }
+export function getEditorVisibleFakeLinesAtStation(project: ActualRouteProject, stationId: string, time: string): Line[] {
+  const relationByLine = new Map<string, StationLineRelation>()
+  const memberIds = new Set(getCompoundStationMemberIds(project, stationId))
+  for (const relation of getCompoundStationRelations(project, stationId)) {
+    const line = project.lines.find(item => item.id === relation.lineId)
+    if (!line?.visible || !isFakeLine(line) || line.source?.format === 'aarc' || !isLineOperationalAt(line, time) || !isRelationOperationalAt(relation, time)) continue
+    const hasVisibleGeometry = project.geometry.segments.some(segment => {
+      if (!memberIds.has(segment.fromStationId) && !memberIds.has(segment.toStationId)) return false
+      return isSegmentOperationalAt(segment, time) && resolveSegmentLineAt(segment, time) === line.id
+    })
+    if (hasVisibleGeometry && !relationByLine.has(line.id)) relationByLine.set(line.id, relation)
+  }
+  return [...relationByLine.values()]
+    .map(relation => project.lines.find(line => line.id === relation.lineId))
+    .filter((line): line is Line => Boolean(line))
+    .sort((a, b) => compareRelations(project, stationId, a.id, b.id))
+}
 export function getPassengerVisibleRelationIds(project: ActualRouteProject, stationId: string, time: string, lineIds?: string[]): string[] {
   const ids = lineIds ?? getActiveLinesAtStation(project, stationId, time).map(line => line.id)
   const representativeFamilies = new Set(ids.map(id => project.lines.find(line => line.id === id)).filter((line): line is Line => Boolean(line) && !isFakeLine(line)).map(line => getRootLineId(project, line, time)))
@@ -75,6 +92,15 @@ export function getOrientationAnchorLine(project: ActualRouteProject, stationId:
   return getActiveLinesAtStation(project, stationId, time)[0]
 }
 export type ActiveSegment = Segment & { effectiveLineIdAtCurrentDate: string }
+export function getEditorVisibleStationsAtTime(project: ActualRouteProject, time: string) {
+  const passengerStations = getActiveNetworkAtTime(project, time).stations
+  const canonicalIds = new Set(passengerStations.map(station => station.id))
+  for (const relation of project.stationLineRelations) {
+    if (!getEditorVisibleFakeLinesAtStation(project, relation.stationId, time).some(line => line.id === relation.lineId)) continue
+    canonicalIds.add(getCompoundStationCanonical(project, relation.stationId)?.id ?? relation.stationId)
+  }
+  return project.stations.filter(station => canonicalIds.has(station.id))
+}
 export function getActiveNetworkAtTime(project: ActualRouteProject, time: string) {
   const unsortedLines = project.lines.filter(line => line.visible && isLineOperationalAt(line, time))
   const lines = sortByAarcCommonLineZIndex(project, unsortedLines, line => line.id)

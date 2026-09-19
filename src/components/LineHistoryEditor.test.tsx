@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { demoProject } from '../data/demo'
 import { LineHistoryEditor } from './LineHistoryEditor'
@@ -62,7 +62,7 @@ describe('LineHistoryEditor', () => {
     project.lines[0].displayCodeHistory!.splice(1, 0, { id: 'code-2010', effectiveAt: '2010-01-01', displayCode: '1A' })
     const onChange = vi.fn()
     render(<LineHistoryEditor project={project} line={project.lines[0]} onChange={onChange} />)
-    fireEvent.click(screen.getByRole('button', { name: '取消此日代码变化' }))
+    const row = screen.getByLabelText('2010-01-01 生效日期').closest('[data-history-date="2010-01-01"]')!\n    fireEvent.click(within(row as HTMLElement).getByRole('button', { name: '取消此日代码变化' }))
     const next = onChange.mock.calls.at(-1)![0]
     const line = next.lines[0]
     expect(line.displayCodeHistory?.some((entry: { effectiveAt: string | null }) => entry.effectiveAt === '2010-01-01')).toBe(false)

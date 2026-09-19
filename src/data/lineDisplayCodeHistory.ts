@@ -1,4 +1,5 @@
 import type { ActualRouteProject, Line, LineDisplayCodeHistoryEntry } from './model'
+import { getLineNameAt } from './lineNameHistory'
 
 const isDate = (value: unknown): value is string => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
 
@@ -29,7 +30,14 @@ export function normalizeLineDisplayCodeHistory(line: Pick<Line, 'id' | 'name' |
 
 export function getLineDisplayCodeAt(line: Line, date?: string | null): string {
   const history = normalizeLineDisplayCodeHistory(line)
-  if (!history || !date) return resolveCurrentLineDisplayCode(line)
+  if (!history) {
+    const explicit = line.displayCode ?? line.number ?? line.code ?? line.shortName
+    if (typeof explicit === 'string' && explicit.trim()) return explicit.trim()
+    const historicalName = date ? getLineNameAt(line, date).name : line.name
+    const match = /^\s*(\d{1,3})/.exec(historicalName)
+    return match?.[1] ?? historicalName.trim().slice(0, 4)
+  }
+  if (!date) return resolveCurrentLineDisplayCode(line)
   let displayCode = history[0].displayCode
   for (const entry of history) if (entry.effectiveAt && entry.effectiveAt <= date) displayCode = entry.displayCode
   return displayCode

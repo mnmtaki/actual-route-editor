@@ -10,6 +10,7 @@ import { detectAarcCompoundGroups, type AarcCompoundPoint } from './aarcCompound
 import { getAarcCompoundGroupId } from '../data/compoundStation'
 import { normalizeStationAnchor } from '../data/stationAnchor'
 import { aggregateAarcPointMetrics, normalizeAarcSave, readAarcTextOptions, resolveAarcLineMetrics, type AarcNormalizedSave } from './aarcNormalize'
+import { materializeAarcFakeLineEntries } from '../data/aarcFakeLineEntries'
 
 interface AarcPoint { id?: unknown; pos?: unknown; sta?: unknown; dir?: unknown; name?: unknown; nameS?: unknown; nameP?: unknown; nameSize?: unknown; nameAngle?: unknown; anchorX?: unknown; anchorY?: unknown; noLeader?: unknown; free?: unknown }
 interface AarcLine { id?: unknown; name?: unknown; nameSub?: unknown; color?: unknown; colorPre?: unknown; pts?: unknown; type?: unknown; isFake?: unknown; width?: unknown; ptSize?: unknown; ptNameSize?: unknown; ptSnapSize?: unknown; ptNameSnapSize?: unknown; style?: unknown; zIndex?: unknown; isFilled?: unknown; parent?: unknown; group?: unknown; removeCarpet?: unknown; tagTextColor?: unknown; cap?: unknown; time?: { open?: unknown; close?: unknown; [key: string]: unknown } }
@@ -356,7 +357,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC å
     warningCount: warnings.length,
     warnings,
   }
-  return { project, summary }
+  return { project: materializeAarcFakeLineEntries(project), summary }
 }
 
 function isRealTransitLine(line: AarcLine, allLines: AarcLine[] = []) {

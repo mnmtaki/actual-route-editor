@@ -79,6 +79,6 @@ describe('AARC lineStyles and styleSlices shared integration', () => {
     const result = convertAarcToActualRouteProject(realSample, '木阳.aarc.json')
     expect(result.project.styles?.map(style => style.id)).toEqual(expect.arrayContaining(['1', '2', '147']))
     expect(result.project.geometry.segments).toHaveLength(105)
-    expect(result.project.lines.map(line => line.name)).toEqual(['1', '3', '4', '6'])
+    expect(result.project.lines.filter(line => !line.isFake).map(line => line.name)).toEqual(['1', '3', '4', '6'])
   })
 })

@@ -10,6 +10,7 @@ import { resolveSideMarkerPlacement } from '../geometry/sideMarker'
 import { StationLabel } from './StationLabel'
 import { effectiveStationStyle } from '../data/style'
 import { lineWithEffectiveColor } from '../data/lineIdentity'
+import { getLineDisplayCodeAt } from '../data/lineDisplayCodeHistory'
 import { getCompoundStationCanonical, isCompoundStationCanonical } from '../data/compoundStation'
 
 export function StationMarker({ project, station, time, selected, hitRadius = 24, onPointerDown, onLabelPointerDown, part = 'all' }: {
@@ -26,9 +27,10 @@ export function StationMarker({ project, station, time, selected, hitRadius = 24
     ? <StationLabel station={renderStation} settings={project.settings} showForeign={project.settings.showForeignStationNames} onPointerDown={onLabelPointerDown} />
     : null
   const lines = getPassengerLinesAtStation(project, renderStation.id, time)
+  const renderLine = (line: typeof lines[number]) => ({ ...lineWithEffectiveColor(project, line, time), displayCode: getLineDisplayCodeAt(line, time) })
   const renderLines = lines.length > 1
-    ? sortTransferLinesForSpatialOrder(project, renderStation.id, lines, time).map(line => lineWithEffectiveColor(project, line, time))
-    : lines.map(line => lineWithEffectiveColor(project, line, time))
+    ? sortTransferLinesForSpatialOrder(project, renderStation.id, lines, time).map(renderLine)
+    : lines.map(renderLine)
   const { stationSize, transferMinorAxis, transferDotGap, transferEndPadding } = effectiveStationStyle(renderStation, project.settings)
   // Transfer stations keep the established capsule renderer. Ordinary stations
   // resolve their project/station style through the shared style registry.

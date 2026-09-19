@@ -4,6 +4,7 @@ import App from './App'
 import { BUILD_VERSION } from './build'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import './styles.css'
+import './direct-edit.css'
 import './ui-system.css'
 import { initializeAndroidShell } from './platform/androidLifecycle'
 

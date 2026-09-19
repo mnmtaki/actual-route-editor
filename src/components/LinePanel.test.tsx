@@ -31,4 +31,13 @@ describe('line structure panel',()=>{
   fireEvent.click(view.container.querySelectorAll('.line-row-main')[1],{ctrlKey:true})
   expect(onSelect).toHaveBeenCalledWith('line-b',{ctrlKey:true,metaKey:false,shiftKey:false})
  })
+ it('exposes native branch creation for ordinary lines and not for fake lines',()=>{
+  const project=structuredClone(demoProject),onAddBranchLine=vi.fn()
+  project.lines[1].isFake=true
+  render(<LinePanel project={project} selection={null} activeLineId={null} onSelect={()=>{}} onChange={()=>{}} onAddLine={()=>{}} onAddBranchLine={onAddBranchLine}/>)
+  const buttons=screen.getAllByTitle('新建支线')
+  expect(buttons).toHaveLength(project.lines.length-1)
+  fireEvent.click(screen.getByRole('button',{name:/在.*下新建支线/}))
+  expect(onAddBranchLine).toHaveBeenCalledTimes(1)
+ })
 })

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { demoProject } from '../data/demo'
 import { createOperationEvent } from '../data/operationEvents'
 import { getOpeningPhasePathCandidates } from '../data/openingPhases'
-import { getActiveLinesAtStation, getActiveNetworkAtTime, getFirstLineAtStation, getPassengerVisibleRelationIds, isActiveAt } from './active'
+import { getActiveLinesAtStation, getActiveNetworkAtTime, getEditorVisibleStationsAtTime, getFirstLineAtStation, getPassengerVisibleRelationIds, isActiveAt } from './active'
 
 describe('timeline', () => {
   it('uses opened inclusive and closed exclusive dates', () => {
@@ -26,6 +26,18 @@ describe('timeline', () => {
     expect(network.lines.map((line) => line.id)).toEqual(['line-a'])
     expect(network.stations).toHaveLength(4)
   })
+  it('keeps native fake-line stations visible only in the editor view', () => {
+    const project = structuredClone(demoProject)
+    const line = project.lines.find(item => item.id === 'line-a')!
+    line.isFake = true
+    const passenger = getActiveNetworkAtTime(project, '2005-01-01')
+    const editor = getEditorVisibleStationsAtTime(project, '2005-01-01')
+    expect(passenger.stations).toHaveLength(0)
+    expect(passenger.relations).toHaveLength(0)
+    expect(passenger.segments.filter(segment => segment.lineId === 'line-a')).toHaveLength(3)
+    expect(editor.map(station => station.id)).toEqual(['s1', 's2', 's3', 's4'])
+  })
+
   it('resolves historical segment ownership in a derived view without mutating the project', () => {
     const project = structuredClone(demoProject)
     const segment = project.geometry.segments[0]

@@ -40,6 +40,7 @@ export function LinePanel({
   onClearSelection,
   onChange,
   onAddLine,
+  onAddBranchLine,
   mobileMode = false,
   onMobileLongPress,
 }: {
@@ -52,6 +53,7 @@ export function LinePanel({
   onClearSelection?: () => void
   onChange: (project: ActualRouteProject) => void
   onAddLine: () => void
+  onAddBranchLine?: (parentLineId: string) => void
   mobileMode?: boolean
   onMobileLongPress?: (lineId: string) => void
 }) {
@@ -218,6 +220,7 @@ export function LinePanel({
         const displayName = getLineDisplayName(project, line), color = getEffectiveLineColor(project, line), hasChildren = childrenByParent.has(line.id), collapsed = collapsedParentIds.has(line.id)
         return <div key={line.id} ref={node => { if (node) rowRefs.current.set(line.id, node); else rowRefs.current.delete(line.id) }} data-line-id={line.id} data-fake-line={fake ? 'true' : undefined} className={`line-row ${isSelected ? 'selected' : ''} ${isActive ? 'active' : ''} ${isSelected && !isActive ? 'secondary-selected' : ''}`}>
           <button type="button" className="line-row-main" onClick={event => onClickMain(event, line.id)}>{hasChildren && <span className="line-tree-toggle" role="button" tabIndex={0} aria-label={collapsed ? '展开支线' : '折叠支线'} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setCollapsedParentIds(previous => { const next = new Set(previous); if (next.has(line.id)) next.delete(line.id); else next.add(line.id); return next }) }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); setCollapsedParentIds(previous => { const next = new Set(previous); if (next.has(line.id)) next.delete(line.id); else next.add(line.id); return next }) } }}>{collapsed ? '▸' : '▾'}</span>}<span aria-hidden="true" className="line-color" style={{ background: color }} /><span className="line-name">{depth ? "└ " : ""}{displayName}{fake && <small className="line-fake-badge">（伪线）</small>}</span></button>
+          {!fake && <button type="button" className="line-state-button branch-line-add" aria-label={`在${displayName || '该线路'}下新建支线`} title="新建支线" onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onAddBranchLine?.(line.id)}><span aria-hidden="true">＋支</span></button>}
           <button type="button" className={`line-state-button fake-line-toggle ${fake ? 'is-on' : ''}`} aria-label={fake ? `${displayName}恢复为普通线路` : `${displayName}设为伪线`} title={fake ? '恢复为普通线路' : '设为伪线'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onChange(setLineFake(project, line.id, !fake))}><span aria-hidden="true">伪</span></button>
           <button type="button" className={`line-state-button ${line.visible ? 'is-on' : ''}`} aria-label={line.visible ? `${displayName}隐藏线路` : `${displayName}显示线路`} title={line.visible ? '隐藏线路' : '显示线路'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onChange(setLineVisibility(project, line.id, !line.visible))}><span aria-hidden="true"><EyeIcon hidden={!line.visible} /></span></button>
           <button type="button" className={`line-state-button ${line.locked ? 'is-on' : ''}`} aria-label={line.locked ? `${displayName}解锁线路` : `${displayName}锁定线路`} title={line.locked ? '解锁线路' : '锁定线路'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onChange(setLineLocked(project, line.id, !line.locked))}><span aria-hidden="true"><LockIcon locked={line.locked} /></span></button>

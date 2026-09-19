@@ -77,11 +77,14 @@ export function validateLineParentHistory(project: ActualRouteProject): string[]
 }
 
 export function updateLineParentHistoryEntry(project: ActualRouteProject, lineId: string, entry: LineParentHistoryEntry) {
-  const line = project.lines.find(item => item.id === lineId)
-  if (!line) throw new Error('未找到线路')
+  const original = project.lines.find(item => item.id === lineId)
+  if (!original) throw new Error('未找到线路')
   const parentLineId = typeof entry.parentLineId === 'string' && entry.parentLineId ? entry.parentLineId : null
   if (parentLineId === lineId) throw new Error('线路不能将自己设为主线')
   if (parentLineId && !project.lines.some(item => item.id === parentLineId)) throw new Error('选择的主线不存在')
+
+  const candidate = structuredClone(project)
+  const line = candidate.lines.find(item => item.id === lineId)!
   const history = normalizeLineParentHistory(line) ?? [{ id: `parent-base-${line.id}`, effectiveAt: null, parentLineId: line.parentLineId ?? null }]
   if (entry.effectiveAt !== null && history.some(item => item.id !== entry.id && item.effectiveAt === entry.effectiveAt)) throw new Error('同一天只能有一次主支关系变更')
   const next: LineParentHistoryEntry = { ...entry, parentLineId }
@@ -90,27 +93,52 @@ export function updateLineParentHistoryEntry(project: ActualRouteProject, lineId
   else history.push(next)
   line.parentHistory = history
   syncLineParentFromHistory(line)
-  const errors = validateLineParentHistory(project)
+  const errors = validateLineParentHistory(candidate)
   if (errors.length) throw new Error(errors[0])
+
+  original.parentHistory = structuredClone(line.parentHistory)
+  if (line.parentLineId) original.parentLineId = line.parentLineId
+  else delete original.parentLineId
 }
 
 export function removeLineParentHistoryEntry(project: ActualRouteProject, lineId: string, entryId: string) {
-  const line = project.lines.find(item => item.id === lineId)
-  if (!line) return
-  const history = normalizeLineParentHistory(line)
-  if (!history) return
-  const target = history.find(entry => entry.id === entryId)
+  const original = project.lines.find(item => item.id === lineId)
+  if (!original) return
+  const currentHistory = normalizeLineParentHistory(original)
+  if (!currentHistory) return
+  const target = currentHistory.find(entry => entry.id === entryId)
   if (!target || target.effectiveAt === null) return
+
+  const candidate = structuredClone(project)
+  const line = candidate.lines.find(item => item.id === lineId)!
+  const history = normalizeLineParentHistory(line)!
   const next = history.filter(entry => entry.id !== entryId)
   if (next.length === 1 && next[0].effectiveAt === null) {
     const parent = next[0].parentLineId
     if (parent) line.parentLineId = parent
     else delete line.parentLineId
     delete line.parentHistory
-    return
+  } else {
+    line.parentHistory = next
+    syncLineParentFromHistory(line)
   }
-  line.parentHistory = next
-  syncLineParentFromHistory(line)
+  const errors = validateLineParentHistory(candidate)
+  if (errors.length) throw new Error(errors[0])
+
+  if (line.parentHistory) original.parentHistory = structuredClone(line.parentHistory)
+  else delete original.parentHistory
+  if (line.parentLineId) original.parentLineId = line.parentLineId
+  else delete original.parentLineId
+}
+
+export function clearDeletedLineParentReferences(project: ActualRouteProject, deletedIds: Set<string>) {
+  for (const line of project.lines) {
+    const history = normalizeLineParentHistory(line)
+    if (!history) continue
+    const next = history.map(entry => deletedIds.has(entry.parentLineId ?? '') ? { ...entry, parentLineId: null } : entry)
+    line.parentHistory = next
+    syncLineParentFromHistory(line)
+  }
 }
 
 export function projectWithLineParentsAt(project: ActualRouteProject, date: string): ActualRouteProject {

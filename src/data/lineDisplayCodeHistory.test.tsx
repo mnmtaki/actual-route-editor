@@ -57,6 +57,17 @@ describe('line display code history', () => {
     expect(getLineDisplayCodeAt(line, '2005-01-01')).toBe('12')
   })
 
+  it('derives a fallback code from the historical line name when no explicit code exists', () => {
+    const line = structuredClone(demoProject.lines[0])
+    line.name = '机场线'
+    line.nameHistory = [
+      { id: 'base-name', effectiveAt: null, name: '12号线' },
+      { id: 'rename', effectiveAt: '2015-01-01', name: '机场线' },
+    ]
+    expect(getLineDisplayCodeAt(line, '2010-01-01')).toBe('12')
+    expect(getLineDisplayCodeAt(line, '2020-01-01')).toBe('机场线')
+  })
+
   it('edits and removes code history without losing its baseline', () => {
     const project = projectWithDisplayCodeHistory()
     const line = project.lines.find(item => item.id === 'line-a')!

@@ -66,8 +66,8 @@ export function getPresentationState(project: ActualRouteProject, sequence: Pres
     const targetLineIds = activeLineIds(project, sequence, station.id, transition?.historyDate ?? historyDate)
     const previousLineIds = transition ? presentationVisibleLineIds(project,sequence,station.id,historyDate,transitionArrivalTime-1e-6) : presentationVisibleLineIds(project,sequence,station.id,historyDate,time)
     const lineIds = presentationVisibleLineIds(project,sequence,station.id,historyDate,time)
-    const previousPassengerLineIds = collapseLineIdsByServiceFamily(project, previousLineIds)
-    const passengerLineIds = collapseLineIdsByServiceFamily(project, lineIds)
+    const previousPassengerLineIds = collapseLineIdsByServiceFamily(project, previousLineIds, historyDate)
+    const passengerLineIds = collapseLineIdsByServiceFamily(project, lineIds, historyDate)
     const relationSetChanged=previousPassengerLineIds.length!==passengerLineIds.length||previousPassengerLineIds.some((id,index)=>id!==passengerLineIds[index])
     const transferProgress = transition && relationSetChanged ? easing.transfer(clamp((time - transitionArrivalTime) / PRESENTATION_ANIMATION.transferMorphDuration)) : 1
     const openingHasStarted = !opening || time >= (isOriginStation ? opening.originRevealStart : opening.revealStart), historicallyEligible = targetLineIds.length > 0, isClosed = !historicallyEligible && openingHasStarted
@@ -108,10 +108,10 @@ function presentationVisibleLineIds(project:ActualRouteProject,sequence:Presenta
   }))
 }
 function presentationVisibleRelationIds(project: ActualRouteProject, stationId: string, date: string, lineIds: string[]) {
-  const representativeFamilies = new Set(lineIds.map(lineId => project.lines.find(line => line.id === lineId)).filter((line): line is ActualRouteProject['lines'][number] => Boolean(line)).map(line => getRootLineId(project, line)))
+  const representativeFamilies = new Set(lineIds.map(lineId => project.lines.find(line => line.id === lineId)).filter((line): line is ActualRouteProject['lines'][number] => Boolean(line)).map(line => getRootLineId(project, line, date)))
   return getCompoundStationMemberIds(project, stationId).flatMap(memberId => project.stationLineRelations.filter(relation => {
     const relationLine = project.lines.find(line => line.id === relation.lineId)
-    return relation.stationId === memberId && Boolean(relationLine && representativeFamilies.has(getRootLineId(project, relationLine))) && isStationLineServiceActiveAt(project, relation, date)
+    return relation.stationId === memberId && Boolean(relationLine && representativeFamilies.has(getRootLineId(project, relationLine, date))) && isStationLineServiceActiveAt(project, relation, date)
   }).map(relation => relation.id))
 }
 function getPresentationStationCountForLine(project: ActualRouteProject, stationStates: Record<string, StationPresentationState>, lineId: string) {

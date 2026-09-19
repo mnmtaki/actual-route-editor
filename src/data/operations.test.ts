@@ -82,10 +82,15 @@ describe('line-driven editing operations', () => {
     expect(seeded.stationLineRelations.some(relation => relation.stationId === 's2' && relation.lineId === created.lineId)).toBe(true)
   })
 
-  it('rejects fake parents and cascades native child deletion with its main line', () => {
+  it('rejects fake or locked parents and cascades native child deletion with its main line', () => {
     const fakeParent = structuredClone(demoProject)
     fakeParent.lines[0].isFake = true
     expect(createBranchLine(fakeParent, 'line-a').lineId).toBeNull()
+    const lockedParent = structuredClone(demoProject)
+    lockedParent.lines[0].locked = true
+    const lockedResult = createBranchLine(lockedParent, 'line-a')
+    expect(lockedResult.lineId).toBeNull()
+    expect(lockedResult.error).toContain('锁定')
 
     const created = createBranchLine(structuredClone(demoProject), 'line-a', { name: '支线' })
     const seeded = connectExistingStation(created.project, created.lineId!, 's2')

@@ -25,6 +25,7 @@ import {
   appendStationToLine,
   batchDeleteLines,
   connectExistingStation,
+  createBranchLine,
   createLine,
   deleteLineAndOrphans,
   deleteStationConsistently,
@@ -96,7 +97,7 @@ export default function App() {
     [drawing, setDrawing] = useState<Drawing | null>(null),
     [roadDraft, setRoadDraft] = useState<Road | null>(null),
     [roadStyleId, setRoadStyleId] = useState("road-local"),
-    [dialog, setDialog] = useState<{ seed?: string } | null>(null),
+    [dialog, setDialog] = useState<{ seed?: string; parentLineId?: string } | null>(null),
     [choice, setChoice] = useState<string | null>(null),
     [segmentPoint, setSegmentPoint] = useState<{ id: string; p: Point } | null>(
       null,
@@ -285,15 +286,25 @@ export default function App() {
       ? setView(bounds(new Set([selection.id])))
       : fitAll();
   const startLine = () => setDialog({});
+  const startBranchLine = (parentLineId: string) => setDialog({ parentLineId });
   const confirmLine = () => {
     const seed = dialog?.seed;
     const openedAt =
       dateRef.current?.value || history.project.timeline.currentDate;
-    const r = createLine(history.project, {
-      name: nameRef.current?.value ?? "",
-      color: colorRef.current?.value ?? "#6b58c4",
-      openedAt,
-    });
+    const r = dialog?.parentLineId
+      ? createBranchLine(history.project, dialog.parentLineId, {
+          name: nameRef.current?.value ?? "",
+          openedAt,
+        })
+      : createLine(history.project, {
+          name: nameRef.current?.value ?? "",
+          color: colorRef.current?.value ?? "#6b58c4",
+          openedAt,
+        });
+    if (!r.lineId) {
+      setNotice(r.error ?? "无法创建支线");
+      return;
+    }
     const phase = createOpeningPhase(r.project, {
       lineId: r.lineId,
       name: "一期",
@@ -1047,6 +1058,7 @@ export default function App() {
         onPreviewChange={history.replace}
         onCommitChange={history.commitFrom}
         onAddLine={startLine}
+        onAddBranchLine={startBranchLine}
         onOpenPresentation={() => setPresentationOpen(true)}
         onAddText={addMapElement}
         onAddRoad={() => startRoadDrawing()}
@@ -1158,6 +1170,7 @@ export default function App() {
             onClearSelection={clearLineSelection}
             onChange={history.commit}
             onAddLine={startLine}
+            onAddBranchLine={startBranchLine}
           />
           <section className="canvas-wrap">
             <div className="canvas-status">
@@ -1249,19 +1262,22 @@ export default function App() {
             }}
           >
             <div className="line-dialog">
-              <h2>{dialog.seed ? "从本站新建线路" : "新建线路"}</h2>
+              <h2>{dialog.parentLineId ? "新建支线" : dialog.seed ? "从本站新建线路" : "新建线路"}</h2>
+              {dialog.parentLineId && <p className="meta-note">主线：{getLineDisplayName(history.project, dialog.parentLineId)}</p>}
               <label className="field">
                 <span>线路名称</span>
                 <input
                   ref={nameRef}
                   autoFocus
-                  defaultValue={`新线路 ${history.project.lines.length + 1}`}
+                  defaultValue={dialog.parentLineId ? "" : `新线路 ${history.project.lines.length + 1}`}
+                  placeholder={dialog.parentLineId ? "留空则显示“支线”" : undefined}
                 />
               </label>
-              <label className="field">
+              {dialog.parentLineId && <label className="field"><span>从主线车站开始</span><select aria-label="支线起点站" value={dialog.seed ?? ""} onChange={event => setDialog({ ...dialog, seed: event.currentTarget.value || undefined })}><option value="">暂不选择</option>{(history.project.lines.find(line => line.id === dialog.parentLineId)?.stationSequence ?? []).map(stationId => { const station = history.project.stations.find(item => item.id === stationId); return station ? <option key={stationId} value={stationId}>{station.name}</option> : null })}</select></label>}
+              {!dialog.parentLineId && <label className="field">
                 <span>线路颜色</span>
                 <input ref={colorRef} type="color" defaultValue="#6b58c4" />
-              </label>
+              </label>}
               <label className="field">
                 <span>可选开通时间</span>
                 <input

@@ -31,13 +31,13 @@ describe('line structure panel',()=>{
   fireEvent.click(view.container.querySelectorAll('.line-row-main')[1],{ctrlKey:true})
   expect(onSelect).toHaveBeenCalledWith('line-b',{ctrlKey:true,metaKey:false,shiftKey:false})
  })
- it('exposes native branch creation for ordinary lines and not for fake lines',()=>{
+ it('offers native branch creation for the active ordinary line and hides it for an active fake line',()=>{
   const project=structuredClone(demoProject),onAddBranchLine=vi.fn()
   project.lines[1].isFake=true
-  render(<LinePanel project={project} selection={null} activeLineId={null} onSelect={()=>{}} onChange={()=>{}} onAddLine={()=>{}} onAddBranchLine={onAddBranchLine}/>)
-  const buttons=screen.getAllByTitle('新建支线')
-  expect(buttons).toHaveLength(project.lines.length-1)
+  const view=render(<LinePanel project={project} selection={{type:'line',id:'line-a'}} activeLineId='line-a' onSelect={()=>{}} onChange={()=>{}} onAddLine={()=>{}} onAddBranchLine={onAddBranchLine}/>)
   fireEvent.click(screen.getByRole('button',{name:'在澄川线下新建支线'}))
   expect(onAddBranchLine).toHaveBeenCalledWith('line-a')
+  view.rerender(<LinePanel project={project} selection={{type:'line',id:'line-b'}} activeLineId='line-b' onSelect={()=>{}} onChange={()=>{}} onAddLine={()=>{}} onAddBranchLine={onAddBranchLine}/>)
+  expect(screen.queryByTitle('新建支线')).toBeNull()
  })
 })

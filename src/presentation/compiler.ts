@@ -4,6 +4,7 @@ import { PRESENTATION_ANIMATION, clamp } from './config'
 import { compileCameraTrack } from './camera'
 import { getBeatRevealFronts, ORIGIN_HOLD_DURATION, ORIGIN_REVEAL_DURATION } from './reveal'
 import { getStationNameAt, normalizeStationNameHistory } from '../data/stationNameHistory'
+import { getLineNameAt, normalizeLineNameHistory } from '../data/lineNameHistory'
 import { resolveSegmentLineAt, normalizeSegmentLineHistory } from '../data/segmentLineHistory'
 import { resolveMetersPerWorldUnit } from '../data/distance'
 import { getCompoundStationMemberIds } from '../data/compoundStation'
@@ -104,6 +105,15 @@ export function compileHistoryEvents(project: ActualRouteProject, settings: Pres
       if (!validDate(entry.effectiveAt) || entry.effectiveAt < start || entry.effectiveAt > end) continue
       const oldName = getStationNameAt(station, previousDate(entry.effectiveAt))
       events.push({ id: `${entry.effectiveAt}-station-rename-${station.id}-${entry.id}`, type: 'STATION_RENAME', eventTypes: ['STATION_RENAME'], historyDate: entry.effectiveAt, lineId: '', segmentIds: [], stationIds: [], interchangeStationIds: [], branches: [], stationNameChange: { stationId: station.id, oldName: oldName.name, ...(oldName.nameS ? { oldNameS: oldName.nameS } : {}), newName: entry.name, ...(entry.nameS ? { newNameS: entry.nameS } : {}) } })
+    }
+  }
+  for (const line of project.lines) {
+    const history = normalizeLineNameHistory(line)
+    if (!history) continue
+    for (const entry of history) {
+      if (!validDate(entry.effectiveAt) || entry.effectiveAt < start || entry.effectiveAt > end) continue
+      const oldName = getLineNameAt(line, previousDate(entry.effectiveAt)).name
+      events.push({ id: `${entry.effectiveAt}-line-rename-${line.id}-${entry.id}`, type: 'LINE_RENAME', eventTypes: ['LINE_RENAME'], historyDate: entry.effectiveAt, lineId: line.id, segmentIds: [], stationIds: [], interchangeStationIds: [], branches: [], lineNameChange: { lineId: line.id, oldName, newName: entry.name } })
     }
   }
   return events.sort((a, b) => a.historyDate.localeCompare(b.historyDate) || lineOrder(project, a.lineId) - lineOrder(project, b.lineId) || a.id.localeCompare(b.id))

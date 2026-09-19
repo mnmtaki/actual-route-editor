@@ -39,5 +39,8 @@ describe('line structure panel',()=>{
   expect(onAddBranchLine).toHaveBeenCalledWith('line-a')
   view.rerender(<LinePanel project={project} selection={{type:'line',id:'line-b'}} activeLineId='line-b' onSelect={()=>{}} onChange={()=>{}} onAddLine={()=>{}} onAddBranchLine={onAddBranchLine}/>)
   expect(screen.queryByTitle('新建支线')).toBeNull()
+  project.lines[0].locked=true
+  view.rerender(<LinePanel project={project} selection={{type:'line',id:'line-a'}} activeLineId='line-a' onSelect={()=>{}} onChange={()=>{}} onAddLine={()=>{}} onAddBranchLine={onAddBranchLine}/>)
+  expect(screen.queryByTitle('新建支线')).toBeNull()
  })
 })

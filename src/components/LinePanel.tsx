@@ -213,7 +213,7 @@ export function LinePanel({
   const activeLine = activeLineId ? project.lines.find(line => line.id === activeLineId) : undefined
   const activeLineName = activeLine ? getLineDisplayName(project, activeLine) : ''
   return <aside className="left-panel panel" aria-label="线路结构">
-    <div className="panel-heading"><div><h2>线路</h2><span className="panel-subtitle">线路与图层</span></div><div className="panel-heading-actions"><button className="icon-button" onClick={onAddLine} aria-label="新增线路">＋</button>{activeLine && !isFakeLine(activeLine) && <button className="icon-button branch-line-add" onClick={() => onAddBranchLine?.(activeLine.id)} aria-label={`在${activeLineName || '当前线路'}下新建支线`} title="新建支线">支＋</button>}</div></div>
+    <div className="panel-heading"><div><h2>线路</h2><span className="panel-subtitle">线路与图层</span></div><div className="panel-heading-actions"><button className="icon-button" onClick={onAddLine} aria-label="新增线路">＋</button>{activeLine && !isFakeLine(activeLine) && !activeLine.locked && <button className="icon-button branch-line-add" onClick={() => onAddBranchLine?.(activeLine.id)} aria-label={`在${activeLineName || '当前线路'}下新建支线`} title="新建支线">支＋</button>}</div></div>
     <div ref={listRef} className="line-list" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={finishPointer} onPointerCancel={event => { endTouchLongPress(event); finishPointer(event, true) }} onContextMenu={event => { if (marqueeRef.current) event.preventDefault() }}>
       {displayLines.map(({ line, depth }) => {
         const isSelected = selected.has(line.id)

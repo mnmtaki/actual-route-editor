@@ -63,6 +63,7 @@ export function createBranchLine(project: ActualRouteProject, parentLineId: stri
   const parent = project.lines.find(line => line.id === parentLineId)
   if (!parent) return { project, lineId: null, error: '未找到主线' }
   if (parent.isFake) return { project, lineId: null, error: '伪线不能作为原生支线的主线' }
+  if (isLineLocked(project, parent.id)) return { project, lineId: null, error: '线路已锁定，不能新建支线' }
   const next = structuredClone(project)
   const lineId = uid('line')
   next.lines.push({

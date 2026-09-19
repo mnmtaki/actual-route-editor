@@ -1,0 +1,713 @@
+/*
+ * Actual Route Editor visual system
+ * ---------------------------------
+ * Structural/layout rules stay in styles.css and direct-edit.css.
+ * This file is the final visual authority for shared editor surfaces.
+ * New UI should consume these tokens instead of introducing local colors,
+ * radii, shadows or control heights.
+ */
+
+:root {
+  color-scheme: light;
+  --ui-font: Inter, "Noto Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+
+  --ui-bg: #ece8df;
+  --ui-canvas: #f3f0e9;
+  --ui-surface: #fffdfa;
+  --ui-surface-raised: #ffffff;
+  --ui-surface-muted: #f8f5ee;
+  --ui-surface-subtle: #fbf9f4;
+
+  --ui-text: #2d322f;
+  --ui-text-secondary: #5f6661;
+  --ui-text-muted: #7a817c;
+  --ui-text-faint: #969c97;
+
+  --ui-border: #ddd8cf;
+  --ui-border-strong: #cbc4b8;
+  --ui-divider: #e9e4db;
+
+  --ui-accent: #d6a72d;
+  --ui-accent-hover: #c79824;
+  --ui-accent-soft: #f7ebc2;
+  --ui-accent-softer: #fff8e6;
+  --ui-accent-text: #5c4712;
+
+  --ui-danger: #a64a3f;
+  --ui-danger-border: #e5c4bf;
+  --ui-danger-soft: #fff4f1;
+
+  --ui-success: #3f7565;
+  --ui-success-soft: #edf6f1;
+
+  --ui-radius-xs: 5px;
+  --ui-radius-sm: 7px;
+  --ui-radius-md: 9px;
+  --ui-radius-lg: 12px;
+  --ui-radius-xl: 16px;
+
+  --ui-control-h: 36px;
+  --ui-control-h-compact: 32px;
+  --ui-control-h-touch: 44px;
+
+  --ui-space-1: 4px;
+  --ui-space-2: 8px;
+  --ui-space-3: 12px;
+  --ui-space-4: 16px;
+  --ui-space-5: 20px;
+
+  --ui-shadow-subtle: 0 2px 10px #4e463515;
+  --ui-shadow-float: 0 14px 38px #4e46352b;
+  --ui-shadow-dialog: 0 24px 72px #4e46353b;
+
+  /* Compatibility aliases used by older editor rules. */
+  --ink: var(--ui-text);
+  --panel: var(--ui-surface);
+  --panel2: var(--ui-surface-muted);
+  --line: var(--ui-border);
+  --accent: var(--ui-accent);
+  --ui-hover: var(--ui-surface-muted);
+  --ui-selected: var(--ui-accent-soft);
+  --ui-muted: var(--ui-text-muted);
+  --ui-radius-button: var(--ui-radius-sm);
+  --ui-radius-input: var(--ui-radius-sm);
+  --ui-radius-panel: var(--ui-radius-lg);
+}
+
+html,
+body,
+#root {
+  font-family: var(--ui-font);
+  color: var(--ui-text);
+}
+
+body,
+.app-shell {
+  background: var(--ui-bg);
+}
+
+/* Shared controls -------------------------------------------------------- */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  min-height: var(--ui-control-h);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  padding: 7px 11px;
+  background: var(--ui-surface-raised);
+  color: var(--ui-text);
+  box-shadow: none;
+  transition:
+    background-color .12s ease,
+    border-color .12s ease,
+    color .12s ease,
+    box-shadow .12s ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--ui-border-strong);
+  background: var(--ui-surface-muted);
+}
+
+button:active:not(:disabled) {
+  background: #f1ede4;
+}
+
+button:disabled {
+  opacity: .42;
+  cursor: default;
+}
+
+button.primary,
+button.active,
+button[aria-pressed="true"] {
+  border-color: #c99b26;
+  background: var(--ui-accent);
+  color: #30250a;
+  font-weight: 700;
+}
+
+button.primary:hover:not(:disabled),
+button.active:hover:not(:disabled),
+button[aria-pressed="true"]:hover:not(:disabled) {
+  border-color: #b98b1f;
+  background: var(--ui-accent-hover);
+}
+
+button.danger,
+.danger {
+  border-color: var(--ui-danger-border);
+  background: var(--ui-danger-soft);
+  color: var(--ui-danger);
+}
+
+button.danger:hover:not(:disabled),
+.danger:hover:not(:disabled) {
+  border-color: #dca99f;
+  background: #ffebe6;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: var(--ui-control-h);
+  min-width: var(--ui-control-h);
+  height: var(--ui-control-h);
+  min-height: var(--ui-control-h);
+  padding: 0;
+  border-radius: var(--ui-radius-sm);
+  font-size: 17px;
+}
+
+input,
+select,
+textarea,
+.field input,
+.field select,
+.field textarea,
+.project-settings-panel input,
+.project-settings-panel select,
+.presentation-setting-grid input,
+.presentation-setting-grid select,
+.presentation-title-field input,
+.style-drawer input,
+.style-drawer select {
+  min-height: var(--ui-control-h);
+  border: 1px solid var(--ui-border) !important;
+  border-radius: var(--ui-radius-sm) !important;
+  padding: 7px 9px;
+  background: var(--ui-surface-raised) !important;
+  color: var(--ui-text) !important;
+  color-scheme: light;
+  box-shadow: none;
+}
+
+textarea {
+  line-height: 1.5;
+  resize: vertical;
+}
+
+input[type="color"] {
+  min-height: var(--ui-control-h);
+  padding: 3px !important;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  min-height: auto;
+  accent-color: var(--ui-accent);
+}
+
+input[type="range"] {
+  min-height: auto;
+  accent-color: var(--ui-accent);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid #d9b34c;
+  outline-offset: 2px;
+}
+
+/* Type hierarchy -------------------------------------------------------- */
+.panel h2,
+.style-center-header h2,
+.project-settings-overlay h2,
+.presentation-settings h2,
+.mobile-drawer-header h2,
+.line-dialog h2 {
+  color: var(--ui-text);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+.panel h2,
+.project-settings-overlay h2,
+.presentation-settings h2 {
+  font-size: 16px;
+}
+
+.panel h3,
+.style-section h3,
+.project-settings-group h3 {
+  color: #3e4541;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.panel-subtitle,
+.meta-note,
+.project-settings-help,
+.about-dialog-card small {
+  color: var(--ui-text-muted);
+}
+
+.panel-subtitle {
+  font-size: 10px;
+}
+
+.meta-note,
+.project-settings-help {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.eyebrow {
+  color: var(--ui-text-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  text-transform: none;
+}
+
+/* App chrome ------------------------------------------------------------ */
+.toolbar {
+  height: 58px;
+  gap: 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--ui-border);
+  background: color-mix(in srgb, var(--ui-surface) 96%, transparent);
+  box-shadow: var(--ui-shadow-subtle);
+  color: var(--ui-text);
+}
+
+.brand-mark {
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-accent);
+  color: #2f250d;
+  box-shadow: none;
+}
+
+.brand strong {
+  color: var(--ui-text);
+}
+
+.brand small,
+.brand-project-name {
+  color: var(--ui-text-muted) !important;
+}
+
+.tool-group {
+  border-left-color: var(--ui-divider);
+}
+
+.toolbar button,
+.toolbar-menu-trigger {
+  height: var(--ui-control-h);
+  min-height: var(--ui-control-h);
+  border-radius: var(--ui-radius-sm);
+}
+
+.toolbar-menu-trigger[aria-expanded="true"] {
+  border-color: #cfb15f;
+  background: var(--ui-accent-softer);
+  color: var(--ui-accent-text);
+}
+
+.toolbar-menu-popover,
+.context-menu > div,
+.about-dialog-card {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-lg);
+  background: color-mix(in srgb, var(--ui-surface) 97%, transparent);
+  color: var(--ui-text);
+  box-shadow: var(--ui-shadow-float);
+  backdrop-filter: blur(12px);
+}
+
+.toolbar-menu-popover button,
+.context-menu button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ui-text);
+}
+
+.toolbar-menu-popover button:hover:not(:disabled),
+.context-menu button:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--ui-surface-muted);
+}
+
+.presentation-entry {
+  border-color: #d8bd71 !important;
+  background: var(--ui-accent-softer) !important;
+  color: var(--ui-accent-text) !important;
+}
+
+.workspace {
+  background: var(--ui-bg);
+}
+
+.panel,
+.left-panel,
+.right-panel {
+  background: var(--ui-surface);
+  color: var(--ui-text);
+}
+
+.left-panel {
+  border-right-color: var(--ui-border);
+}
+
+.right-panel {
+  border-left-color: var(--ui-border);
+}
+
+.panel-heading {
+  height: 58px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ui-divider);
+  background: var(--ui-surface);
+}
+
+.panel-section {
+  border-top-color: var(--ui-divider);
+}
+
+/* Lists and inspector --------------------------------------------------- */
+.line-list {
+  gap: 4px;
+  padding: 8px;
+}
+
+.line-row {
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius-md);
+  color: var(--ui-text);
+}
+
+.line-row:hover {
+  background: var(--ui-surface-muted);
+}
+
+.line-row.selected,
+.line-row.active {
+  border-color: #dec36f;
+  background: var(--ui-accent-soft);
+  box-shadow: inset 3px 0 #c79d31;
+}
+
+.line-row.secondary-selected {
+  border-color: #ead9ad;
+  background: #fbf5e8;
+}
+
+.line-row-main,
+.line-row-main:hover {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.line-tree-toggle,
+.line-state-button {
+  color: var(--ui-text-muted);
+}
+
+.line-state-button {
+  border-radius: var(--ui-radius-sm);
+}
+
+.line-state-button:hover:not(:disabled),
+.line-state-button.is-on {
+  border-color: var(--ui-border);
+  background: var(--ui-surface-raised);
+  color: #4d5550;
+}
+
+.network-overview,
+.panel-help {
+  border-color: var(--ui-divider);
+  color: var(--ui-text-secondary);
+}
+
+.network-summary,
+.relation-list,
+.opening-phases,
+.hint-card,
+.style-section,
+.layer-card,
+.raster-size {
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-surface-muted);
+  color: var(--ui-text);
+}
+
+.inspector-body {
+  color: var(--ui-text);
+}
+
+.field {
+  gap: 6px;
+  color: var(--ui-text-secondary);
+  font-size: 11px;
+}
+
+.toggle-row {
+  color: var(--ui-text-secondary);
+}
+
+.empty-inspector {
+  border-color: var(--ui-divider);
+  background: var(--ui-surface-subtle);
+  color: var(--ui-text-muted);
+}
+
+.opening-phase-row,
+.station-opening-row,
+.batch-inspector-section {
+  border-color: var(--ui-divider);
+}
+
+/* Canvas overlays ------------------------------------------------------- */
+.canvas-wrap,
+.network-canvas {
+  background: var(--ui-canvas);
+}
+
+.canvas-status {
+  border-color: var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  background: color-mix(in srgb, var(--ui-surface) 94%, transparent);
+  box-shadow: var(--ui-shadow-subtle);
+}
+
+.canvas-status span {
+  border-right: 1px solid var(--ui-divider);
+  background: transparent;
+  color: var(--ui-text-secondary);
+}
+
+.canvas-status span:last-child {
+  border-right: 0;
+  color: var(--ui-text-muted);
+}
+
+.creation-banner {
+  border: 1px solid #e8d49a;
+  border-radius: 999px;
+  background: #fff8e5ed;
+  color: #655019;
+  box-shadow: var(--ui-shadow-subtle);
+}
+
+.context-sheet,
+.line-choice,
+.presentation-controls {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-lg);
+  background: color-mix(in srgb, var(--ui-surface) 95%, transparent);
+  color: var(--ui-text);
+  box-shadow: var(--ui-shadow-float);
+  backdrop-filter: blur(12px);
+}
+
+.context-menu > summary {
+  border-color: var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--ui-surface-raised);
+  color: var(--ui-text);
+}
+
+.context-menu label {
+  color: var(--ui-text-secondary);
+}
+
+.context-menu select {
+  border-color: var(--ui-border);
+  background: var(--ui-surface-raised);
+  color: var(--ui-text);
+}
+
+/* Drawers, settings and dialogs ---------------------------------------- */
+.style-drawer,
+.mobile-drawer,
+.project-settings-overlay,
+.presentation-settings {
+  border-color: var(--ui-border);
+  background: color-mix(in srgb, var(--ui-surface) 97%, transparent);
+  color: var(--ui-text);
+  box-shadow: var(--ui-shadow-float);
+  backdrop-filter: blur(14px);
+}
+
+.style-drawer {
+  border-radius: var(--ui-radius-lg) 0 0 var(--ui-radius-lg);
+}
+
+.style-drawer > header,
+.style-center-header,
+.mobile-drawer-header,
+.project-settings-overlay > header {
+  border-bottom-color: var(--ui-divider);
+  background: var(--ui-surface);
+}
+
+.style-drawer details {
+  border-color: var(--ui-divider);
+}
+
+.style-drawer summary {
+  color: var(--ui-text);
+}
+
+.style-category-button,
+.preset-card,
+.basemap-path-list > button {
+  border: 1px solid var(--ui-divider);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+}
+
+.style-category-button:hover,
+.preset-card:hover,
+.basemap-path-list > button:hover {
+  border-color: #dbc682;
+  background: var(--ui-accent-softer);
+}
+
+.style-back-button {
+  color: var(--ui-text-secondary);
+}
+
+.line-dialog-backdrop,
+.mobile-drawer-scrim {
+  background: #514b4147;
+  backdrop-filter: blur(3px);
+}
+
+.line-dialog {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-xl);
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  box-shadow: var(--ui-shadow-dialog);
+}
+
+.line-dialog-actions {
+  border-top-color: var(--ui-divider);
+}
+
+.project-settings-group {
+  color: var(--ui-text);
+}
+
+.project-settings-actions button.active {
+  border-color: #d4b65e;
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent-text);
+}
+
+/* Presentation controls use the editor language, while map artwork stays
+ * untouched. */
+.presentation-mode {
+  background: var(--ui-bg);
+  color: var(--ui-text);
+}
+
+.presentation-stage {
+  background: var(--ui-canvas);
+}
+
+.presentation-topbar {
+  background: linear-gradient(#fffdfaef, #fffdfa00);
+  color: var(--ui-text);
+}
+
+.presentation-topbar small,
+.presentation-controls span,
+.presentation-setting-grid label,
+.presentation-title-field,
+.presentation-checks {
+  color: var(--ui-text-secondary);
+}
+
+.presentation-debug {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  background: color-mix(in srgb, var(--ui-surface) 94%, transparent);
+  color: var(--ui-text-secondary);
+  box-shadow: var(--ui-shadow-subtle);
+}
+
+.presentation-debug strong {
+  color: var(--ui-text);
+}
+
+.presentation-play {
+  border-color: #d7bb6c !important;
+  background: var(--ui-accent-softer);
+  color: var(--ui-accent-text);
+}
+
+.presentation-message {
+  color: var(--ui-success);
+}
+
+/* Mobile uses the same surfaces and controls, only with touch dimensions. */
+@media (max-width: 699px) {
+  .mobile-topbar {
+    background: linear-gradient(#fffdfaef, #fffdfa00);
+    color: var(--ui-text);
+  }
+
+  .mobile-topbar button,
+  .mobile-primary-nav button {
+    border-color: var(--ui-border);
+    background: color-mix(in srgb, var(--ui-surface) 94%, transparent);
+    color: var(--ui-text);
+    box-shadow: var(--ui-shadow-subtle);
+  }
+
+  .mobile-primary-nav button {
+    min-height: var(--ui-control-h-touch);
+    border-radius: var(--ui-radius-md);
+  }
+
+  .mobile-primary-nav button.active {
+    border-color: #d4b65e;
+    background: var(--ui-accent-soft);
+    color: var(--ui-accent-text);
+  }
+
+  .mobile-drawer {
+    background: var(--ui-surface);
+  }
+
+  .mobile-drawer-section p,
+  .mobile-line-list-head,
+  .mobile-history-list time,
+  .mobile-history-list span {
+    color: var(--ui-text-muted);
+  }
+
+  .mobile-line-list-head,
+  .mobile-line-batch-actions,
+  .mobile-drawer .context-sheet {
+    border-color: var(--ui-divider);
+    background: var(--ui-surface-muted);
+  }
+
+  .mobile-drawer button,
+  .mobile-drawer input,
+  .mobile-drawer select,
+  .mobile-drawer textarea {
+    min-height: var(--ui-control-h-touch);
+  }
+
+  .style-drawer,
+  .presentation-settings {
+    border-radius: var(--ui-radius-xl) var(--ui-radius-xl) 0 0;
+  }
+}

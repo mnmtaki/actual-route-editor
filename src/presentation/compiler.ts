@@ -149,7 +149,7 @@ export function compilePresentationBeats(project: ActualRouteProject, events: Hi
     const primaryBranchIndex = branchLengths.length ? branchLengths.indexOf(totalPathLength) : 0
     const opening = event.eventTypes.includes('SEGMENT_OPENING')
     const revealDuration = event.type === 'LINE_REASSIGNMENT' || event.type === 'LINE_PARENT_CHANGE' || event.type === 'LINE_COLOR_CHANGE' || event.type === 'LINE_DISPLAY_CODE_CHANGE' ? 0.001 : opening ? totalPathLength / speed : event.type.includes('CLOSURE') ? PRESENTATION_ANIMATION.closureFadeDuration : settings.stationOpeningDuration
-    const cameraTransitionDuration = index === 0 || event.type === 'LINE_REASSIGNMENT' || event.type === 'LINE_PARENT_CHANGE' || event.type === 'LINE_COLOR_CHANGE' ? 0 : PRESENTATION_ANIMATION.cameraTransitionDuration
+    const cameraTransitionDuration = index === 0 || event.type === 'LINE_REASSIGNMENT' || event.type === 'LINE_PARENT_CHANGE' || event.type === 'LINE_COLOR_CHANGE' || event.type === 'LINE_DISPLAY_CODE_CHANGE' ? 0 : PRESENTATION_ANIMATION.cameraTransitionDuration
     const constructionStart = cursor + cameraTransitionDuration
     const originStationId = opening ? event.branches[primaryBranchIndex]?.[0]?.fromStationId : undefined
     const needsOriginReveal = Boolean(opening && originStationId && !stationWasVisibleBeforeBeat(project, events, index, originStationId, event.historyDate))

@@ -5,6 +5,7 @@ import { getStationLineTangent } from '../geometry/tangent'
 import { sampleSegmentNearStation } from '../geometry/path'
 import { dotX, getDefaultTransferMetrics } from './stationStyles'
 import { getGuangzhouStationPillMetrics, GuangzhouStationPill } from './guangzhouArtwork'
+import { getLineDisplayCodeAt } from '../data/lineDisplayCodeHistory'
 
 export interface TransferArtworkProps {
   project: ActualRouteProject
@@ -21,11 +22,8 @@ export interface TransferArtworkProps {
   minMajorAxis?: number
 }
 
-export function getLineDisplayCode(line: Line): string {
-  const explicit = line.displayCode ?? line.number ?? line.code ?? line.shortName
-  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim()
-  const match = /^\s*(\d{1,3})/.exec(line.name)
-  return match?.[1] ?? line.name.trim().slice(0, 4)
+export function getLineDisplayCode(line: Line, date?: string | null): string {
+  return getLineDisplayCodeAt(line, date)
 }
 
 export function getStationCodeForLine(project: ActualRouteProject, stationId: string, lineId: string): string {

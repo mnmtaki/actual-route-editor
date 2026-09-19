@@ -10,14 +10,26 @@ describe('AARC fake line entries', () => {
       format: 'aarc',
       raw: {
         lines: [
-          { id: 7, name: '图例线', color: '#123456', type: 0, isFake: true, pts: [1, 2] },
+          { id: 7, name: '图例线', color: '#123456', colorPre: 0.5, type: 0, isFake: true, width: 2, style: 3, pts: [1, 2] },
           { id: 8, name: '伪地形', color: '#abcdef', type: 1, isFake: true, pts: [3, 4] },
         ],
       },
     }
     const next = materializeAarcFakeLineEntries(project)
     expect(next.lines).toHaveLength(1)
-    expect(next.lines[0]).toMatchObject({ id: 'aarc-line-7', name: '图例线', color: '#123456', isFake: true })
+    expect(next.lines[0]).toMatchObject({
+      id: 'aarc-line-7',
+      name: '图例线',
+      color: '#123456',
+      isFake: true,
+      lineStyleId: '3',
+      source: {
+        sourceWidthRatio: 2,
+        sourceColor: '#123456',
+        sourceColorPre: 0.5,
+        sourceStyleId: 3,
+      },
+    })
     expect(materializeAarcFakeLineEntries(next)).toBe(next)
   })
 

@@ -9,7 +9,6 @@ import { DEFAULT_CORNER_RADIUS, getWaypointCornerPlan } from '../geometry/path'
 import { CHINESE_FONT_PRESETS, ColorControl, FontFamilyControl, FontWeightControl, FOREIGN_FONT_PRESETS } from './TypographyControls'
 import { normalizeStationNameHistory, removeStationNameHistoryEntry, setCurrentStationName, updateStationNameHistoryEntry } from '../data/stationNameHistory'
 import { setCurrentLineName } from '../data/lineNameHistory'
-import { normalizeLineParentHistory, removeLineParentHistoryEntry, updateLineParentHistoryEntry } from '../data/lineParentHistory'
 import { setCurrentLineOwnColor } from '../data/lineColorHistory'
 import { resolveCurrentLineDisplayCode, setCurrentLineDisplayCode } from '../data/lineDisplayCodeHistory'
 import { splitLineAtStation, type SplitSide } from '../data/operations'
@@ -22,7 +21,8 @@ import { collapseLinesByServiceFamily, getEffectiveLineColor, getLineDisplayName
 import { getCompoundStationCanonical, getCompoundStationMembers, getCompoundStationRelations } from '../data/compoundStation'
 import { getStationStyles, resolveStationStyle } from '../data/stationStyles'
 import { getBuiltInPresets } from '../data/presetRegistry'
-import { getTransferStyles, resolveTransferStyle } from '../data/transferStyles'\nimport { LineHistoryEditor } from './LineHistoryEditor'
+import { getTransferStyles, resolveTransferStyle } from '../data/transferStyles'
+import { LineHistoryEditor } from './LineHistoryEditor'
 
 const round=(value:number)=>Math.round(value*100)/100
 const inferDirectionFromVector=(x:number,y:number,fallback:LabelDirection):LabelDirection=>inferLabelDirection(x,y)==='custom'?fallback:inferLabelDirection(x,y) as LabelDirection

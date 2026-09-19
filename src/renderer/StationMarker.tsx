@@ -27,8 +27,8 @@ export function StationMarker({ project, station, time, selected, hitRadius = 24
     : null
   const lines = getPassengerLinesAtStation(project, renderStation.id, time)
   const renderLines = lines.length > 1
-    ? sortTransferLinesForSpatialOrder(project, renderStation.id, lines, time).map(line => lineWithEffectiveColor(project, line))
-    : lines.map(line => lineWithEffectiveColor(project, line))
+    ? sortTransferLinesForSpatialOrder(project, renderStation.id, lines, time).map(line => lineWithEffectiveColor(project, line, time))
+    : lines.map(line => lineWithEffectiveColor(project, line, time))
   const { stationSize, transferMinorAxis, transferDotGap, transferEndPadding } = effectiveStationStyle(renderStation, project.settings)
   // Transfer stations keep the established capsule renderer. Ordinary stations
   // resolve their project/station style through the shared style registry.

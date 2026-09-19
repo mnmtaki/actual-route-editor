@@ -7,6 +7,7 @@ import { appendSegmentLineHistory } from './segmentLineHistory'
 import { labelOffsetFor } from './style'
 import { isLineLocked, isSegmentGeometryLocked, isStationGeometryLocked } from './lineLock'
 import { getEffectiveLineColor } from './lineIdentity'
+import { clearDeletedLineParentReferences } from './lineParentHistory'
 
 export interface Point { x: number; y: number }
 
@@ -63,6 +64,7 @@ export function createBranchLine(project: ActualRouteProject, parentLineId: stri
   const parent = project.lines.find(line => line.id === parentLineId)
   if (!parent) return { project, lineId: null, error: '未找到主线' }
   if (parent.isFake) return { project, lineId: null, error: '伪线不能作为原生支线的主线' }
+  if (isLineLocked(project, parent.id)) return { project, lineId: null, error: '线路已锁定，不能新建支线' }
   const next = structuredClone(project)
   const lineId = uid('line')
   next.lines.push({
@@ -221,6 +223,7 @@ export function deleteLineAndOrphans(project: ActualRouteProject, lineId: string
     for (const line of next.lines) if (line.parentLineId && deletedIds.has(line.parentLineId) && !deletedIds.has(line.id)) { deletedIds.add(line.id); changed = true }
   }
   next.lines = next.lines.filter(line => !deletedIds.has(line.id))
+  clearDeletedLineParentReferences(next, deletedIds)
   next.stationLineRelations = next.stationLineRelations.filter(relation => !deletedIds.has(relation.lineId))
   next.geometry.segments = next.geometry.segments.filter(segment => !deletedIds.has(segment.lineId))
   next.openingPhases = next.openingPhases.filter(phase => !deletedIds.has(phase.lineId))

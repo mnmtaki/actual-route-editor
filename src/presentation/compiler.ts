@@ -5,6 +5,7 @@ import { compileCameraTrack } from './camera'
 import { getBeatRevealFronts, ORIGIN_HOLD_DURATION, ORIGIN_REVEAL_DURATION } from './reveal'
 import { getStationNameAt, normalizeStationNameHistory } from '../data/stationNameHistory'
 import { getLineNameAt, normalizeLineNameHistory } from '../data/lineNameHistory'
+import { getLineParentIdAt, normalizeLineParentHistory } from '../data/lineParentHistory'
 import { resolveSegmentLineAt, normalizeSegmentLineHistory } from '../data/segmentLineHistory'
 import { resolveMetersPerWorldUnit } from '../data/distance'
 import { getCompoundStationMemberIds } from '../data/compoundStation'
@@ -109,11 +110,17 @@ export function compileHistoryEvents(project: ActualRouteProject, settings: Pres
   }
   for (const line of project.lines) {
     const history = normalizeLineNameHistory(line)
-    if (!history) continue
-    for (const entry of history) {
+    if (history) for (const entry of history) {
       if (!validDate(entry.effectiveAt) || entry.effectiveAt < start || entry.effectiveAt > end) continue
       const oldName = getLineNameAt(line, previousDate(entry.effectiveAt)).name
       events.push({ id: `${entry.effectiveAt}-line-rename-${line.id}-${entry.id}`, type: 'LINE_RENAME', eventTypes: ['LINE_RENAME'], historyDate: entry.effectiveAt, lineId: line.id, segmentIds: [], stationIds: [], interchangeStationIds: [], branches: [], lineNameChange: { lineId: line.id, oldName, newName: entry.name } })
+    }
+    const parentHistory = normalizeLineParentHistory(line)
+    if (parentHistory) for (const entry of parentHistory) {
+      if (!validDate(entry.effectiveAt) || entry.effectiveAt < start || entry.effectiveAt > end) continue
+      const oldParentLineId = getLineParentIdAt(line, previousDate(entry.effectiveAt))
+      const newParentLineId = entry.parentLineId || undefined
+      events.push({ id: `${entry.effectiveAt}-line-parent-${line.id}-${entry.id}`, type: 'LINE_PARENT_CHANGE', eventTypes: ['LINE_PARENT_CHANGE'], historyDate: entry.effectiveAt, lineId: line.id, segmentIds: [], stationIds: [], interchangeStationIds: [], branches: [], lineParentChange: { lineId: line.id, ...(oldParentLineId ? { oldParentLineId } : {}), ...(newParentLineId ? { newParentLineId } : {}) } })
     }
   }
   return events.sort((a, b) => a.historyDate.localeCompare(b.historyDate) || lineOrder(project, a.lineId) - lineOrder(project, b.lineId) || a.id.localeCompare(b.id))
@@ -127,8 +134,8 @@ export function compilePresentationBeats(project: ActualRouteProject, events: Hi
     const totalPathLength = Math.max(0, ...branchLengths)
     const primaryBranchIndex = branchLengths.length ? branchLengths.indexOf(totalPathLength) : 0
     const opening = event.eventTypes.includes('SEGMENT_OPENING')
-    const revealDuration = event.type === 'LINE_REASSIGNMENT' ? 0.001 : opening ? totalPathLength / speed : event.type.includes('CLOSURE') ? PRESENTATION_ANIMATION.closureFadeDuration : settings.stationOpeningDuration
-    const cameraTransitionDuration = index === 0 || event.type === 'LINE_REASSIGNMENT' ? 0 : PRESENTATION_ANIMATION.cameraTransitionDuration
+    const revealDuration = event.type === 'LINE_REASSIGNMENT' || event.type === 'LINE_PARENT_CHANGE' ? 0.001 : opening ? totalPathLength / speed : event.type.includes('CLOSURE') ? PRESENTATION_ANIMATION.closureFadeDuration : settings.stationOpeningDuration
+    const cameraTransitionDuration = index === 0 || event.type === 'LINE_REASSIGNMENT' || event.type === 'LINE_PARENT_CHANGE' ? 0 : PRESENTATION_ANIMATION.cameraTransitionDuration
     const constructionStart = cursor + cameraTransitionDuration
     const originStationId = opening ? event.branches[primaryBranchIndex]?.[0]?.fromStationId : undefined
     const needsOriginReveal = Boolean(opening && originStationId && !stationWasVisibleBeforeBeat(project, events, index, originStationId, event.historyDate))

@@ -31,12 +31,12 @@ export function isStationLineServiceActiveAt(project: ActualRouteProject, relati
   const line = project.lines.find(item => item.id === relation.lineId)
   if (!line?.visible || isFakeLine(line) || !isLineOperationalAt(line, time) || !isRelationOperationalAt(relation, time)) return false
   const memberIds = new Set(getCompoundStationMemberIds(project, relation.stationId))
-  const relationFamily = getRootLineId(project, line)
+  const relationFamily = getRootLineId(project, line, time)
   return project.geometry.segments.some(segment => {
     if (!memberIds.has(segment.fromStationId) && !memberIds.has(segment.toStationId)) return false
     if (!isSegmentOperationalAt(segment, time)) return false
     const effectiveLine = project.lines.find(item => item.id === resolveSegmentLineAt(segment, time))
-    return Boolean(effectiveLine && !isFakeLine(effectiveLine) && getRootLineId(project, effectiveLine) === relationFamily)
+    return Boolean(effectiveLine && !isFakeLine(effectiveLine) && getRootLineId(project, effectiveLine, time) === relationFamily)
   })
 }
 
@@ -52,15 +52,15 @@ export function getActiveLinesAtStation(project: ActualRouteProject, stationId: 
     .sort((a, b) => compareRelations(project, stationId, a.id, b.id))
 }
 export function getPassengerLinesAtStation(project: ActualRouteProject, stationId: string, time: string): Line[] {
-  return collapseLinesByServiceFamily(project, getActiveLinesAtStation(project, stationId, time))
+  return collapseLinesByServiceFamily(project, getActiveLinesAtStation(project, stationId, time), time)
 }
 export function getPassengerVisibleRelationIds(project: ActualRouteProject, stationId: string, time: string, lineIds?: string[]): string[] {
   const ids = lineIds ?? getActiveLinesAtStation(project, stationId, time).map(line => line.id)
-  const representativeFamilies = new Set(ids.map(id => project.lines.find(line => line.id === id)).filter((line): line is Line => Boolean(line) && !isFakeLine(line)).map(line => getRootLineId(project, line)))
+  const representativeFamilies = new Set(ids.map(id => project.lines.find(line => line.id === id)).filter((line): line is Line => Boolean(line) && !isFakeLine(line)).map(line => getRootLineId(project, line, time)))
   return getCompoundStationRelations(project, stationId)
     .filter(relation => {
       const relationLine = project.lines.find(line => line.id === relation.lineId)
-      return Boolean(relationLine && !isFakeLine(relationLine) && representativeFamilies.has(getRootLineId(project, relationLine)) && isStationLineServiceActiveAt(project, relation, time))
+      return Boolean(relationLine && !isFakeLine(relationLine) && representativeFamilies.has(getRootLineId(project, relationLine, time)) && isStationLineServiceActiveAt(project, relation, time))
     })
     .map(relation => relation.id)
 }

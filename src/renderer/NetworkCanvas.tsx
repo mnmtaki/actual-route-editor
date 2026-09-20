@@ -440,14 +440,14 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragVectorBasemap(false); setPreview(null)
   }
 
-  const handleRoadPointerDown = useCallback((event: React.PointerEvent, road: ActualRouteProject['roads'][number]) => {
+  const handleRoadPointerDown = useCallback((event: React.PointerEvent, road: NonNullable<ActualRouteProject['roads']>[number]) => {
     if (drawing) return
     event.stopPropagation()
     if (road.locked) return
     onSelect({ type: 'road', id: road.id })
   }, [drawing, onSelect])
 
-  const handleRoadPointPointerDown = useCallback((event: React.PointerEvent, road: ActualRouteProject['roads'][number], pointId: string) => {
+  const handleRoadPointPointerDown = useCallback((event: React.PointerEvent, road: NonNullable<ActualRouteProject['roads']>[number], pointId: string) => {
     if (drawing || road.locked) return
     event.stopPropagation()
     const point = road.points.find(item => item.id === pointId)

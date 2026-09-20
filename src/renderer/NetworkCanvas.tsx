@@ -3,8 +3,6 @@ import type { ActualRouteProject, Road, Selection } from '../data/model'
 import { uid } from '../data/model'
 import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPlans, getSegmentSubpathSpans, pathSpansToSvgPath } from '../geometry/path'
 import { projectPointToSvgPath, screenPointToWorld } from '../geometry/screenPoint'
-import { getEditorVisibleStationsAtTime } from '../timeline/active'
-import { StationMarker } from './StationMarker'
 import { getStationHandleStyle } from './stationHandle'
 import { getSegmentStyleIntervalAtProgress, getStructureNodePoint } from '../data/structure'
 import { MapElementsLayer } from './MapElements'
@@ -21,10 +19,11 @@ import { translateStationWithAnchors } from '../data/stationAnchor'
 import { lineWithEffectiveColor } from '../data/lineIdentity'
 import { projectWithLineParentsAt } from '../data/lineParentHistory'
 import { projectWithLineColorsAt } from '../data/lineColorHistory'
-import { getCompoundStationCanonical, isCompoundStationCanonical } from '../data/compoundStation'
+import { isCompoundStationCanonical } from '../data/compoundStation'
 import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, demoteTerminalStationToDrawingPoint } from '../data/operations'
-import { cloneProjectForDrag, getDragAffectedLineIds } from './dragPreview'
+import { cloneProjectForDrag, getDragAffectedLineIds, getDragStationOverlay, type DragStationOverlay } from './dragPreview'
 import { NetworkLineLayer } from './NetworkLineLayer'
+import { NetworkStationLayer } from './NetworkStationLayer'
 
 type View = { x: number; y: number; width: number; height: number }
 type Point = { x: number; y: number }
@@ -65,11 +64,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const basemapCanvasPointer = useRef<DrawingCanvasPointer | null>(null)
   const [preview, setPreview] = useState<ActualRouteProject | null>(null)
   const [dragAffectedLineIds, setDragAffectedLineIds] = useState<Set<string>>(() => new Set())
+  const [dragStationOverlay, setDragStationOverlay] = useState<DragStationOverlay>(() => ({ stationIds: new Set(), markers: false, labels: false }))
   const [canvasWidth, setCanvasWidth] = useState(920)
   const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
   const shown = preview ?? project
-  const editorStations = useMemo(() => getEditorVisibleStationsAtTime(shown, shown.timeline.currentDate), [shown])
   const historicalIdentityProject = useMemo(() => projectWithLineColorsAt(projectWithLineParentsAt(shown, shown.timeline.currentDate), shown.timeline.currentDate), [shown])
   const touchHitPixels = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 699px)').matches ? 44 : 28
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
@@ -105,11 +104,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     pendingPreview.current = next
     if (previewTimer.current === null) previewTimer.current = setTimeout(flushPreview, Math.max(0, 50 - elapsed))
   }
-  const cancelScheduledPreview = () => {
+  const cancelScheduledPreview = useCallback(() => {
     pendingPreview.current = null
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
     previewTimer.current = null
-  }
+  }, [])
 
   useLayoutEffect(() => {
     liveViewRef.current = view
@@ -136,9 +135,9 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     setDrawingPointSelection(null)
   }, [drawing?.kind, drawing?.kind === 'line' ? drawing.lineId : undefined, drawing?.kind === 'line' ? drawing.phaseId : undefined, drawing?.kind === 'line' ? drawing.anchorStationId : undefined])
 
-  const pointerToWorld = (clientX: number, clientY: number): Point => screenPointToWorld(svgRef.current!, clientX, clientY, liveViewRef.current)
-  const capture = (event: React.PointerEvent) => event.currentTarget.setPointerCapture?.(event.pointerId)
-  const beginPinch = () => {
+  const pointerToWorld = useCallback((clientX: number, clientY: number): Point => screenPointToWorld(svgRef.current!, clientX, clientY, liveViewRef.current), [])
+  const capture = useCallback((event: React.PointerEvent) => event.currentTarget.setPointerCapture?.(event.pointerId), [])
+  const beginPinch = useCallback(() => {
     const points = [...pointers.current.entries()].slice(0, 2)
     if (points.length < 2) return
     lineCanvasPointer.current = null
@@ -154,16 +153,17 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }
     const startView = liveViewRef.current
     gesture.current = { kind: 'pinchingCanvas', pointerIds: [firstId, secondId], initialDistance, startView, startWorld: screenPointToWorld(svgRef.current!, center.x, center.y, startView) }
-  }
-  const startObjectDrag = (kind: Extract<Gesture, { before: ActualRouteProject }>['kind'], event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string, ownerPathId?: string, ownerRoadId?: string) => {
+  }, [cancelScheduledPreview])
+  const startObjectDrag = useCallback((kind: Extract<Gesture, { before: ActualRouteProject }>['kind'], event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string, ownerPathId?: string, ownerRoadId?: string) => {
     event.stopPropagation(); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); capture(event)
     if (pointers.current.size >= 2) { beginPinch(); return false }
     const target = { kind, id, segmentId, ownerLineId, ownerPathId, ownerRoadId }
     gesture.current = { ...target, pointerId: event.pointerId, startWorld: pointerToWorld(event.clientX, event.clientY), origin, before: project, latest: project, moved: false }
     setDragAffectedLineIds(getDragAffectedLineIds(project, target))
+    setDragStationOverlay(getDragStationOverlay(project, target))
     setPreview(project)
     return true
-  }
+  }, [beginPinch, capture, pointerToWorld, project])
 
   const addDraftPointAt = (position: Point) => {
     if (!lineDraft?.anchorStationId) return
@@ -397,24 +397,47 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }
     const current = gesture.current
     if (current.kind === 'pinchingCanvas') {
-      if (pointers.current.size < 2) { gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); commitLiveView() }
+      if (pointers.current.size < 2) { gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); commitLiveView() }
       return
     }
     if (current.kind === 'calibrationTap' && current.pointerId === event.pointerId) {
       if (!current.moved) onCalibrationPoint?.(pointerToWorld(event.clientX, event.clientY))
       else commitLiveView()
-      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); pointers.current.clear(); return
+      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); pointers.current.clear(); return
     }
     if (current.kind === 'panningCanvas') {
       if (current.pointerId === event.pointerId) commitLiveView()
-      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setPreview(null); return
+      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setPreview(null); return
     }
     if ('before' in current && current.pointerId === event.pointerId && current.moved) {
       cancelScheduledPreview()
       onDragCommit(current.before, current.latest)
     }
-    gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setPreview(null)
+    gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setPreview(null)
   }
+
+  const handleStationPointerDown = useCallback((event: React.PointerEvent, station: ActualRouteProject['stations'][number]) => {
+    event.stopPropagation()
+    if (drawing?.kind === 'line') { connectDrawingToStation(station.id); return }
+    if (drawing) { onConnectStation(station.id); return }
+    if (isStationGeometryLocked(project, station.id)) {
+      onSelect({ type: 'station', id: station.id })
+      onEditBlocked?.(lockedStationMessage(project, station.id))
+      return
+    }
+    if (startObjectDrag('draggingStation', event, { x: station.x, y: station.y }, station.id)) {
+      const additive = event.ctrlKey || event.metaKey || event.shiftKey
+      if (additive && onToggleStationSelection) onToggleStationSelection(station.id)
+      else onSelect({ type: 'station', id: station.id })
+    }
+  }, [drawing, onConnectStation, onEditBlocked, onSelect, onToggleStationSelection, project, startObjectDrag])
+
+  const handleStationLabelPointerDown = useCallback((event: React.PointerEvent, station: ActualRouteProject['stations'][number]) => {
+    if (drawing) return
+    if (startObjectDrag('draggingLabel', event, { x: station.labelOffsetX, y: station.labelOffsetY }, station.id)) {
+      onSelect({ type: 'station', id: station.id })
+    }
+  }, [drawing, onSelect, startObjectDrag])
 
   const handleSegmentPointerDown = useCallback((event: React.PointerEvent<SVGPathElement>, segment: ActualRouteProject['geometry']['segments'][number]) => {
     if (drawing) return
@@ -524,12 +547,28 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     />}
     {selectedInterval&&<g data-layer="style-interval-selection" data-editor="true" pointerEvents="none"><path d={selectedInterval.path} fill="none" stroke="#d2a72f" strokeWidth={(shown.lines.find(line=>line.id===selectedInterval.segment.lineId)?.lineWidth??shown.settings.lineWidth)+7} strokeLinecap="round" strokeLinejoin="round" opacity=".24" vectorEffect="non-scaling-stroke"/></g>}
     {phasePreview && <g data-layer="opening-phase-preview" pointerEvents="none">{phasePreview.segmentIds.map(id => { const segment = shown.geometry.segments.find(item => item.id === id); const rawLine = segment ? shown.lines.find(item => item.id === segment.lineId) : null; const line = rawLine ? lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate) : null; return segment && line ? <path key={id} d={getSegmentPath(shown, segment)} className="opening-phase-preview-segment" stroke={line.color} /> : null })}{phasePreview.stationIds.map(id => { const station = shown.stations.find(item => item.id === id); return station && isCompoundStationCanonical(shown, station) ? <circle key={id} cx={station.x} cy={station.y} r={effectiveStationStyle(station, shown.settings).stationSize * .9} className="opening-phase-preview-station" /> : null })}</g>}
-    <g data-layer="stations">{editorStations.map(station => <StationMarker key={station.id} part="marker" project={shown} station={station} time={shown.timeline.currentDate} selected={(selection?.type === 'station' && (selection.id === station.id || getCompoundStationCanonical(shown, selection.id)?.id === station.id)) || selectedStationIds.includes(station.id)} hitRadius={stationHitRadius}
-      onPointerDown={event => { event.stopPropagation(); if (drawing?.kind === 'line') { connectDrawingToStation(station.id); return } if (drawing) { onConnectStation(station.id); return } if (isStationGeometryLocked(shown, station.id)) { onSelect({ type: 'station', id: station.id }); onEditBlocked?.(lockedStationMessage(shown, station.id)); return } if (startObjectDrag('draggingStation', event, { x: station.x, y: station.y }, station.id)) { const additive = event.ctrlKey || event.metaKey || event.shiftKey; if (additive && onToggleStationSelection) onToggleStationSelection(station.id); else onSelect({ type: 'station', id: station.id }) } }}
-      onLabelPointerDown={event => { if (drawing) return; if (startObjectDrag('draggingLabel', event, { x: station.labelOffsetX, y: station.labelOffsetY }, station.id)) onSelect({ type: 'station', id: station.id }) }} />)}</g>
-    <AarcFakeLinesLayer project={shown} part="stations" />
-    <AarcPointLinksLayer project={shown} />
-    <g data-layer="station-labels">{editorStations.map(station => <StationMarker key={station.id} part="label" project={shown} station={station} time={shown.timeline.currentDate} selected={false} hitRadius={stationHitRadius} onPointerDown={() => {}} onLabelPointerDown={event => { if (drawing) return; if (startObjectDrag('draggingLabel', event, { x: station.labelOffsetX, y: station.labelOffsetY }, station.id)) onSelect({ type: 'station', id: station.id }) }} />)}</g>
+    <NetworkStationLayer
+      project={project}
+      selection={selection}
+      selectedStationIds={selectedStationIds}
+      hitRadius={stationHitRadius}
+      excludeMarkerStationIds={dragStationOverlay.markers ? dragStationOverlay.stationIds : undefined}
+      excludeLabelStationIds={dragStationOverlay.labels ? dragStationOverlay.stationIds : undefined}
+      onStationPointerDown={handleStationPointerDown}
+      onLabelPointerDown={handleStationLabelPointerDown}
+    />
+    {preview && dragStationOverlay.stationIds.size > 0 && <NetworkStationLayer
+      project={shown}
+      selection={selection}
+      selectedStationIds={selectedStationIds}
+      hitRadius={stationHitRadius}
+      includeStationIds={dragStationOverlay.stationIds}
+      renderMarkers={dragStationOverlay.markers}
+      renderLabels={dragStationOverlay.labels}
+      overlay
+    />}
+    <AarcFakeLinesLayer project={project} part="stations" />
+    <AarcPointLinksLayer project={project} />
     {lineDrawingOverlay}
     <LineBadgesLayer project={historicalIdentityProject} selectedId={selection?.type === 'lineLabel' && selection.source === 'native' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={(event, line, badge) => { if (drawing) return; if (startObjectDrag('draggingLineLabel', event, { x: badge.x, y: badge.y }, badge.id, undefined, line.id)) onSelect({ type: 'lineLabel', id: badge.id, lineId: line.id, source: 'native' }) }} />
     <AarcTextTagsLayer project={historicalIdentityProject} selectedId={selection?.type === 'lineLabel' && selection.source === 'aarc' ? selection.id : undefined} hitRadius={stationHitRadius} onLineLabelPointerDown={(event, tag, lineId) => { if (drawing) return; event.stopPropagation(); if (startObjectDrag('draggingLineLabel', event, { x: tag.x, y: tag.y }, tag.id, undefined, lineId)) onSelect({ type: 'lineLabel', id: tag.id, lineId, source: 'aarc' }) }} />

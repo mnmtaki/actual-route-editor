@@ -242,7 +242,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     onSelect(null)
   }
 
-  const connectDrawingToStation = (stationId: string) => {
+  const connectDrawingToStation = useCallback((stationId: string) => {
     if (!lineDraft?.anchorStationId || stationId === lineDraft.anchorStationId) {
       if (lineDraft?.lastCreatedStationId === stationId) setDrawingPointSelection({ kind: 'station', id: stationId })
       return
@@ -254,7 +254,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     setLineDraft({ ...lineDraft, anchorStationId: stationId, points: [], lastCreatedStationId: undefined })
     setDrawingPointSelection(null)
     onSelect({ type: 'station', id: stationId })
-  }
+  }, [lineDraft, onDragCommit, onSelect, project])
 
   const handleCanvasPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })

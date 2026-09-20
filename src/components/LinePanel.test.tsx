@@ -41,7 +41,7 @@ describe('line structure panel',()=>{
  it('plain name clicks select but do not enter a settings panel',()=>{
   const onSelect=vi.fn()
   render(<LinePanel project={structuredClone(demoProject)} selection={null} activeLineId={null} onSelect={onSelect} onChange={()=>{}} onAddLine={()=>{}}/>)
-  fireEvent.click(screen.getByRole('button',{name:/澄川线/}))
+  fireEvent.click(screen.getByRole('button',{name:'澄川线'}))
   expect(onSelect).toHaveBeenCalledWith('line-a',{ctrlKey:false,metaKey:false,shiftKey:false})
   expect(screen.queryByTestId('line-detail-panel')).toBeNull()
   expect(screen.queryByTestId('line-branch-panel')).toBeNull()

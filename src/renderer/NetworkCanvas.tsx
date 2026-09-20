@@ -586,7 +586,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       includeStationIds={dragStationOverlay.stationIds}
       renderMarkers={false}
       overlay
-    />
+    />}
     {lineDrawingOverlay}
     <LineBadgesLayer project={historicalIdentityProject} selectedId={selection?.type === 'lineLabel' && selection.source === 'native' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={(event, line, badge) => { if (drawing) return; if (startObjectDrag('draggingLineLabel', event, { x: badge.x, y: badge.y }, badge.id, undefined, line.id)) onSelect({ type: 'lineLabel', id: badge.id, lineId: line.id, source: 'native' }) }} />
     <AarcTextTagsLayer project={historicalIdentityProject} selectedId={selection?.type === 'lineLabel' && selection.source === 'aarc' ? selection.id : undefined} hitRadius={stationHitRadius} onLineLabelPointerDown={(event, tag, lineId) => { if (drawing) return; event.stopPropagation(); if (startObjectDrag('draggingLineLabel', event, { x: tag.x, y: tag.y }, tag.id, undefined, lineId)) onSelect({ type: 'lineLabel', id: tag.id, lineId, source: 'aarc' }) }} />

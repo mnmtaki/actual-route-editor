@@ -380,7 +380,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       if (current.pointerId === event.pointerId) commitLiveView()
       gesture.current = { kind: 'idle' }; setPreview(null); return
     }
-    if (current.kind !== 'idle' && current.pointerId === event.pointerId && current.moved) onDragCommit(current.before, current.latest)
+    if ('before' in current && current.pointerId === event.pointerId && current.moved) onDragCommit(current.before, current.latest)
     gesture.current = { kind: 'idle' }; setPreview(null)
   }
 

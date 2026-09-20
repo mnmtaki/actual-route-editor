@@ -155,3 +155,10 @@ export function getDragLineLabelOverlay(project: ActualRouteProject, target: Dra
   const source = project.textTags?.some(tag => tag.id === target.id) ? 'aarc' as const : 'native' as const
   return { labelIds, source, ownerLineId: target.ownerLineId }
 }
+
+
+export function dragTouchesVectorBasemap(target: DragPreviewTarget | null): boolean {
+  return target?.kind === 'draggingBasemapPoint'
+    || target?.kind === 'draggingBasemapPath'
+    || target?.kind === 'draggingRoadPoint'
+}

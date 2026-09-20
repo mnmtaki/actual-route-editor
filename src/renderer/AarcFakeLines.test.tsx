@@ -70,6 +70,6 @@ describe('AARC fake line visual fidelity', () => {
     const rawLine = (project.aarc!.raw!.lines as Array<Record<string, unknown>>)[0]
     rawLine.style = 3
     const { container } = render(<svg><AarcFakeLinesLayer project={project} part="common" sourceLineId={10} /></svg>)
-    expect(container.querySelector('[data-aarc-fake-line-style-layer="0"]')).toHaveAttribute('stroke-linecap', 'butt')
+    expect(container.querySelector('[data-aarc-fake-line-style-layer="0"]')).toHaveAttribute('stroke-linecap', 'round')
   })
 })

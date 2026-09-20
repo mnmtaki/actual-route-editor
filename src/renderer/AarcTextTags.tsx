@@ -290,7 +290,7 @@ function CommonLineTag({ tag, project, target }: { tag: AarcTextTag; project: Ac
     const xLeft = rectLeft(x, params.anchorX, naturalWidth)
     const yTop = params.anchorY === -1 ? y - totalHeight : params.anchorY === 0 ? y - totalHeight / 2 : y
     return <>
-      <rect x={rectLeft(x, params.anchorX, rectWidth)} y={rectTop(y, params.anchorY, totalHeight)} width={rectWidth} height={totalHeight} fill={target.color} stroke={padding > 0 ? target.color : undefined} strokeWidth={paddingLineWidth} data-aarc-line-name-carpet="true" data-aarc-width-mode="minimum" />
+      <rect x={rectLeft(x, params.anchorX, rectWidth)} y={rectTop(y, params.anchorY, totalHeight)} width={rectWidth} height={totalHeight} fill={target.color} stroke={padding > 0 ? target.color : undefined} strokeWidth={paddingLineWidth} strokeLinejoin="round" data-aarc-line-name-carpet="true" data-aarc-width-mode="minimum" data-aarc-carpet-shape="fill-rect-round-stroke" />
       <g data-aarc-text-render-kind="line-dropcap" data-aarc-dropcap-part={dropCapPart}>
         <text x={xLeft} y={yTop + totalHeight / 2} dominantBaseline="middle" textAnchor="start" fontFamily={giantFont.family} fontSize={giantFont.size} fill={textColor}>{dropCapPart}</text>
         <text x={xLeft + giantWidth + margin} y={yTop + primaryRow / 2} dominantBaseline="middle" textAnchor="start" fontFamily={primaryFont.family} fontSize={primaryFont.size} fill={textColor}>{rest}</text>
@@ -301,7 +301,7 @@ function CommonLineTag({ tag, project, target }: { tag: AarcTextTag; project: Ac
 
   const rectWidth = Math.max(metrics.width, params.width)
   return <>
-    <rect x={rectLeft(x, params.anchorX, rectWidth)} y={rectTop(y, params.anchorY, metrics.totalHeight)} width={rectWidth} height={metrics.totalHeight} fill={target.color} stroke={padding > 0 ? target.color : undefined} strokeWidth={paddingLineWidth} data-aarc-line-name-carpet="true" data-aarc-width-mode="minimum" />
+    <rect x={rectLeft(x, params.anchorX, rectWidth)} y={rectTop(y, params.anchorY, metrics.totalHeight)} width={rectWidth} height={metrics.totalHeight} fill={target.color} stroke={padding > 0 ? target.color : undefined} strokeWidth={paddingLineWidth} strokeLinejoin="round" data-aarc-line-name-carpet="true" data-aarc-width-mode="minimum" data-aarc-carpet-shape="fill-rect-round-stroke" />
     <TextBlock x={x} y={y} params={params} primaryLines={primaryLines} secondaryLines={secondaryLines} primaryFont={primaryFont} secondaryFont={secondaryFont} primaryRow={primaryRow} secondaryRow={secondaryRow} primaryColor={textColor} secondaryColor={textColor} dataKind="line" />
   </>
 }

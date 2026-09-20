@@ -1,6 +1,7 @@
+import { memo } from 'react'
 import type { ActualRouteProject, MapElement } from '../data/model'
 
-export function MapElementsLayer({ project, presentation = false, visibleLineIds, selectedId, hitRadius = 22, onPointerDown }: {
+export const MapElementsLayer = memo(function MapElementsLayer({ project, presentation = false, visibleLineIds, selectedId, hitRadius = 22, onPointerDown }: {
   project: ActualRouteProject
   presentation?: boolean
   visibleLineIds?: Set<string>
@@ -17,4 +18,4 @@ export function MapElementsLayer({ project, presentation = false, visibleLineIds
       {!presentation && selectedId === element.id && <rect data-editor="true" className="map-element-selection" x={element.textAlign === 'start' ? -4 : element.textAlign === 'end' ? -estimatedWidth - 4 : -estimatedWidth / 2 - 4} y={-element.fontSize - 4} width={estimatedWidth + 8} height={height + 8} rx="4" />}
     </g>
   })}</g>
-}
+})

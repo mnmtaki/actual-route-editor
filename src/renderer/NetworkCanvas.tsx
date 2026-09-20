@@ -27,6 +27,7 @@ import { projectWithLineParentsAt } from '../data/lineParentHistory'
 import { projectWithLineColorsAt } from '../data/lineColorHistory'
 import { getCompoundStationCanonical, isCompoundStationCanonical } from '../data/compoundStation'
 import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, demoteTerminalStationToDrawingPoint } from '../data/operations'
+import { cloneProjectForDrag } from './dragPreview'
 
 type View = { x: number; y: number; width: number; height: number }
 type Point = { x: number; y: number }
@@ -50,6 +51,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   view: View; setView: React.Dispatch<React.SetStateAction<View>>
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
+  const liveViewRef = useRef<View>(view)
+  const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingPreview = useRef<ActualRouteProject | null>(null)
+  const lastPreviewAt = useRef(0)
   const gesture = useRef<Gesture>({ kind: 'idle' })
   const pointers = useRef(new Map<number, Point>())
   const drawingClick = useRef<{ time: number; x: number; y: number } | null>(null)
@@ -73,7 +79,50 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const touchHitPixels = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 699px)').matches ? 44 : 28
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
   const structureHitRadius = Math.max(22, touchHitPixels * view.width / canvasWidth)
+  const segmentsByLineId = useMemo(() => {
+    const grouped = new Map<string, typeof active.segments>()
+    for (const segment of active.segments) {
+      const bucket = grouped.get(segment.lineId)
+      if (bucket) bucket.push(segment)
+      else grouped.set(segment.lineId, [segment])
+    }
+    return grouped
+  }, [active.segments])
 
+  const applyLiveView = (next: View) => {
+    liveViewRef.current = next
+    svgRef.current?.setAttribute('viewBox', `${next.x} ${next.y} ${next.width} ${next.height}`)
+  }
+  const commitLiveView = () => setView(liveViewRef.current)
+  const panLiveView = (fromClient: Point, toClient: Point) => {
+    const currentView = liveViewRef.current
+    const before = screenPointToWorld(svgRef.current!, fromClient.x, fromClient.y, currentView)
+    const after = screenPointToWorld(svgRef.current!, toClient.x, toClient.y, currentView)
+    applyLiveView({ ...currentView, x: currentView.x - (after.x - before.x), y: currentView.y - (after.y - before.y) })
+  }
+  const flushPreview = () => {
+    previewTimer.current = null
+    const next = pendingPreview.current
+    if (!next) return
+    pendingPreview.current = null
+    lastPreviewAt.current = performance.now()
+    setPreview(next)
+  }
+  const schedulePreview = (next: ActualRouteProject) => {
+    pendingPreview.current = next
+    const wait = Math.max(0, 50 - (performance.now() - lastPreviewAt.current))
+    if (previewTimer.current === null) previewTimer.current = setTimeout(flushPreview, wait)
+  }
+  const cancelScheduledPreview = () => {
+    pendingPreview.current = null
+    if (previewTimer.current !== null) clearTimeout(previewTimer.current)
+    previewTimer.current = null
+  }
+
+  useLayoutEffect(() => {
+    liveViewRef.current = view
+    svgRef.current?.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`)
+  }, [view])
   useLayoutEffect(() => {
     const element = svgRef.current
     if (!element) return
@@ -83,6 +132,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     observer?.observe(element)
     return () => observer?.disconnect()
   }, [])
+  useEffect(() => () => {
+    if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
+    if (previewTimer.current !== null) clearTimeout(previewTimer.current)
+  }, [])
   useEffect(() => { if (!drawing) drawingClick.current = null }, [drawing])
   useEffect(() => {
     if (drawing?.kind === 'line') {
@@ -91,7 +144,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     setDrawingPointSelection(null)
   }, [drawing?.kind, drawing?.kind === 'line' ? drawing.lineId : undefined, drawing?.kind === 'line' ? drawing.phaseId : undefined, drawing?.kind === 'line' ? drawing.anchorStationId : undefined])
 
-  const pointerToWorld = (clientX: number, clientY: number): Point => screenPointToWorld(svgRef.current!, clientX, clientY, view)
+  const pointerToWorld = (clientX: number, clientY: number): Point => screenPointToWorld(svgRef.current!, clientX, clientY, liveViewRef.current)
   const capture = (event: React.PointerEvent) => event.currentTarget.setPointerCapture?.(event.pointerId)
   const beginPinch = () => {
     const points = [...pointers.current.entries()].slice(0, 2)
@@ -104,10 +157,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (initialDistance < 1) return
     const previous = gesture.current
     if (previous.kind !== 'idle') {
-      if (previous.kind !== 'panningCanvas' && previous.kind !== 'pinchingCanvas' && 'before' in previous) onPreview(previous.before)
+      if (previous.kind !== 'panningCanvas' && previous.kind !== 'pinchingCanvas' && 'before' in previous) cancelScheduledPreview()
       setPreview(null)
     }
-    gesture.current = { kind: 'pinchingCanvas', pointerIds: [firstId, secondId], initialDistance, startView: view, startWorld: pointerToWorld(center.x, center.y) }
+    const startView = liveViewRef.current
+    gesture.current = { kind: 'pinchingCanvas', pointerIds: [firstId, secondId], initialDistance, startView, startWorld: screenPointToWorld(svgRef.current!, center.x, center.y, startView) }
   }
   const startObjectDrag = (kind: Extract<Gesture, { before: ActualRouteProject }>['kind'], event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string, ownerPathId?: string, ownerRoadId?: string) => {
     event.stopPropagation(); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); capture(event)
@@ -239,9 +293,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const dx = event.clientX - current.startClient.x, dy = event.clientY - current.startClient.y
       current.moved ||= Math.hypot(dx, dy) > 6
       if (current.moved) {
-        const before = pointerToWorld(current.lastClient.x, current.lastClient.y), after = pointerToWorld(event.clientX, event.clientY)
+        panLiveView(current.lastClient, { x: event.clientX, y: event.clientY })
         current.lastClient = { x: event.clientX, y: event.clientY }
-        setView(value => ({ ...value, x: value.x - (after.x - before.x), y: value.y - (after.y - before.y) }))
       }
       return
     }
@@ -250,9 +303,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const dx = event.clientX - current.startClient.x, dy = event.clientY - current.startClient.y
       current.moved ||= Math.hypot(dx, dy) > 6
       if (current.moved) {
-        const before = pointerToWorld(current.lastClient.x, current.lastClient.y), after = pointerToWorld(event.clientX, event.clientY)
+        panLiveView(current.lastClient, { x: event.clientX, y: event.clientY })
         current.lastClient = { x: event.clientX, y: event.clientY }
-        setView(value => ({ ...value, x: value.x - (after.x - before.x), y: value.y - (after.y - before.y) }))
       }
       return
     }
@@ -266,7 +318,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const width = current.startView.width * scale, height = current.startView.height * scale
       const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
       const underStart = screenPointToWorld(svgRef.current!, center.x, center.y, current.startView)
-      setView({ x: current.startWorld.x - (underStart.x - current.startView.x) * scale, y: current.startWorld.y - (underStart.y - current.startView.y) * scale, width, height })
+      applyLiveView({ x: current.startWorld.x - (underStart.x - current.startView.x) * scale, y: current.startWorld.y - (underStart.y - current.startView.y) * scale, width, height })
       return
     }
     if (current.kind === 'calibrationTap') {
@@ -274,24 +326,21 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const dx = event.clientX - current.startClient.x, dy = event.clientY - current.startClient.y
       current.moved ||= Math.hypot(dx, dy) > 6
       if (current.moved) {
-        const before = pointerToWorld(current.lastClient.x, current.lastClient.y), after = pointerToWorld(event.clientX, event.clientY)
+        panLiveView(current.lastClient, { x: event.clientX, y: event.clientY })
         current.lastClient = { x: event.clientX, y: event.clientY }
-        setView(value => ({ ...value, x: value.x - (after.x - before.x), y: value.y - (after.y - before.y) }))
       }
       return
     }
     if (current.kind === 'idle' || current.pointerId !== event.pointerId) return
     if (current.kind === 'panningCanvas') {
-      const before = pointerToWorld(current.lastClient.x, current.lastClient.y)
-      const after = pointerToWorld(event.clientX, event.clientY)
+      panLiveView(current.lastClient, { x: event.clientX, y: event.clientY })
       current.lastClient = { x: event.clientX, y: event.clientY }
-      setView(value => ({ ...value, x: value.x - (after.x - before.x), y: value.y - (after.y - before.y) }))
       return
     }
     const point = pointerToWorld(event.clientX, event.clientY)
     const dx = point.x - current.startWorld.x, dy = point.y - current.startWorld.y
     current.moved ||= Math.hypot(dx, dy) > 1
-    const next = structuredClone(current.before)
+    const next = cloneProjectForDrag(current.before, current)
     if (current.kind === 'draggingStation') {
       const station = next.stations.find(item => item.id === current.id)
       if (station) translateStationWithAnchors(next, station.id, dx, dy)
@@ -333,7 +382,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       next.background.x = current.origin.x + dx; next.background.y = current.origin.y + dy
     }
     current.latest = next
-    setPreview(next); onPreview(next)
+    schedulePreview(next)
   }
   const endGesture = (event: React.PointerEvent) => {
     pointers.current.delete(event.pointerId)
@@ -341,19 +390,35 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (lineCanvasPointer.current?.pointerId === event.pointerId) {
       const current = lineCanvasPointer.current
       lineCanvasPointer.current = null
-      if (!current.moved && event.type === 'pointerup') addDraftPointAt(pointerToWorld(event.clientX, event.clientY))
+      if (current.moved) commitLiveView()
+      else if (event.type === 'pointerup') addDraftPointAt(pointerToWorld(event.clientX, event.clientY))
       return
     }
     if (basemapCanvasPointer.current?.pointerId === event.pointerId) {
       const current = basemapCanvasPointer.current
       basemapCanvasPointer.current = null
-      if (!current.moved && event.type === 'pointerup') onCreatePoint(pointerToWorld(event.clientX, event.clientY))
+      if (current.moved) commitLiveView()
+      else if (event.type === 'pointerup') onCreatePoint(pointerToWorld(event.clientX, event.clientY))
       return
     }
     const current = gesture.current
-    if (current.kind === 'pinchingCanvas') { if (pointers.current.size < 2) gesture.current = { kind: 'idle' }; return }
-    if (current.kind === 'calibrationTap' && current.pointerId === event.pointerId) { if (!current.moved) onCalibrationPoint?.(pointerToWorld(event.clientX, event.clientY)); gesture.current = { kind: 'idle' }; pointers.current.clear(); return }
-    if (current.kind !== 'idle' && current.pointerId === event.pointerId && current.kind !== 'panningCanvas' && current.kind !== 'calibrationTap' && current.moved) onDragCommit(current.before, current.latest)
+    if (current.kind === 'pinchingCanvas') {
+      if (pointers.current.size < 2) { gesture.current = { kind: 'idle' }; commitLiveView() }
+      return
+    }
+    if (current.kind === 'calibrationTap' && current.pointerId === event.pointerId) {
+      if (!current.moved) onCalibrationPoint?.(pointerToWorld(event.clientX, event.clientY))
+      else commitLiveView()
+      gesture.current = { kind: 'idle' }; pointers.current.clear(); return
+    }
+    if (current.kind === 'panningCanvas') {
+      if (current.pointerId === event.pointerId) commitLiveView()
+      gesture.current = { kind: 'idle' }; setPreview(null); return
+    }
+    if ('before' in current && current.pointerId === event.pointerId && current.moved) {
+      cancelScheduledPreview()
+      onDragCommit(current.before, current.latest)
+    }
     gesture.current = { kind: 'idle' }; setPreview(null)
   }
 
@@ -413,7 +478,23 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   return <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''}`} tabIndex={0} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
     onPointerDown={handleCanvasPointerDown} onPointerMove={handlePointerMove} onPointerUp={endGesture} onPointerCancel={endGesture} onContextMenu={event=>event.preventDefault()}
     onDoubleClick={event => { if (drawing && drawing.kind !== 'line') { event.preventDefault(); drawingClick.current = null; if (pointerDoubleFinish.current) { pointerDoubleFinish.current = false; return } onFinishDrawing?.() } }}
-    onWheel={event => { event.preventDefault(); const point = pointerToWorld(event.clientX, event.clientY); const factor = event.deltaY > 0 ? 1.12 : .88; setView(value => ({ x: point.x - (point.x - value.x) * factor, y: point.y - (point.y - value.y) * factor, width: value.width * factor, height: value.height * factor })) }}>
+    onWheel={event => {
+      event.preventDefault()
+      const currentView = liveViewRef.current
+      const point = screenPointToWorld(svgRef.current!, event.clientX, event.clientY, currentView)
+      const factor = event.deltaY > 0 ? 1.12 : .88
+      applyLiveView({
+        x: point.x - (point.x - currentView.x) * factor,
+        y: point.y - (point.y - currentView.y) * factor,
+        width: currentView.width * factor,
+        height: currentView.height * factor,
+      })
+      if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
+      wheelCommitTimer.current = setTimeout(() => {
+        wheelCommitTimer.current = null
+        commitLiveView()
+      }, 100)
+    }}>
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>
     <g data-layer="canvas-background"><rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>
     {shown.background?.visible && <image data-layer="background-image" href={shown.background.dataUrl} x={shown.background.x} y={shown.background.y} width={shown.background.width} height={shown.background.height} opacity={shown.background.opacity} onPointerDown={event => { if (drawing) return; if (!shown.background?.locked) { onSelect({ type: 'background' }); startObjectDrag('draggingBackground', event, { x: shown.background!.x, y: shown.background!.y }) } }} />}
@@ -429,7 +510,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
         return [<AarcFakeLinesLayer key={`fake-common-${rawLine.id}`} project={shown} part="common" sourceLineId={sourceId} />]
       }
       const line = lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate)
-      const lineSegments = active.segments.filter(segment => segment.lineId === rawLine.id)
+      const lineSegments = segmentsByLineId.get(rawLine.id) ?? []
       const hitPaths = lineSegments.map(segment => {
         const path = getSegmentPath(shown, segment)
         return <path key={`hit:${segment.id}`} d={path} className="segment-hit" onPointerDown={event => { if (drawing) return; event.stopPropagation(); const projected=projectPointToSvgPath(event.currentTarget,pointerToWorld(event.clientX,event.clientY)), progress=findSegmentProgressForPoint(shown,segment,projected); onSelect({ type: 'segment', id: segment.id, progress }); onSegmentPoint(segment.id, projected) }} />

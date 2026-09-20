@@ -15,14 +15,14 @@ export function StationLabel({ station, settings, showForeign, presentation=fals
   const anchor=resolveLabelAnchor(station.labelOffsetX,station.labelOffsetY)
   if(isAarcBlock){
     const blockAnchor=resolveAarcLabelAnchor([station.labelOffsetX,station.labelOffsetY])
-    const metrics=getAarcLabelBlockMetrics(labelSize,foreignLabelSize,foreignLabelGap,foreignLines.length)
+    const metrics=getAarcLabelBlockMetrics(labelSize,foreignLabelSize,foreignLabelGap,foreignLines.length,station.source?.sourceStationNameRowHeight,station.source?.sourceStationSubNameRowHeight)
     const alignmentOffset=getAarcLabelAlignmentOffset(blockAnchor.horizontalAlign,blockAnchor.verticalAlign)
     const blockX=alignmentOffset.x
     const blockY=(blockAnchor.verticalAlign==='top'?0:blockAnchor.verticalAlign==='bottom'?-metrics.height:-metrics.height/2)+alignmentOffset.y
     return <g className="station-label-group aarc-station-label-group" transform={`translate(${x} ${y}) rotate(${rotation})`} opacity={opacity} onPointerDown={onPointerDown} data-label-anchor-x={x} data-label-anchor-y={y} data-label-rotation={rotation} data-label-horizontal-anchor={blockAnchor.horizontalAlign} data-label-vertical-anchor={blockAnchor.verticalAlign}>
       <g className="station-label-block" transform={`translate(${blockX} ${blockY})`} data-label-block-height={metrics.height}>
-        <text x="0" y={metrics.primaryBaseline} textAnchor={blockAnchor.horizontalAlign} className={presentation?'presentation-station-label station-label-primary':'station-label station-label-primary'} style={{fontSize:labelSize,fontFamily:labelFontFamily,fontWeight:labelFontWeight,fill:labelColor,textRendering:'geometricPrecision'}}>{resolvedName}</text>
-        {foreignLines.map((line,index)=><text key={`${index}-${line}`} x="0" y={metrics.foreignBaselines[index]} textAnchor={blockAnchor.horizontalAlign} fill={foreignLabelColor} className={presentation?'presentation-station-label station-label-foreign':'station-label station-label-foreign'} style={{fontSize:foreignLabelSize,fontFamily:foreignLabelFontFamily,fontWeight:foreignLabelFontWeight,fill:foreignLabelColor,textRendering:'geometricPrecision'}}>{line}</text>)}
+        <text x="0" y={metrics.primaryBaseline} textAnchor={blockAnchor.horizontalAlign} dominantBaseline="middle" className={presentation?'presentation-station-label station-label-primary':'station-label station-label-primary'} style={{fontSize:labelSize,fontFamily:labelFontFamily,fontWeight:labelFontWeight,fill:labelColor,textRendering:'geometricPrecision'}}>{resolvedName}</text>
+        {foreignLines.map((line,index)=><text key={`${index}-${line}`} x="0" y={metrics.foreignBaselines[index]} textAnchor={blockAnchor.horizontalAlign} dominantBaseline="middle" fill={foreignLabelColor} className={presentation?'presentation-station-label station-label-foreign':'station-label station-label-foreign'} style={{fontSize:foreignLabelSize,fontFamily:foreignLabelFontFamily,fontWeight:foreignLabelFontWeight,fill:foreignLabelColor,textRendering:'geometricPrecision'}}>{line}</text>)}
       </g>
     </g>
   }

@@ -37,7 +37,7 @@ describe('segment structure styles', () => {
     const aarcLine: Line = { ...nativeLine, id: 'aarc-line-1', source: { format: 'aarc', lineId: 1, sourceLineId: 1, raw: {} } }
     segment.lineId = aarcLine.id
     const aarc = render(<svg><SegmentArtwork segment={segment} line={aarcLine} path="M 0 0 L 100 0" lineWidth={10} renderLegacyStructure={false} /></svg>)
-    expect(aarc.container.querySelector('.segment-main')).toHaveAttribute('stroke-linecap', 'butt')
+    expect(aarc.container.querySelector('.segment-main')).toHaveAttribute('stroke-linecap', 'round')
     aarc.unmount()
     const native = render(<svg><SegmentArtwork segment={{ ...segment, lineId: nativeLine.id }} line={nativeLine} path="M 0 0 L 100 0" lineWidth={10} renderLegacyStructure={false} /></svg>)
     expect(native.container.querySelector('.segment-main')).toHaveAttribute('stroke-linecap', 'round')

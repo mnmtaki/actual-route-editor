@@ -3,6 +3,7 @@ import rawSample from './__fixtures__/木阳.aarc.json'
 import { convertAarcToActualRouteProject } from './aarc'
 import { detectProjectFormat } from './detectProjectFormat'
 import { parseProjectJson, serializeProject } from './projectJson'
+import { effectiveLineWidth } from '../data/style'
 
 const imported = () => convertAarcToActualRouteProject(rawSample, '木阳.aarc.json')
 
@@ -29,14 +30,17 @@ describe('AARC importer with the real 木阳 sample', () => {
     expect(project.stations.find(station => station.source?.pointId === 57)?.nameS).toBe('Muyang West\nRailway Station')
   })
 
-  it('imports the AARC global visual calibration without scaling any world geometry', () => {
+  it('imports current AARC source metrics without scaling any world geometry', () => {
     const { project } = imported()
-    expect(project.settings.lineWidth).toBeCloseTo(22.035, 3)
-    expect(project.settings.stationSize).toBeCloseTo(14, 6)
-    expect(project.settings.transferMinorAxis).toBeCloseTo(23.871, 3)
-    expect(project.settings.transferDotGap).toBe(5)
-    expect(project.settings.stationLabelSize).toBeCloseTo(30.68, 2)
-    expect(project.settings.stationForeignLabelSize).toBeCloseTo(20.5, 1)
+    expect(project.settings.lineWidth).toBe(14)
+    expect(project.settings.aarcLineWidthReferenceRatio).toBe(1)
+    expect(project.settings.stationSize).toBe(18)
+    expect(project.settings.stationLabelSize).toBe(45.5)
+    expect(project.settings.stationForeignLabelSize).toBe(31.5)
+    expect(project.lines.filter(line => !line.isFake).every(line => effectiveLineWidth(line, project.settings) === 21)).toBe(true)
+    const sampleStation = project.stations.find(station => station.source?.pointId === 6)!
+    expect(sampleStation.styleOverrides).toMatchObject({ stationSize: 18, labelSize: 45.5, foreignLabelSize: 31.5 })
+    expect(sampleStation.source).toMatchObject({ sourceStationRadius: 9, sourceStationStrokeWidth: 3.6, sourceStationNameRowHeight: 52.5, sourceStationSubNameRowHeight: 35 })
     const sourcePoints = new Map((rawSample.points as Array<{id:number;pos:number[]}>).map(point => [point.id, point.pos]))
     for (const station of project.stations) {
       const source = sourcePoints.get(station.source!.pointId!)!

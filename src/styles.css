@@ -146,9 +146,15 @@ body{background:#eeeae2;color:#262a28}
 
 
 /* Line management: level 1 is navigation, level 2 owns lifecycle/settings. */
-.line-row{grid-template-columns:minmax(0,1fr)!important;padding:2px 4px!important}
-.line-row-main{min-height:42px!important;padding:6px 7px!important}
-.line-row-chevron{margin-left:auto;color:#aaa397;font-size:20px;font-weight:300;line-height:1}
+.line-row{grid-template-columns:28px minmax(0,1fr) 40px 40px!important;gap:3px!important;padding:2px 3px!important}
+.line-row-main{min-height:40px!important;padding:5px 4px!important}
+.line-list-color{width:26px!important;height:30px!important;min-width:26px!important;padding:2px!important;border:0!important;border-radius:6px!important;background:transparent!important}
+.line-list-color:disabled{opacity:.5}
+.line-row-action{min-width:0!important;width:40px!important;height:30px!important;min-height:30px!important;padding:0!important;border:1px solid transparent!important;border-radius:6px!important;background:transparent!important;color:var(--ui-text-muted)!important;font-size:10px!important}
+.line-row-action:hover{border-color:var(--ui-border)!important;background:var(--ui-surface-muted)!important;color:var(--ui-text)!important}
+.line-row.selected,.line-row.active,.line-row.secondary-selected{border-color:transparent!important;background:transparent!important;box-shadow:none!important}
+.line-row:hover{background:var(--ui-surface-muted)!important}
+
 .line-fake-badge{margin-left:7px;padding:1px 5px;border:1px solid #dfd7c8;border-radius:999px;color:#777067;font-size:9px;font-weight:500}
 .line-detail-panel{display:grid;grid-template-rows:auto minmax(0,1fr);height:100%;min-height:0;background:var(--ui-surface)}
 .line-detail-header{display:grid;grid-template-columns:30px 7px minmax(0,1fr);align-items:center;gap:9px;min-height:58px;padding:8px 10px;border-bottom:1px solid var(--ui-divider)}

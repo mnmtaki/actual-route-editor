@@ -56,7 +56,6 @@ import {
   saveText,
   shareText,
 } from "./platform/fileIO";
-import "./direct-edit.css";
 import {
   appendBasemapPoint,
   createBasemapPath,

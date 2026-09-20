@@ -52,13 +52,12 @@ export function Inspector({ project, selection, onChange, onDelete, onAddLineBad
   } else if (selection?.type === 'line') {
     const line = project.lines.find((item) => item.id === selection.id)
     if (line) {
-      const effectiveColor=getEffectiveLineColor(project,line),effectiveWidth=effectiveLineWidth(line,project.settings)
+      const effectiveWidth=effectiveLineWidth(line,project.settings)
       const setLineOverride=(key:keyof LineStyleOverrides,value:number)=>patch(next=>{const target=next.lines.find(item=>item.id===line.id)!;target.styleOverrides??={};target.styleOverrides[key]=value})
       const clearLineOverride=(key:keyof LineStyleOverrides)=>patch(next=>{const target=next.lines.find(item=>item.id===line.id)!;if(!target.styleOverrides)return;delete target.styleOverrides[key];if(!Object.keys(target.styleOverrides).length)delete target.styleOverrides})
       content = <>
         <h3>线路</h3>
         <p className="meta-note line-inspector-note">线路的名称、编号、主支关系、可见/锁定/伪线、时间与发展历史已移到左侧线路设置。</p>
-        <Field label={line.parentLineId ? "颜色（继承主线）" : "颜色"}><input type="color" value={effectiveColor} disabled={Boolean(line.parentLineId)} onChange={(e) => patch((n) => { setCurrentLineOwnColor(n.lines.find((l) => l.id === line.id)!,e.target.value) })} /></Field>
         <Field label="线路样式"><select aria-label="线路样式" value={line.lineStyleId ?? 'normal'} onChange={event=>patch(next=>{const target=next.lines.find(item=>item.id===line.id)!;target.lineStyleId=event.target.value})}>{getLineStyles(project).map(style=><option key={style.id} value={style.id}>{style.name}{style.builtin?'（内置）':''}</option>)}</select></Field>
         <section className="station-label-layout compact-line-style" data-testid="line-style-overrides"><OverrideNumber label="线路宽度" value={line.styleOverrides?.lineWidth} effective={effectiveWidth} min={1} max={120} step={.5} onChange={value=>setLineOverride('lineWidth',value)} onReset={()=>clearLineOverride('lineWidth')}/></section>
       </>

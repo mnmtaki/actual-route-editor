@@ -21,7 +21,7 @@ import { projectWithLineParentsAt } from '../data/lineParentHistory'
 import { projectWithLineColorsAt } from '../data/lineColorHistory'
 import { isCompoundStationCanonical } from '../data/compoundStation'
 import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, demoteTerminalStationToDrawingPoint } from '../data/operations'
-import { cloneProjectForDrag, getDragAffectedLineIds, getDragLineLabelOverlay, getDragStationOverlay, type DragLineLabelOverlay, type DragStationOverlay } from './dragPreview'
+import { cloneProjectForDrag, dragTouchesVectorBasemap, getDragAffectedLineIds, getDragLineLabelOverlay, getDragStationOverlay, type DragLineLabelOverlay, type DragStationOverlay } from './dragPreview'
 import { NetworkLineLayer } from './NetworkLineLayer'
 import { NetworkStationLayer } from './NetworkStationLayer'
 
@@ -66,6 +66,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const [dragAffectedLineIds, setDragAffectedLineIds] = useState<Set<string>>(() => new Set())
   const [dragStationOverlay, setDragStationOverlay] = useState<DragStationOverlay>(() => ({ stationIds: new Set(), markers: false, labels: false }))
   const [dragLineLabelOverlay, setDragLineLabelOverlay] = useState<DragLineLabelOverlay>(() => ({ labelIds: new Set(), source: null }))
+  const [dragVectorBasemap, setDragVectorBasemap] = useState(false)
   const [canvasWidth, setCanvasWidth] = useState(920)
   const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
@@ -85,6 +86,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       }),
     }
   }, [dragLineLabelOverlay, preview, shown, staticHistoricalIdentityProject])
+  const vectorBasemapProject = preview && dragVectorBasemap ? shown : project
   const touchHitPixels = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 699px)').matches ? 44 : 28
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
   const structureHitRadius = Math.max(22, touchHitPixels * view.width / canvasWidth)
@@ -177,6 +179,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     setDragAffectedLineIds(getDragAffectedLineIds(project, target))
     setDragStationOverlay(getDragStationOverlay(project, target))
     setDragLineLabelOverlay(getDragLineLabelOverlay(project, target))
+    setDragVectorBasemap(dragTouchesVectorBasemap(target))
     setPreview(project)
     return true
   }, [beginPinch, capture, pointerToWorld, project])
@@ -413,24 +416,57 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }
     const current = gesture.current
     if (current.kind === 'pinchingCanvas') {
-      if (pointers.current.size < 2) { gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); commitLiveView() }
+      if (pointers.current.size < 2) { gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragVectorBasemap(false); commitLiveView() }
       return
     }
     if (current.kind === 'calibrationTap' && current.pointerId === event.pointerId) {
       if (!current.moved) onCalibrationPoint?.(pointerToWorld(event.clientX, event.clientY))
       else commitLiveView()
-      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); pointers.current.clear(); return
+      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragVectorBasemap(false); pointers.current.clear(); return
     }
     if (current.kind === 'panningCanvas') {
       if (current.pointerId === event.pointerId) commitLiveView()
-      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setPreview(null); return
+      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragVectorBasemap(false); setPreview(null); return
     }
     if ('before' in current && current.pointerId === event.pointerId && current.moved) {
       cancelScheduledPreview()
       onDragCommit(current.before, current.latest)
     }
-    gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setPreview(null)
+    gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragVectorBasemap(false); setPreview(null)
   }
+
+  const handleRoadPointerDown = useCallback((event: React.PointerEvent, road: ActualRouteProject['roads'][number]) => {
+    if (drawing) return
+    event.stopPropagation()
+    if (road.locked) return
+    onSelect({ type: 'road', id: road.id })
+  }, [drawing, onSelect])
+
+  const handleRoadPointPointerDown = useCallback((event: React.PointerEvent, road: ActualRouteProject['roads'][number], pointId: string) => {
+    if (drawing || road.locked) return
+    event.stopPropagation()
+    const point = road.points.find(item => item.id === pointId)
+    if (point && startObjectDrag('draggingRoadPoint', event, point, point.id, undefined, undefined, undefined, road.id)) {
+      onSelect({ type: 'roadPoint', id: pointId, roadId: road.id })
+    }
+  }, [drawing, onSelect, startObjectDrag])
+
+  const handleBasemapPathPointerDown = useCallback((event: React.PointerEvent, path: NonNullable<ActualRouteProject['basemapPaths']>[number]) => {
+    if (drawing) return
+    event.stopPropagation()
+    onSelect({ type: 'basemapPath', id: path.id })
+    if (!path.locked && path.points.length) startObjectDrag('draggingBasemapPath', event, path.points[0], undefined, undefined, undefined, path.id)
+  }, [drawing, onSelect, startObjectDrag])
+
+  const handleBasemapPointPointerDown = useCallback((event: React.PointerEvent, path: NonNullable<ActualRouteProject['basemapPaths']>[number], pointId: string) => {
+    const drawingThisBasemap = drawing?.kind === 'basemap' && drawing.pathId === path.id
+    if ((drawing && !drawingThisBasemap) || path.locked) return
+    event.stopPropagation()
+    const point = path.points.find(item => item.id === pointId)
+    if (point && startObjectDrag('draggingBasemapPoint', event, point, pointId, undefined, undefined, undefined, path.id)) {
+      onSelect({ type: 'basemapPath', id: path.id })
+    }
+  }, [drawing, onSelect, startObjectDrag])
 
   const handleNativeLineLabelPointerDown = useCallback((event: React.PointerEvent<SVGGElement>, line: ActualRouteProject['lines'][number], badge: NonNullable<ActualRouteProject['lines'][number]['lineBadges']>[number]) => {
     if (drawing) return
@@ -558,11 +594,16 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>
     <g data-layer="canvas-background"><rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>
     {shown.background?.visible && <image data-layer="background-image" href={shown.background.dataUrl} x={shown.background.x} y={shown.background.y} width={shown.background.width} height={shown.background.height} opacity={shown.background.opacity} onPointerDown={event => { if (drawing) return; if (!shown.background?.locked) { onSelect({ type: 'background' }); startObjectDrag('draggingBackground', event, { x: shown.background!.x, y: shown.background!.y }) } }} />}
-    <VectorBasemapLayer project={shown} draft={roadDraft} selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined} hitRadius={stationHitRadius}
-      onRoadPointerDown={(event, road) => { if (drawing) return; event.stopPropagation(); if (road.locked) return; onSelect({ type: 'road', id: road.id }) }}
-      onRoadPointPointerDown={(event, road, pointId) => { if (drawing || road.locked) return; event.stopPropagation(); const point=road.points.find(item=>item.id===pointId); if(point && startObjectDrag('draggingRoadPoint', event, point, point.id, undefined, undefined, undefined, road.id)) onSelect({type:'roadPoint',id:pointId,roadId:road.id}) }}
-      onPathPointerDown={(event, path) => { if (drawing) return; event.stopPropagation(); onSelect({ type: 'basemapPath', id: path.id }); if (!path.locked && path.points.length) startObjectDrag('draggingBasemapPath', event, path.points[0], undefined, undefined, undefined, path.id) }}
-      onPointPointerDown={(event, path, pointId) => { const drawingThisBasemap = drawing?.kind === 'basemap' && drawing.pathId === path.id; if ((drawing && !drawingThisBasemap) || path.locked) return; event.stopPropagation(); const point = path.points.find(item => item.id === pointId); if (point && startObjectDrag('draggingBasemapPoint', event, point, pointId, undefined, undefined, path.id)) onSelect({ type: 'basemapPath', id: path.id }) }} />
+    <VectorBasemapLayer
+      project={vectorBasemapProject}
+      draft={roadDraft}
+      selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
+      hitRadius={stationHitRadius}
+      onRoadPointerDown={handleRoadPointerDown}
+      onRoadPointPointerDown={handleRoadPointPointerDown}
+      onPathPointerDown={handleBasemapPathPointerDown}
+      onPointPointerDown={handleBasemapPointPointerDown}
+    />
     {basemapDrawingOverlay}
     <NetworkLineLayer
       project={project}

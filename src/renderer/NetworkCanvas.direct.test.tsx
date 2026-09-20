@@ -65,6 +65,22 @@ describe('direct manipulation gestures', () => {
     expect(group.querySelectorAll('.segment-hit')).toHaveLength(segments.length)
   })
 
+  it('selects and drags imported AARC line labels through the unified lineLabel selection', () => {
+    const project=structuredClone(demoProject),line=project.lines.find(item=>item.id==='line-a')!
+    project.textTags=[{id:'aarc-line-label',kind:'LineNameLabel',x:200,y:150,lineId:line.id,padding:1,source:{format:'aarc',kind:'text-tag',forId:1,targetKind:'line'}}]
+    project.aarc={format:'aarc',raw:{lines:[{id:1,name:line.name,color:line.color,pts:[]}]}}
+    const onSelect=vi.fn(),onDragCommit=vi.fn()
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} onSelect={onSelect} onDragCommit={onDragCommit}/>)
+    const svg=container.querySelector('svg')!;vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
+    const label=container.querySelector('[data-line-label-id="aarc-line-label"]')!
+    fireEvent.pointerDown(label,{pointerId:19,clientX:200,clientY:150,bubbles:true})
+    fireEvent.pointerMove(svg,{pointerId:19,clientX:240,clientY:175,bubbles:true})
+    fireEvent.pointerUp(svg,{pointerId:19,clientX:240,clientY:175,bubbles:true})
+    expect(onSelect).toHaveBeenCalledWith({type:'lineLabel',id:'aarc-line-label',lineId:'line-a',source:'aarc'})
+    expect(onDragCommit).toHaveBeenCalledTimes(1)
+    expect(onDragCommit.mock.calls[0][1].textTags[0]).toMatchObject({x:240,y:175})
+  })
+
   it('keeps station markers and labels visible when a native line is switched to fake', () => {
     const project = structuredClone(demoProject)
     project.lines.find(line => line.id === 'line-a')!.isFake = true

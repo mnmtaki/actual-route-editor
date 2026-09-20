@@ -49,6 +49,22 @@ describe('direct manipulation gestures', () => {
     const widths=[...container.querySelectorAll('.segment-main')].map(path=>path.getAttribute('stroke-width'))
     expect(widths).toContain('44');expect(widths).toContain('30');expect(widths).not.toContain('8')
   })
+  it('strokes adjacent AARC station segments as one continuous capped path while keeping each hit target', () => {
+    const project = structuredClone(demoProject)
+    const line = project.lines.find(item => item.id === 'line-a')!
+    line.source = { format: 'aarc', lineId: 1, sourceLineId: 1, raw: { cap: 'square' } }
+    const segments = project.geometry.segments.filter(segment => segment.lineId === line.id)
+    segments.forEach((segment, index) => {
+      segment.source = { format: 'aarc', lineId: 1, sourceLineId: 1, pointIds: [index + 1, index + 2], raw: { sourceSegmentIndex: index } }
+      segment.mode = 'straight'; segment.waypoints = []; segment.structureType = 'underground'; segment.structureNodes = []
+    })
+    const { container } = render(<NetworkCanvas {...baseProps} project={project} />)
+    const group = container.querySelector('[data-aarc-continuous-line="line-a"]')!
+    expect(group.querySelectorAll('.segment-main')).toHaveLength(1)
+    expect(group.querySelector('.segment-main')).toHaveAttribute('stroke-linecap', 'square')
+    expect(group.querySelectorAll('.segment-hit')).toHaveLength(segments.length)
+  })
+
   it('keeps station markers and labels visible when a native line is switched to fake', () => {
     const project = structuredClone(demoProject)
     project.lines.find(line => line.id === 'line-a')!.isFake = true

@@ -376,8 +376,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       else commitLiveView()
       gesture.current = { kind: 'idle' }; pointers.current.clear(); return
     }
-    if (current.kind === 'panningCanvas' && current.pointerId === event.pointerId) commitLiveView()
-    else if (current.kind !== 'idle' && current.pointerId === event.pointerId && current.kind !== 'calibrationTap' && current.moved) onDragCommit(current.before, current.latest)
+    if (current.kind === 'panningCanvas') {
+      if (current.pointerId === event.pointerId) commitLiveView()
+      gesture.current = { kind: 'idle' }; setPreview(null); return
+    }
+    if (current.kind !== 'idle' && current.pointerId === event.pointerId && current.moved) onDragCommit(current.before, current.latest)
     gesture.current = { kind: 'idle' }; setPreview(null)
   }
 

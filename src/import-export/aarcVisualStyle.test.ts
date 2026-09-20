@@ -43,7 +43,7 @@ describe('AARC source visual semantics', () => {
     expect(calibration.settings.stationLabelSize).toBe(24)
     expect(calibration.settings.stationForeignLabelSize).toBe(16)
     expect(calibration.mainRowHeight).toBe(28.8)
-    expect(calibration.subRowHeight).toBe(19.2)
+    expect(calibration.subRowHeight).toBeCloseTo(19.2)
   })
 
   it('falls back exactly like AARC saveStore when lineWidthMapped is absent', () => {

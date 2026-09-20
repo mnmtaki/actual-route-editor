@@ -108,8 +108,9 @@ describe('AARC TextTag fidelity', () => {
     expect(carpet).not.toHaveAttribute('rx')
     expect(carpet).not.toHaveAttribute('ry')
 
-    project.textTags[0].padding = 2
-    rerender(createElement(AarcTextTagsLayer, { project }))
+    const updated = structuredClone(project)
+    updated.textTags![0].padding = 2
+    rerender(createElement(AarcTextTagsLayer, { project: updated }))
     carpet = container.querySelector('[data-aarc-line-name-carpet="true"]')
     expect(carpet).toHaveAttribute('stroke-width', '32')
   })

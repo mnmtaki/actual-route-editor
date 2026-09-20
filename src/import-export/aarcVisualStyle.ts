@@ -171,10 +171,10 @@ export function getAarcLabelAlignmentOffset(_horizontalAlign: AarcLabelHorizonta
  * (with dominantBaseline=middle in StationLabel), so no measured glyph magic
  * numbers are needed.
  */
-export function getAarcLabelBlockMetrics(labelSize: number, _foreignLabelSize: number, _foreignLabelGap: number, foreignLineCount: number) {
+export function getAarcLabelBlockMetrics(labelSize: number, _foreignLabelSize: number, _foreignLabelGap: number, foreignLineCount: number, sourceMainRowHeight?: number, sourceSubRowHeight?: number) {
   const ratio = labelSize > 0 ? labelSize / AARC_DEFAULT_STATION_NAME_FONT_SIZE : 1
-  const mainRowHeight = AARC_DEFAULT_STATION_NAME_ROW_HEIGHT * ratio
-  const subRowHeight = AARC_DEFAULT_STATION_SUB_NAME_ROW_HEIGHT * ratio
+  const mainRowHeight = sourceMainRowHeight && sourceMainRowHeight > 0 ? sourceMainRowHeight : AARC_DEFAULT_STATION_NAME_ROW_HEIGHT * ratio
+  const subRowHeight = sourceSubRowHeight && sourceSubRowHeight > 0 ? sourceSubRowHeight : AARC_DEFAULT_STATION_SUB_NAME_ROW_HEIGHT * ratio
   const height = mainRowHeight + foreignLineCount * subRowHeight
   return {
     height,

@@ -9,7 +9,7 @@ export function LineBadgesLayer({ project, presentation = false, visibleLineIds,
   hitRadius?: number
   onPointerDown?: (event: React.PointerEvent<SVGGElement>, line: Line, badge: LineBadge) => void
 }) {
-  return <g data-layer="line-labels-native">{project.lines.flatMap(line => (line.lineBadges ?? []).filter(badge => badge.visible).map(badge => {
+  return <g data-layer="line-badges" data-line-label-layer="native">{project.lines.flatMap(line => (line.lineBadges ?? []).filter(badge => badge.visible).map(badge => {
     if (presentation && visibleLineIds && !visibleLineIds.has(line.id)) return null
     const displayName = getLineDisplayName(project, line)
     const color = getEffectiveLineColor(project, line)

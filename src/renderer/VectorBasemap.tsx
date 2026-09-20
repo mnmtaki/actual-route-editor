@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { ActualRouteProject, Road } from '../data/model'
 import { sortedVectorBasemapObjects } from '../data/roads'
 import { AarcTerrainTransitionsArtwork, BasemapPathArtwork } from './BasemapPaths'
@@ -5,7 +6,7 @@ import { RoadArtwork } from './Roads'
 import { AarcTextTagsLayer } from './AarcTextTags'
 import { AarcFakeLinesLayer } from './AarcFakeLines'
 
-export function VectorBasemapLayer({
+export const VectorBasemapLayer = memo(function VectorBasemapLayer({
   project,
   presentation = false,
   visibleLineIds,
@@ -45,4 +46,4 @@ export function VectorBasemapLayer({
     <AarcTextTagsLayer project={project} presentation={presentation} visibleLineIds={visibleLineIds} mode="sunken" />
     {draft && <RoadArtwork road={draft} project={project} presentation={false} selected hitRadius={hitRadius} onPointerDown={onRoadPointerDown} onPointPointerDown={onRoadPointPointerDown} />}
   </g>
-}
+})

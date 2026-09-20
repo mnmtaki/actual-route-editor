@@ -1,13 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ActualRouteProject, Road, Selection } from '../data/model'
 import { uid } from '../data/model'
 import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPlans, getSegmentSubpathSpans, pathSpansToSvgPath } from '../geometry/path'
 import { projectPointToSvgPath, screenPointToWorld } from '../geometry/screenPoint'
-import { getActiveNetworkAtTime, getEditorVisibleStationsAtTime } from '../timeline/active'
+import { getEditorVisibleStationsAtTime } from '../timeline/active'
 import { StationMarker } from './StationMarker'
 import { getStationHandleStyle } from './stationHandle'
-import { SegmentArtwork, StructureRunArtwork } from './segmentStyles'
-import { compileElevatedRuns, getSegmentStyleIntervalAtProgress, getSegmentStyleIntervals, getStructureNodePoint } from '../data/structure'
+import { getSegmentStyleIntervalAtProgress, getStructureNodePoint } from '../data/structure'
 import { MapElementsLayer } from './MapElements'
 import { AarcTextTagsLayer } from './AarcTextTags'
 import { AarcPointLinksLayer } from './AarcPointLinks'
@@ -15,11 +14,8 @@ import { LineLegendLayer } from './LineLegend'
 import { LineBadgesLayer } from './LineBadges'
 import { VectorBasemapLayer } from './VectorBasemap'
 import { AarcFakeLinesLayer } from './AarcFakeLines'
-import { compileAarcLineArtworkRuns } from './lineArtworkRuns'
-import { isFakeLine } from '../data/fakeLines'
 import type { DrawingMode, LineDraftPoint } from '../data/basemapPaths'
 import { effectiveLineWidth, effectiveStationStyle, snapLabelOffset } from '../data/style'
-import { getLineStyle, resolveLineStyle } from '../data/lineStyles'
 import { isSegmentGeometryLocked, isStationGeometryLocked, lockedStationMessage } from '../data/lineLock'
 import { translateStationWithAnchors } from '../data/stationAnchor'
 import { lineWithEffectiveColor } from '../data/lineIdentity'
@@ -27,7 +23,8 @@ import { projectWithLineParentsAt } from '../data/lineParentHistory'
 import { projectWithLineColorsAt } from '../data/lineColorHistory'
 import { getCompoundStationCanonical, isCompoundStationCanonical } from '../data/compoundStation'
 import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, demoteTerminalStationToDrawingPoint } from '../data/operations'
-import { cloneProjectForDrag } from './dragPreview'
+import { cloneProjectForDrag, getDragAffectedLineIds } from './dragPreview'
+import { NetworkLineLayer } from './NetworkLineLayer'
 
 type View = { x: number; y: number; width: number; height: number }
 type Point = { x: number; y: number }
@@ -67,30 +64,16 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const lineCanvasPointer = useRef<DrawingCanvasPointer | null>(null)
   const basemapCanvasPointer = useRef<DrawingCanvasPointer | null>(null)
   const [preview, setPreview] = useState<ActualRouteProject | null>(null)
+  const [dragAffectedLineIds, setDragAffectedLineIds] = useState<Set<string>>(() => new Set())
   const [canvasWidth, setCanvasWidth] = useState(920)
   const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
   const shown = preview ?? project
-  const active = useMemo(() => getActiveNetworkAtTime(shown, shown.timeline.currentDate), [shown])
   const editorStations = useMemo(() => getEditorVisibleStationsAtTime(shown, shown.timeline.currentDate), [shown])
   const historicalIdentityProject = useMemo(() => projectWithLineColorsAt(projectWithLineParentsAt(shown, shown.timeline.currentDate), shown.timeline.currentDate), [shown])
-  const activeProject = useMemo(() => {
-    const effectiveById = new Map(active.segments.map(segment => [segment.id, segment]))
-    return { ...historicalIdentityProject, geometry: { ...shown.geometry, segments: shown.geometry.segments.map(segment => effectiveById.get(segment.id) ?? segment) } }
-  }, [shown.geometry, historicalIdentityProject, active.segments])
-  const elevatedRuns = useMemo(() => compileElevatedRuns(activeProject, new Set(active.segments.map(segment => segment.id))), [activeProject, active.segments])
   const touchHitPixels = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 699px)').matches ? 44 : 28
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
   const structureHitRadius = Math.max(22, touchHitPixels * view.width / canvasWidth)
-  const segmentsByLineId = useMemo(() => {
-    const grouped = new Map<string, typeof active.segments>()
-    for (const segment of active.segments) {
-      const bucket = grouped.get(segment.lineId)
-      if (bucket) bucket.push(segment)
-      else grouped.set(segment.lineId, [segment])
-    }
-    return grouped
-  }, [active.segments])
 
   const applyLiveView = (next: View) => {
     liveViewRef.current = next
@@ -175,7 +158,9 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const startObjectDrag = (kind: Extract<Gesture, { before: ActualRouteProject }>['kind'], event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string, ownerPathId?: string, ownerRoadId?: string) => {
     event.stopPropagation(); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); capture(event)
     if (pointers.current.size >= 2) { beginPinch(); return false }
-    gesture.current = { kind, pointerId: event.pointerId, id, segmentId, ownerLineId, ownerPathId, ownerRoadId, startWorld: pointerToWorld(event.clientX, event.clientY), origin, before: project, latest: project, moved: false }
+    const target = { kind, id, segmentId, ownerLineId, ownerPathId, ownerRoadId }
+    gesture.current = { ...target, pointerId: event.pointerId, startWorld: pointerToWorld(event.clientX, event.clientY), origin, before: project, latest: project, moved: false }
+    setDragAffectedLineIds(getDragAffectedLineIds(project, target))
     setPreview(project)
     return true
   }
@@ -412,24 +397,36 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }
     const current = gesture.current
     if (current.kind === 'pinchingCanvas') {
-      if (pointers.current.size < 2) { gesture.current = { kind: 'idle' }; commitLiveView() }
+      if (pointers.current.size < 2) { gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); commitLiveView() }
       return
     }
     if (current.kind === 'calibrationTap' && current.pointerId === event.pointerId) {
       if (!current.moved) onCalibrationPoint?.(pointerToWorld(event.clientX, event.clientY))
       else commitLiveView()
-      gesture.current = { kind: 'idle' }; pointers.current.clear(); return
+      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); pointers.current.clear(); return
     }
     if (current.kind === 'panningCanvas') {
       if (current.pointerId === event.pointerId) commitLiveView()
-      gesture.current = { kind: 'idle' }; setPreview(null); return
+      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setPreview(null); return
     }
     if ('before' in current && current.pointerId === event.pointerId && current.moved) {
       cancelScheduledPreview()
       onDragCommit(current.before, current.latest)
     }
-    gesture.current = { kind: 'idle' }; setPreview(null)
+    gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setPreview(null)
   }
+
+  const handleSegmentPointerDown = useCallback((event: React.PointerEvent<SVGPathElement>, segment: ActualRouteProject['geometry']['segments'][number]) => {
+    if (drawing) return
+    event.stopPropagation()
+    const projected = projectPointToSvgPath(
+      event.currentTarget,
+      screenPointToWorld(svgRef.current!, event.clientX, event.clientY, liveViewRef.current),
+    )
+    const progress = findSegmentProgressForPoint(project, segment, projected)
+    onSelect({ type: 'segment', id: segment.id, progress })
+    onSegmentPoint(segment.id, projected)
+  }, [drawing, project, onSelect, onSegmentPoint])
 
   const selectedInterval = selection?.type === 'segment' ? (() => {
     const segment = shown.geometry.segments.find(item => item.id === selection.id)
@@ -513,31 +510,18 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       onPathPointerDown={(event, path) => { if (drawing) return; event.stopPropagation(); onSelect({ type: 'basemapPath', id: path.id }); if (!path.locked && path.points.length) startObjectDrag('draggingBasemapPath', event, path.points[0], undefined, undefined, undefined, path.id) }}
       onPointPointerDown={(event, path, pointId) => { const drawingThisBasemap = drawing?.kind === 'basemap' && drawing.pathId === path.id; if ((drawing && !drawingThisBasemap) || path.locked) return; event.stopPropagation(); const point = path.points.find(item => item.id === pointId); if (point && startObjectDrag('draggingBasemapPoint', event, point, pointId, undefined, undefined, path.id)) onSelect({ type: 'basemapPath', id: path.id }) }} />
     {basemapDrawingOverlay}
-    <g data-layer="segments">{active.lines.flatMap(rawLine => {
-      const sourceId = Number(rawLine.source?.sourceLineId ?? rawLine.source?.lineId)
-      if (isFakeLine(rawLine) && rawLine.source?.format === 'aarc' && Number.isFinite(sourceId)) {
-        return [<AarcFakeLinesLayer key={`fake-common-${rawLine.id}`} project={shown} part="common" sourceLineId={sourceId} />]
-      }
-      const line = lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate)
-      const lineSegments = segmentsByLineId.get(rawLine.id) ?? []
-      const hitPaths = lineSegments.map(segment => {
-        const path = getSegmentPath(shown, segment)
-        return <path key={`hit:${segment.id}`} d={path} className="segment-hit" onPointerDown={event => { if (drawing) return; event.stopPropagation(); const projected=projectPointToSvgPath(event.currentTarget,pointerToWorld(event.clientX,event.clientY)), progress=findSegmentProgressForPoint(shown,segment,projected); onSelect({ type: 'segment', id: segment.id, progress }); onSegmentPoint(segment.id, projected) }} />
-      })
-      if (rawLine.source?.format === 'aarc') {
-        const runs = compileAarcLineArtworkRuns(shown, line, lineSegments)
-        return [<g key={rawLine.id} data-aarc-continuous-line={rawLine.id}>
-          {runs.map(run => <SegmentArtwork key={run.id} segment={run.segment} line={line} path={run.path} lineWidth={effectiveLineWidth(line, shown.settings)} renderLegacyStructure={false} style={resolveLineStyle(shown,line,run.segment)}/>)}
-          {hitPaths}
-        </g>]
-      }
-      return lineSegments.map(segment => {
-        const path = getSegmentPath(shown, segment)
-        const intervals = getSegmentStyleIntervals(shown, segment)
-        return <g key={segment.id}>{intervals.map((interval,index) => { const spans=getSegmentSubpathSpans(shown,segment,interval.start,interval.end); if(!spans.length)return null; const intervalPath=pathSpansToSvgPath(spans), intervalSegment={...segment,structureType:interval.structureType,lineStyleId:interval.lineStyleId}; return <SegmentArtwork key={`${segment.id}:${index}`} segment={intervalSegment} line={line} path={intervalPath} lineWidth={effectiveLineWidth(line, shown.settings)} renderLegacyStructure={false} style={resolveLineStyle(shown,line,interval.lineStyleId===undefined?undefined:intervalSegment)}/> })}{hitPaths.find(item=>item.key===`hit:${segment.id}`)}</g>
-      })
-    })}</g>
-    <g data-layer="structure-runs">{elevatedRuns.map(run => { const rawLine = shown.lines.find(item => item.id === run.lineId); const line = rawLine ? lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate) : undefined; return line ? <StructureRunArtwork key={run.id} run={run} line={line} lineWidth={effectiveLineWidth(line, shown.settings)} style={getLineStyle(shown, 'elevated')} /> : null })}</g>
+    <NetworkLineLayer
+      project={project}
+      excludeArtworkLineIds={dragAffectedLineIds}
+      renderHits
+      onSegmentPointerDown={handleSegmentPointerDown}
+    />
+    {preview && dragAffectedLineIds.size > 0 && <NetworkLineLayer
+      project={shown}
+      includeLineIds={dragAffectedLineIds}
+      renderHits={false}
+      overlay
+    />}
     {selectedInterval&&<g data-layer="style-interval-selection" data-editor="true" pointerEvents="none"><path d={selectedInterval.path} fill="none" stroke="#d2a72f" strokeWidth={(shown.lines.find(line=>line.id===selectedInterval.segment.lineId)?.lineWidth??shown.settings.lineWidth)+7} strokeLinecap="round" strokeLinejoin="round" opacity=".24" vectorEffect="non-scaling-stroke"/></g>}
     {phasePreview && <g data-layer="opening-phase-preview" pointerEvents="none">{phasePreview.segmentIds.map(id => { const segment = shown.geometry.segments.find(item => item.id === id); const rawLine = segment ? shown.lines.find(item => item.id === segment.lineId) : null; const line = rawLine ? lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate) : null; return segment && line ? <path key={id} d={getSegmentPath(shown, segment)} className="opening-phase-preview-segment" stroke={line.color} /> : null })}{phasePreview.stationIds.map(id => { const station = shown.stations.find(item => item.id === id); return station && isCompoundStationCanonical(shown, station) ? <circle key={id} cx={station.x} cy={station.y} r={effectiveStationStyle(station, shown.settings).stationSize * .9} className="opening-phase-preview-station" /> : null })}</g>}
     <g data-layer="stations">{editorStations.map(station => <StationMarker key={station.id} part="marker" project={shown} station={station} time={shown.timeline.currentDate} selected={(selection?.type === 'station' && (selection.id === station.id || getCompoundStationCanonical(shown, selection.id)?.id === station.id)) || selectedStationIds.includes(station.id)} hitRadius={stationHitRadius}

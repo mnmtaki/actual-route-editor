@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { demoProject } from '../data/demo'
-import { cloneProjectForDrag, dragTouchesVectorBasemap, getDragAffectedLineIds, getDragLineLabelOverlay, getDragStationOverlay } from './dragPreview'
+import { cloneProjectForDrag, dragTouchesVectorBasemap, getDragAffectedLineIds, getDragLineLabelOverlay, getDragMapElementOverlay, getDragStationOverlay, getDragVectorBasemapOverlay } from './dragPreview'
 
 describe('cloneProjectForDrag', () => {
   it('clones only the active Station and its anchored relations', () => {
@@ -76,10 +76,13 @@ describe('cloneProjectForDrag', () => {
     })
   })
 
-  it('keeps the vector basemap static for unrelated drags', () => {
+  it('scopes free text and vector basemap drags to active overlays', () => {
+    expect(getDragMapElementOverlay({ kind: 'draggingMapElement', id: 'note' })).toEqual({ elementIds: new Set(['note']) })
+    expect(getDragMapElementOverlay({ kind: 'draggingStation', id: 's1' })).toEqual({ elementIds: new Set() })
+    expect(getDragVectorBasemapOverlay({ kind: 'draggingRoadPoint', id: 'p', ownerRoadId: 'road' })).toEqual({ kind: 'road', objectIds: new Set(['road']) })
+    expect(getDragVectorBasemapOverlay({ kind: 'draggingBasemapPoint', id: 'p', ownerPathId: 'path' })).toEqual({ kind: 'basemap', objectIds: new Set(['path']) })
+    expect(getDragVectorBasemapOverlay({ kind: 'draggingStation', id: 's1' })).toEqual({ kind: null, objectIds: new Set() })
     expect(dragTouchesVectorBasemap({ kind: 'draggingStation', id: 's1' })).toBe(false)
-    expect(dragTouchesVectorBasemap({ kind: 'draggingLineLabel', id: 'label' })).toBe(false)
-    expect(dragTouchesVectorBasemap({ kind: 'draggingBasemapPoint', id: 'p', ownerPathId: 'path' })).toBe(true)
     expect(dragTouchesVectorBasemap({ kind: 'draggingRoadPoint', id: 'p', ownerRoadId: 'road' })).toBe(true)
   })
 })

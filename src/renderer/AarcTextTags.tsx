@@ -354,13 +354,13 @@ function Tag({ tag, project, selectedId, hitRadius = 22, onLineLabelPointerDown 
   </g>
 }
 
-export const AarcTextTagsLayer = memo(function AarcTextTagsLayer({ project, presentation = false, visibleLineIds, mode = 'notSunken', selectedId, hitRadius = 22, onLineLabelPointerDown }: { project: ActualRouteProject; presentation?: boolean; visibleLineIds?: Set<string>; mode?: LayerMode; selectedId?: string; hitRadius?: number; onLineLabelPointerDown?: (event: React.PointerEvent<SVGGElement>, tag: AarcTextTag, lineId: string) => void }) {
+export const AarcTextTagsLayer = memo(function AarcTextTagsLayer({ project, presentation = false, visibleLineIds, mode = 'notSunken', selectedId, hitRadius = 22, onLineLabelPointerDown, includeTagIds, excludeTagIds, overlay = false }: { project: ActualRouteProject; presentation?: boolean; visibleLineIds?: Set<string>; mode?: LayerMode; selectedId?: string; hitRadius?: number; onLineLabelPointerDown?: (event: React.PointerEvent<SVGGElement>, tag: AarcTextTag, lineId: string) => void; includeTagIds?: ReadonlySet<string>; excludeTagIds?: ReadonlySet<string>; overlay?: boolean }) {
   const tags = (project.textTags ?? [])
     .map((tag, index) => ({ tag, index, boundLineId: boundLineId(project, tag) }))
-    .filter(({ tag, boundLineId: lineId }) => (mode === 'sunken' ? tag.sunken === true : tag.sunken !== true) && (!presentation || !lineId || !visibleLineIds || visibleLineIds.has(lineId)))
+    .filter(({ tag, boundLineId: lineId }) => (!includeTagIds || includeTagIds.has(tag.id)) && !excludeTagIds?.has(tag.id) && (mode === 'sunken' ? tag.sunken === true : tag.sunken !== true) && (!presentation || !lineId || !visibleLineIds || visibleLineIds.has(lineId)))
     .sort((a, b) => (a.tag.zIndex ?? 0) - (b.tag.zIndex ?? 0) || a.index - b.index)
     .map(({ tag }) => tag)
   if (!tags.length) return null
   const layerName = mode === 'sunken' ? 'aarc-text-tags-sunken' : 'aarc-text-tags'
-  return <g data-layer={layerName} data-aarc-text-tag-layer={mode} data-presentation-layer={presentation ? layerName : undefined} pointerEvents={onLineLabelPointerDown ? 'visiblePainted' : 'none'}>{tags.map(tag => <Tag key={tag.id} tag={tag} project={project} selectedId={selectedId} hitRadius={hitRadius} onLineLabelPointerDown={onLineLabelPointerDown} />)}</g>
+  return <g data-layer={overlay ? `${layerName}-active-overlay` : layerName} data-aarc-text-tag-layer={mode} data-presentation-layer={presentation ? layerName : undefined} pointerEvents={overlay ? 'none' : onLineLabelPointerDown ? 'visiblePainted' : 'none'}>{tags.map(tag => <Tag key={tag.id} tag={tag} project={project} selectedId={selectedId} hitRadius={hitRadius} onLineLabelPointerDown={onLineLabelPointerDown} />)}</g>
 })

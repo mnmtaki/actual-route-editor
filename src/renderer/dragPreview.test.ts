@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { demoProject } from '../data/demo'
-import { cloneProjectForDrag } from './dragPreview'
+import { cloneProjectForDrag, dragTouchesVectorBasemap, getDragAffectedLineIds, getDragLineLabelOverlay, getDragStationOverlay } from './dragPreview'
 
 describe('cloneProjectForDrag', () => {
   it('clones only the active Station and its anchored relations', () => {
@@ -38,5 +38,48 @@ describe('cloneProjectForDrag', () => {
     expect(next.textTags![0]).not.toBe(project.textTags![0])
     expect(next.stations).toBe(project.stations)
     expect(next.geometry).toBe(project.geometry)
+  })
+  it('scopes station drags to their connected line artwork and station overlay', () => {
+    const project = structuredClone(demoProject)
+    const station = project.stations.find(item => item.id === 's2')!
+    const lineIds = getDragAffectedLineIds(project, { kind: 'draggingStation', id: station.id })
+    expect(lineIds.size).toBeGreaterThan(0)
+    for (const segment of project.geometry.segments.filter(segment => segment.fromStationId === station.id || segment.toStationId === station.id)) {
+      expect(lineIds.has(segment.lineId)).toBe(true)
+    }
+    expect(getDragStationOverlay(project, { kind: 'draggingStation', id: station.id })).toEqual({
+      stationIds: new Set([station.id]),
+      markers: true,
+      labels: true,
+    })
+    expect(getDragStationOverlay(project, { kind: 'draggingLabel', id: station.id })).toEqual({
+      stationIds: new Set([station.id]),
+      markers: false,
+      labels: true,
+    })
+  })
+
+  it('scopes native and imported line labels to one active overlay', () => {
+    const project = structuredClone(demoProject)
+    const line = project.lines[0]
+    line.lineBadges = [{ id: 'native-label', x: 10, y: 20, size: 40, rotation: 0, visible: true }]
+    project.textTags = [{ id: 'aarc-label', kind: 'LineNameLabel', x: 30, y: 40, lineId: line.id }]
+    expect(getDragLineLabelOverlay(project, { kind: 'draggingLineLabel', id: 'native-label', ownerLineId: line.id })).toEqual({
+      labelIds: new Set(['native-label']),
+      source: 'native',
+      ownerLineId: line.id,
+    })
+    expect(getDragLineLabelOverlay(project, { kind: 'draggingLineLabel', id: 'aarc-label', ownerLineId: line.id })).toEqual({
+      labelIds: new Set(['aarc-label']),
+      source: 'aarc',
+      ownerLineId: line.id,
+    })
+  })
+
+  it('keeps the vector basemap static for unrelated drags', () => {
+    expect(dragTouchesVectorBasemap({ kind: 'draggingStation', id: 's1' })).toBe(false)
+    expect(dragTouchesVectorBasemap({ kind: 'draggingLineLabel', id: 'label' })).toBe(false)
+    expect(dragTouchesVectorBasemap({ kind: 'draggingBasemapPoint', id: 'p', ownerPathId: 'path' })).toBe(true)
+    expect(dragTouchesVectorBasemap({ kind: 'draggingRoadPoint', id: 'p', ownerRoadId: 'road' })).toBe(true)
   })
 })

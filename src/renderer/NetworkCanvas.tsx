@@ -21,7 +21,7 @@ import { projectWithLineParentsAt } from '../data/lineParentHistory'
 import { projectWithLineColorsAt } from '../data/lineColorHistory'
 import { isCompoundStationCanonical } from '../data/compoundStation'
 import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, demoteTerminalStationToDrawingPoint } from '../data/operations'
-import { cloneProjectForDrag, dragTouchesVectorBasemap, getDragAffectedLineIds, getDragLineLabelOverlay, getDragStationOverlay, type DragLineLabelOverlay, type DragStationOverlay } from './dragPreview'
+import { cloneProjectForDrag, getDragAffectedLineIds, getDragLineLabelOverlay, getDragMapElementOverlay, getDragStationOverlay, getDragVectorBasemapOverlay, type DragLineLabelOverlay, type DragMapElementOverlay, type DragStationOverlay, type DragVectorBasemapOverlay } from './dragPreview'
 import { NetworkLineLayer } from './NetworkLineLayer'
 import { NetworkStationLayer } from './NetworkStationLayer'
 
@@ -66,7 +66,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const [dragAffectedLineIds, setDragAffectedLineIds] = useState<Set<string>>(() => new Set())
   const [dragStationOverlay, setDragStationOverlay] = useState<DragStationOverlay>(() => ({ stationIds: new Set(), markers: false, labels: false }))
   const [dragLineLabelOverlay, setDragLineLabelOverlay] = useState<DragLineLabelOverlay>(() => ({ labelIds: new Set(), source: null }))
-  const [dragVectorBasemap, setDragVectorBasemap] = useState(false)
+  const [dragMapElementOverlay, setDragMapElementOverlay] = useState<DragMapElementOverlay>(() => ({ elementIds: new Set() }))
+  const [dragVectorBasemapOverlay, setDragVectorBasemapOverlay] = useState<DragVectorBasemapOverlay>(() => ({ kind: null, objectIds: new Set() }))
   const [canvasWidth, setCanvasWidth] = useState(920)
   const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
@@ -86,8 +87,6 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }
   }, [dragLineLabelOverlay, preview, shown, staticHistoricalIdentityProject])
   const activeDragKind = preview ? gesture.current.kind : 'idle'
-  const vectorBasemapProject = preview && dragVectorBasemap ? shown : project
-  const mapElementsProject = preview && activeDragKind === 'draggingMapElement' ? shown : project
   const legendProject = useMemo(() => preview && activeDragKind === 'draggingLineLegend'
     ? { ...staticHistoricalIdentityProject, lineLegend: shown.lineLegend }
     : staticHistoricalIdentityProject, [activeDragKind, preview, shown.lineLegend, staticHistoricalIdentityProject])
@@ -184,7 +183,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     setDragAffectedLineIds(getDragAffectedLineIds(project, target))
     setDragStationOverlay(getDragStationOverlay(project, target))
     setDragLineLabelOverlay(getDragLineLabelOverlay(project, target))
-    setDragVectorBasemap(dragTouchesVectorBasemap(target))
+    setDragMapElementOverlay(getDragMapElementOverlay(target))
+    setDragVectorBasemapOverlay(getDragVectorBasemapOverlay(target))
     setPreview(project)
     return true
   }, [beginPinch, capture, pointerToWorld, project])
@@ -421,23 +421,23 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }
     const current = gesture.current
     if (current.kind === 'pinchingCanvas') {
-      if (pointers.current.size < 2) { gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragVectorBasemap(false); commitLiveView() }
+      if (pointers.current.size < 2) { gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragMapElementOverlay({ elementIds: new Set() }); setDragVectorBasemapOverlay({ kind: null, objectIds: new Set() }); commitLiveView() }
       return
     }
     if (current.kind === 'calibrationTap' && current.pointerId === event.pointerId) {
       if (!current.moved) onCalibrationPoint?.(pointerToWorld(event.clientX, event.clientY))
       else commitLiveView()
-      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragVectorBasemap(false); pointers.current.clear(); return
+      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragMapElementOverlay({ elementIds: new Set() }); setDragVectorBasemapOverlay({ kind: null, objectIds: new Set() }); pointers.current.clear(); return
     }
     if (current.kind === 'panningCanvas') {
       if (current.pointerId === event.pointerId) commitLiveView()
-      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragVectorBasemap(false); setPreview(null); return
+      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragMapElementOverlay({ elementIds: new Set() }); setDragVectorBasemapOverlay({ kind: null, objectIds: new Set() }); setPreview(null); return
     }
     if ('before' in current && current.pointerId === event.pointerId && current.moved) {
       cancelScheduledPreview()
       onDragCommit(current.before, current.latest)
     }
-    gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragVectorBasemap(false); setPreview(null)
+    gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragMapElementOverlay({ elementIds: new Set() }); setDragVectorBasemapOverlay({ kind: null, objectIds: new Set() }); setPreview(null)
   }
 
   const handleRoadPointerDown = useCallback((event: React.PointerEvent, road: NonNullable<ActualRouteProject['roads']>[number]) => {
@@ -623,16 +623,37 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>
     <g data-layer="canvas-background"><rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>
     {backgroundProject.background?.visible && <image data-layer="background-image" href={backgroundProject.background.dataUrl} x={backgroundProject.background.x} y={backgroundProject.background.y} width={backgroundProject.background.width} height={backgroundProject.background.height} opacity={backgroundProject.background.opacity} onPointerDown={handleBackgroundPointerDown} />}
-    <VectorBasemapLayer
-      project={vectorBasemapProject}
-      draft={roadDraft}
-      selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
-      hitRadius={stationHitRadius}
-      onRoadPointerDown={handleRoadPointerDown}
-      onRoadPointPointerDown={handleRoadPointPointerDown}
-      onPathPointerDown={handleBasemapPathPointerDown}
-      onPointPointerDown={handleBasemapPointPointerDown}
-    />
+    {preview && dragVectorBasemapOverlay.kind === 'basemap'
+      ? <VectorBasemapLayer
+          project={shown}
+          draft={roadDraft}
+          selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
+          hitRadius={stationHitRadius}
+          onRoadPointerDown={handleRoadPointerDown}
+          onRoadPointPointerDown={handleRoadPointPointerDown}
+          onPathPointerDown={handleBasemapPathPointerDown}
+          onPointPointerDown={handleBasemapPointPointerDown}
+        />
+      : <>
+          <VectorBasemapLayer
+            project={project}
+            draft={roadDraft}
+            selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
+            hitRadius={stationHitRadius}
+            excludeObjectIds={preview && dragVectorBasemapOverlay.kind === 'road' ? dragVectorBasemapOverlay.objectIds : undefined}
+            onRoadPointerDown={handleRoadPointerDown}
+            onRoadPointPointerDown={handleRoadPointPointerDown}
+            onPathPointerDown={handleBasemapPathPointerDown}
+            onPointPointerDown={handleBasemapPointPointerDown}
+          />
+          {preview && dragVectorBasemapOverlay.kind === 'road' && dragVectorBasemapOverlay.objectIds.size > 0 && <VectorBasemapLayer
+            project={shown}
+            selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : undefined}
+            hitRadius={stationHitRadius}
+            includeObjectIds={dragVectorBasemapOverlay.objectIds}
+            overlay
+          />}
+        </>}
     {basemapDrawingOverlay}
     <NetworkLineLayer
       project={project}
@@ -717,7 +738,20 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       includeTagIds={dragLineLabelOverlay.labelIds}
       overlay
     />}
-    <MapElementsLayer project={mapElementsProject} selectedId={selection?.type === 'mapElement' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={handleMapElementPointerDown} />
+    <MapElementsLayer
+      project={project}
+      selectedId={selection?.type === 'mapElement' ? selection.id : undefined}
+      hitRadius={stationHitRadius}
+      excludeElementIds={dragMapElementOverlay.elementIds.size ? dragMapElementOverlay.elementIds : undefined}
+      onPointerDown={handleMapElementPointerDown}
+    />
+    {preview && dragMapElementOverlay.elementIds.size > 0 && <MapElementsLayer
+      project={shown}
+      selectedId={selection?.type === 'mapElement' ? selection.id : undefined}
+      hitRadius={stationHitRadius}
+      includeElementIds={dragMapElementOverlay.elementIds}
+      overlay
+    />}
     <LineLegendLayer project={legendProject} selectedId={selection?.type === 'lineLegend' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={handleLegendPointerDown} />
     <g data-layer="waypoints" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (()=>{const segmentId=selection.type==='segment'?selection.id:selection.segmentId,segment=shown.geometry.segments.find(item=>item.id===segmentId);if(!segment)return null;const cornerIds=new Set(getSegmentRoundedCornerPlans(shown,segment).map(plan=>plan.waypointId));return segment.waypoints.map(waypoint=>{const isCorner=cornerIds.has(waypoint.id),selected=selection.type==='waypoint'&&selection.id===waypoint.id,selectWaypoint=(event:React.PointerEvent)=>{if(isSegmentGeometryLocked(shown,segmentId)){onSelect({type:'waypoint',id:waypoint.id,segmentId});onEditBlocked?.('线路已锁定');return}if(startObjectDrag('draggingWaypoint',event,{x:waypoint.x,y:waypoint.y},waypoint.id,segmentId))onSelect({type:'waypoint',id:waypoint.id,segmentId})};return <g key={waypoint.id} data-corner-handle={isCorner?'true':undefined} data-waypoint-id={waypoint.id} onPointerDown={selectWaypoint}><circle className="waypoint-hit" cx={waypoint.x} cy={waypoint.y} r={stationHitRadius} fill="transparent" pointerEvents="all"/><circle cx={waypoint.x} cy={waypoint.y} r={isCorner?7:8} className={`waypoint ${isCorner?'corner-waypoint':''} ${selected?'selected':''}`} pointerEvents="none"/></g>})})()}</g>
     <g data-layer="style-points" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (() => { const segmentId = selection.type === 'segment' ? selection.id : selection.segmentId; const segment = shown.geometry.segments.find(item=>item.id===segmentId); if (!segment) return null; return (segment.structureNodes ?? []).map(node => { const point = getStructureNodePoint(shown, segment, node); if (!point) return null; const selected = selection.type === 'structureNode' && selection.id === node.id, attached=Boolean(node.waypointId); return <g key={node.id} transform={`translate(${point.x} ${point.y})`} data-style-point-id={node.id} data-structure-node-id={node.id} data-attached-waypoint-id={node.waypointId ?? ''} onPointerDown={event => { event.stopPropagation(); if (attached) { onSelect({ type: 'structureNode', id: node.id, segmentId }); return }; if (isSegmentGeometryLocked(shown, segmentId)) { onSelect({ type: 'structureNode', id: node.id, segmentId }); onEditBlocked?.('线路已锁定'); return }; if (startObjectDrag('draggingStructureNode', event, point, node.id, segmentId)) onSelect({ type: 'structureNode', id: node.id, segmentId }) }}><circle r={attached?6:structureHitRadius} fill="transparent" pointerEvents="all" /><path d="M 0 -5 L 5 0 L 0 5 L -5 0 Z" fill={selected?'#fff4c9':'#fffdf9'} stroke={selected?'#b98700':'#353b38'} strokeWidth={selected?2:1.5} vectorEffect="non-scaling-stroke" pointerEvents="none" /></g> }) })()}</g>

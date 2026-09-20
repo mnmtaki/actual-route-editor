@@ -355,13 +355,15 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (lineCanvasPointer.current?.pointerId === event.pointerId) {
       const current = lineCanvasPointer.current
       lineCanvasPointer.current = null
-      if (!current.moved && event.type === 'pointerup') addDraftPointAt(pointerToWorld(event.clientX, event.clientY))
+      if (current.moved) commitLiveView()
+      else if (event.type === 'pointerup') addDraftPointAt(pointerToWorld(event.clientX, event.clientY))
       return
     }
     if (basemapCanvasPointer.current?.pointerId === event.pointerId) {
       const current = basemapCanvasPointer.current
       basemapCanvasPointer.current = null
-      if (!current.moved && event.type === 'pointerup') onCreatePoint(pointerToWorld(event.clientX, event.clientY))
+      if (current.moved) commitLiveView()
+      else if (event.type === 'pointerup') onCreatePoint(pointerToWorld(event.clientX, event.clientY))
       return
     }
     const current = gesture.current

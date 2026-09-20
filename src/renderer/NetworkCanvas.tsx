@@ -50,6 +50,9 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void; onEditBlocked?: (message: string) => void
   view: View; setView: React.Dispatch<React.SetStateAction<View>>
 }) {
+  // onPreview is retained for API compatibility; drag previews are intentionally local
+  // so App/history does not rerender on every pointer movement.
+  void onPreview
   const svgRef = useRef<SVGSVGElement>(null)
   const liveViewRef = useRef<View>(view)
   const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -109,9 +112,15 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     setPreview(next)
   }
   const schedulePreview = (next: ActualRouteProject) => {
+    const elapsed = performance.now() - lastPreviewAt.current
+    if (elapsed >= 50 && previewTimer.current === null) {
+      pendingPreview.current = null
+      lastPreviewAt.current = performance.now()
+      setPreview(next)
+      return
+    }
     pendingPreview.current = next
-    const wait = Math.max(0, 50 - (performance.now() - lastPreviewAt.current))
-    if (previewTimer.current === null) previewTimer.current = setTimeout(flushPreview, wait)
+    if (previewTimer.current === null) previewTimer.current = setTimeout(flushPreview, Math.max(0, 50 - elapsed))
   }
   const cancelScheduledPreview = () => {
     pendingPreview.current = null

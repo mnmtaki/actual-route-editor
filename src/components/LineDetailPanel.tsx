@@ -30,14 +30,12 @@ function LineHistoryEditor({project,lineId,onChange}:{project:ActualRouteProject
   const patch=(mutate:(next:ActualRouteProject)=>void)=>{const next=structuredClone(project);mutate(next);onChange(next)}
   const names=normalizeLineNameHistory(line)??[{id:`name-base-${line.id}`,effectiveAt:null,name:line.name}]
   const codes=normalizeLineDisplayCodeHistory(line)??[{id:`display-code-base-${line.id}`,effectiveAt:null,displayCode:resolveCurrentLineDisplayCode(line)}]
-  const parents=normalizeLineParentHistory(line)??[{id:`parent-base-${line.id}`,effectiveAt:null,parentLineId:line.parentLineId??null}]
   const colors=normalizeLineColorHistory(line)??[{id:`color-base-${line.id}`,effectiveAt:null,color:line.color}]
   const today=new Date().toISOString().slice(0,10)
   const safe=(fn:()=>void,message:string)=>{try{fn()}catch(error){window.alert(error instanceof Error?error.message:message)}}
   return <div className="line-history-editor">
     <section><h4>名称历史</h4>{names.map(entry=><div className="line-history-row" key={entry.id}><strong>{entry.effectiveAt??'初始'}</strong>{entry.effectiveAt!==null&&<input aria-label="名称生效日期" type="date" value={entry.effectiveAt} onChange={e=>patch(next=>safe(()=>updateLineNameHistoryEntry(next.lines.find(item=>item.id===line.id)!,{...entry,effectiveAt:e.target.value||null}),'线路名称历史无效'))}/>}<input aria-label="历史线路名称" value={entry.name} onChange={e=>patch(next=>safe(()=>updateLineNameHistoryEntry(next.lines.find(item=>item.id===line.id)!,{...entry,name:e.target.value}),'线路名称历史无效'))}/>{entry.effectiveAt!==null&&<button onClick={()=>patch(next=>removeLineNameHistoryEntry(next.lines.find(item=>item.id===line.id)!,entry.id))}>删除</button>}</div>)}<button onClick={()=>patch(next=>safe(()=>updateLineNameHistoryEntry(next.lines.find(item=>item.id===line.id)!,{id:uid('line-name'),effectiveAt:today,name:line.name}),'线路名称历史无效'))}>＋ 添加名称变更</button></section>
     <section><h4>编号历史</h4>{codes.map(entry=><div className="line-history-row" key={entry.id}><strong>{entry.effectiveAt??'初始'}</strong>{entry.effectiveAt!==null&&<input aria-label="编号生效日期" type="date" value={entry.effectiveAt} onChange={e=>patch(next=>safe(()=>updateLineDisplayCodeHistoryEntry(next.lines.find(item=>item.id===line.id)!,{...entry,effectiveAt:e.target.value||null}),'线路编号历史无效'))}/>}<input aria-label="历史线路编号" value={entry.displayCode} onChange={e=>patch(next=>safe(()=>updateLineDisplayCodeHistoryEntry(next.lines.find(item=>item.id===line.id)!,{...entry,displayCode:e.target.value}),'线路编号历史无效'))}/>{entry.effectiveAt!==null&&<button onClick={()=>patch(next=>removeLineDisplayCodeHistoryEntry(next.lines.find(item=>item.id===line.id)!,entry.id))}>删除</button>}</div>)}<button onClick={()=>patch(next=>safe(()=>updateLineDisplayCodeHistoryEntry(next.lines.find(item=>item.id===line.id)!,{id:uid('line-code'),effectiveAt:today,displayCode:resolveCurrentLineDisplayCode(line)}),'线路编号历史无效'))}>＋ 添加编号变更</button></section>
-    <section><h4>主支关系历史</h4>{parents.map(entry=><div className="line-history-row" key={entry.id}><strong>{entry.effectiveAt??'初始'}</strong>{entry.effectiveAt!==null&&<input aria-label="主支关系生效日期" type="date" value={entry.effectiveAt} onChange={e=>patch(next=>safe(()=>updateLineParentHistoryEntry(next,line.id,{...entry,effectiveAt:e.target.value||null}),'主支关系历史无效'))}/>}<select aria-label="历史线路身份" value={entry.parentLineId??''} onChange={e=>patch(next=>safe(()=>updateLineParentHistoryEntry(next,line.id,{...entry,parentLineId:e.target.value||null}),'主支关系历史无效'))}><option value="">独立线路</option>{project.lines.filter(item=>item.id!==line.id&&!item.isFake).map(item=><option key={item.id} value={item.id}>作为「{getLineDisplayName(project,item)||item.id}」的支线</option>)}</select>{entry.effectiveAt!==null&&<button onClick={()=>patch(next=>removeLineParentHistoryEntry(next,line.id,entry.id))}>删除</button>}</div>)}<button onClick={()=>patch(next=>safe(()=>updateLineParentHistoryEntry(next,line.id,{id:uid('line-parent'),effectiveAt:today,parentLineId:line.parentLineId??null}),'主支关系历史无效'))}>＋ 添加主支关系变更</button></section>
     <section><h4>颜色历史</h4>{colors.map(entry=><div className="line-history-row" key={entry.id}><strong>{entry.effectiveAt??'初始'}</strong>{entry.effectiveAt!==null&&<input aria-label="颜色生效日期" type="date" value={entry.effectiveAt} onChange={e=>patch(next=>safe(()=>updateLineColorHistoryEntry(next.lines.find(item=>item.id===line.id)!,{...entry,effectiveAt:e.target.value||null}),'线路颜色历史无效'))}/>}<input aria-label="历史线路颜色" type="color" value={entry.color} onChange={e=>patch(next=>safe(()=>updateLineColorHistoryEntry(next.lines.find(item=>item.id===line.id)!,{...entry,color:e.target.value}),'线路颜色历史无效'))}/>{entry.effectiveAt!==null&&<button onClick={()=>patch(next=>removeLineColorHistoryEntry(next.lines.find(item=>item.id===line.id)!,entry.id))}>删除</button>}</div>)}<button onClick={()=>patch(next=>safe(()=>updateLineColorHistoryEntry(next.lines.find(item=>item.id===line.id)!,{id:uid('line-color'),effectiveAt:today,color:line.color}),'线路颜色历史无效'))}>＋ 添加颜色变更</button></section>
   </div>
 }
@@ -60,6 +58,43 @@ function LineSplitEditor({project,lineId,onChange}:{project:ActualRouteProject;l
     <Field label="新线路颜色"><input type="color" value={color} onChange={e=>setColor(e.target.value)}/></Field>
     <div className="line-detail-inline-actions"><button onClick={()=>setOpen(false)}>取消</button><button className="primary" disabled={!valid||!date} onClick={()=>{const result=splitLineAtStation(project,{lineId:line.id,splitStationId:stationId,side,openedAt:date,name,color});if(result.error){window.alert(result.error);return}onChange(result.project);setOpen(false)}}>确认拆分</button></div>
   </>}</div>
+}
+
+
+export function LineBranchPanel({project,lineId,onBack,onChange,onAddBranchLine}:{
+  project:ActualRouteProject
+  lineId:string
+  onBack:()=>void
+  onChange:(next:ActualRouteProject)=>void
+  onAddBranchLine?:(parentLineId:string)=>void
+}){
+  const line=project.lines.find(item=>item.id===lineId)
+  if(!line)return null
+  const parentHistory=normalizeLineParentHistory(line)??[{id:`parent-base-${line.id}`,effectiveAt:null,parentLineId:line.parentLineId??null}]
+  const currentEntry=parentHistory.at(-1)!
+  const children=project.lines.filter(item=>item.parentLineId===line.id)
+  const patchParent=(entry:{id:string;effectiveAt:string|null;parentLineId:string|null})=>{
+    const next=structuredClone(project)
+    try{updateLineParentHistoryEntry(next,line.id,entry);onChange(next)}
+    catch(error){window.alert(error instanceof Error?error.message:'主支关系无效')}
+  }
+  const today=new Date().toISOString().slice(0,10)
+  return <div className="line-detail-panel" data-testid="line-branch-panel">
+    <div className="line-detail-header"><button className="line-detail-back" aria-label="返回线路列表" onClick={onBack}>‹</button><span className="line-color" style={{background:getEffectiveLineColor(project,line)}}/><div><strong>{getLineDisplayName(project,line)||'未命名线路'}</strong><small>支线设置</small></div></div>
+    <div className="line-detail-scroll">
+      <section className="line-detail-section"><h3>当前关系</h3>
+        <Field label="线路身份"><select aria-label="线路身份" value={line.parentLineId??''} onChange={e=>patchParent({...currentEntry,parentLineId:e.target.value||null})}><option value="">独立线路</option>{project.lines.filter(item=>item.id!==line.id&&!item.isFake).map(item=><option key={item.id} value={item.id}>「{getLineDisplayName(project,item)||item.id}」的支线</option>)}</select></Field>
+        {!line.parentLineId&&!isFakeLine(line)&&!line.locked&&<button onClick={()=>onAddBranchLine?.(line.id)}>＋ 新建支线</button>}
+      </section>
+      <section className="line-detail-section"><h3>所属支线</h3>
+        {children.length?children.map(child=><div className="line-detail-readonly" key={child.id}><span>{getLineDisplayName(project,child)||'支线'}</span><strong>{resolveCurrentLineDisplayCode(child)}</strong></div>):<p className="line-detail-note">当前没有直属支线。</p>}
+      </section>
+      <section className="line-detail-section"><h3>关系历史</h3>
+        {parentHistory.map(entry=><div className="line-history-row" key={entry.id}><strong>{entry.effectiveAt??'初始'}</strong>{entry.effectiveAt!==null&&<input aria-label="主支关系生效日期" type="date" value={entry.effectiveAt} onChange={e=>patchParent({...entry,effectiveAt:e.target.value||null})}/>}<select aria-label="历史线路身份" value={entry.parentLineId??''} onChange={e=>patchParent({...entry,parentLineId:e.target.value||null})}><option value="">独立线路</option>{project.lines.filter(item=>item.id!==line.id&&!item.isFake).map(item=><option key={item.id} value={item.id}>作为「{getLineDisplayName(project,item)||item.id}」的支线</option>)}</select>{entry.effectiveAt!==null&&<button onClick={()=>{const next=structuredClone(project);try{removeLineParentHistoryEntry(next,line.id,entry.id);onChange(next)}catch(error){window.alert(error instanceof Error?error.message:'主支关系历史无效')}}}>删除</button>}</div>)}
+        <button onClick={()=>patchParent({id:uid('line-parent'),effectiveAt:today,parentLineId:line.parentLineId??null})}>＋ 添加关系变更</button>
+      </section>
+    </div>
+  </div>
 }
 
 export function LineDetailPanel({project,lineId,onBack,onChange,onAddBranchLine,onAddLineBadge,onDelete,onPhasePreview,onStartPhaseDrawing}:{
@@ -87,8 +122,6 @@ export function LineDetailPanel({project,lineId,onBack,onChange,onAddBranchLine,
         <Field label="名称"><input value={line.name} onChange={e=>patch(next=>setCurrentLineName(next.lines.find(item=>item.id===line.id)!,e.target.value))}/></Field>
         <Field label="副名称"><input value={line.nameSub??''} onChange={e=>patch(next=>{const target=next.lines.find(item=>item.id===line.id)!;target.nameSub=e.target.value||undefined})}/></Field>
         <Field label="线路编号"><input value={resolveCurrentLineDisplayCode(line)} onChange={e=>patch(next=>{try{setCurrentLineDisplayCode(next.lines.find(item=>item.id===line.id)!,e.target.value)}catch(error){window.alert(error instanceof Error?error.message:'线路编号无效')}})}/></Field>
-        <Field label="线路身份"><select value={line.parentLineId??''} onChange={e=>patch(next=>{try{updateLineParentHistoryEntry(next,line.id,{id:`parent-base-${line.id}`,effectiveAt:null,parentLineId:e.target.value||null})}catch(error){window.alert(error instanceof Error?error.message:'主支关系无效')}})}><option value="">独立线路</option>{project.lines.filter(item=>item.id!==line.id&&!item.isFake).map(item=><option key={item.id} value={item.id}>「{getLineDisplayName(project,item)||item.id}」的支线</option>)}</select></Field>
-        {!line.parentLineId&&!isFakeLine(line)&&!line.locked&&<button className="line-detail-secondary-action" onClick={()=>onAddBranchLine?.(line.id)}>＋ 新建支线</button>}
       </section>
       <section className="line-detail-section"><h3>尺寸</h3>
         <NumberField label="线路宽度" value={effectiveWidth} min={1} max={120} onChange={value=>setLineOverride('lineWidth',value)}/>
@@ -97,7 +130,6 @@ export function LineDetailPanel({project,lineId,onBack,onChange,onAddBranchLine,
         <p className="line-detail-note">站点大小与站名大小当前是工程全局默认值；单站覆盖仍在站点属性中设置。</p>
       </section>
       <section className="line-detail-section"><h3>样式</h3>
-        <Field label={line.parentLineId?'颜色（继承主线）':'颜色'}><input aria-label="线路颜色" type="color" disabled={Boolean(line.parentLineId)} value={effectiveColor} onChange={e=>patch(next=>setCurrentLineOwnColor(next.lines.find(item=>item.id===line.id)!,e.target.value))}/></Field>
         <Field label="线路样式"><select aria-label="线路样式" value={line.lineStyleId??'normal'} onChange={e=>patch(next=>{next.lines.find(item=>item.id===line.id)!.lineStyleId=e.target.value})}>{getLineStyles(project).map(style=><option key={style.id} value={style.id}>{style.name}{style.builtin?'（内置）':''}</option>)}</select></Field>
         <NumberField label="层级" value={line.lineOrder} min={0} max={9999} step={1} onChange={value=>patch(next=>{next.lines.find(item=>item.id===line.id)!.lineOrder=Math.round(value)})}/>
       </section>

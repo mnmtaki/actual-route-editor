@@ -2,22 +2,16 @@ import { useState } from 'react'
 import type { ActualRouteProject, BasemapPathCategory, LabelDirection, Line, LineStyleOverrides, Selection, SegmentMode, StationStyleOverrides, StructureType } from '../data/model'
 import { uid } from '../data/model'
 import { clearRelationDateOverride, markRelationDateOverride, markSegmentDateOverride, phaseForRelation, phaseForSegment, type OpeningPhasePath } from '../data/openingPhases'
-import { OpeningPhaseEditor } from './OpeningPhaseEditor'
 import { getWaypointStructureChange, setWaypointStructureAfter, updateStructureNode, type WaypointStructureChange } from '../data/structure'
 import { effectiveLabelRotation, effectiveLineWidth, effectiveStationStyle, inferLabelDirection, labelOffsetFor, LABEL_DIRECTIONS } from '../data/style'
 import { DEFAULT_CORNER_RADIUS, getWaypointCornerPlan } from '../geometry/path'
 import { CHINESE_FONT_PRESETS, ColorControl, FontFamilyControl, FontWeightControl, FOREIGN_FONT_PRESETS } from './TypographyControls'
 import { normalizeStationNameHistory, removeStationNameHistoryEntry, setCurrentStationName, updateStationNameHistoryEntry } from '../data/stationNameHistory'
-import { normalizeLineNameHistory, removeLineNameHistoryEntry, setCurrentLineName, updateLineNameHistoryEntry } from '../data/lineNameHistory'
-import { normalizeLineParentHistory, removeLineParentHistoryEntry, updateLineParentHistoryEntry } from '../data/lineParentHistory'
-import { normalizeLineColorHistory, removeLineColorHistoryEntry, setCurrentLineOwnColor, updateLineColorHistoryEntry } from '../data/lineColorHistory'
-import { normalizeLineDisplayCodeHistory, removeLineDisplayCodeHistoryEntry, resolveCurrentLineDisplayCode, setCurrentLineDisplayCode, updateLineDisplayCodeHistoryEntry } from '../data/lineDisplayCodeHistory'
-import { splitLineAtStation, type SplitSide } from '../data/operations'
+import { setCurrentLineOwnColor } from '../data/lineColorHistory'
 import { getLineStyles } from '../data/lineStyles'
 import { insertBasemapPoint } from '../data/basemapPaths'
 import { deleteRoadPoint, getRoadStyles, insertRoadPoint, nudgeRoadZIndex, placeRoadZIndex, setRoadZIndex } from '../data/roads'
 import { isSegmentGeometryLocked, isStationGeometryLocked } from '../data/lineLock'
-import { setLineLocked } from '../data/editorCommands'
 import { collapseLinesByServiceFamily, getEffectiveLineColor, getLineDisplayName } from '../data/lineIdentity'
 import { getCompoundStationCanonical, getCompoundStationMembers, getCompoundStationRelations } from '../data/compoundStation'
 import { getStationStyles, resolveStationStyle } from '../data/stationStyles'
@@ -30,32 +24,6 @@ const inferDirectionFromVector=(x:number,y:number,fallback:LabelDirection):Label
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => <label className="field"><span>{label}</span>{children}</label>
 const OverrideNumber=({label,value,effective,min,max,step,onChange,onReset}:{label:string;value:number|undefined;effective:number;min:number;max:number;step:number;onChange:(value:number)=>void;onReset:()=>void})=><div className="field object-style-field"><span>{label}</span><div className="rotation-control"><input aria-label={label} type="number" inputMode="decimal" min={min} max={max} step={step} value={value??effective} onChange={event=>{const next=Number(event.target.value);if(Number.isFinite(next))onChange(Math.max(min,Math.min(max,next)))}}/>{value!==undefined&&<button type="button" onClick={onReset}>恢复全局</button>}</div></div>
 
-function LineSplitEditor({ project, line, onChange }: { project: ActualRouteProject; line: Extract<ActualRouteProject['lines'][number], { id: string }>; onChange: (next: ActualRouteProject) => void }) {
-  const [open, setOpen] = useState(false)
-  const [date, setDate] = useState(project.timeline.currentDate)
-  const [stationId, setStationId] = useState(line.stationSequence[1] ?? '')
-  const [side, setSide] = useState<SplitSide>('after')
-  const [name, setName] = useState(`拆分线路 ${project.lines.length + 1}`)
-  const [color, setColor] = useState('#6b58c4')
-  if (line.stationSequence.length < 3) return null
-  const index = line.stationSequence.indexOf(stationId)
-  const validStation = index > 0 && index < line.stationSequence.length - 1
-  const moved = side === 'after' ? line.stationSequence.slice(index) : line.stationSequence.slice(0, index + 1)
-  const retained = side === 'after' ? line.stationSequence.slice(0, index + 1) : line.stationSequence.slice(index)
-  const stationName = (id: string) => project.stations.find(station => station.id === id)?.name ?? id
-  return <section className="line-split-editor" data-testid="line-split-editor">
-    {!open ? <button type="button" disabled={line.locked} onClick={() => setOpen(true)}>拆分线路</button> : <>
-      <span className="eyebrow">拆分线路</span>
-      <Field label="拆分日期"><input type="date" value={date} onChange={event => setDate(event.target.value)} /></Field>
-      <Field label="拆分站"><select value={stationId} onChange={event => setStationId(event.target.value)}>{line.stationSequence.slice(1, -1).map(id => <option key={id} value={id}>{stationName(id)}</option>)}</select></Field>
-      <Field label="拆出哪一侧"><select value={side} onChange={event => setSide(event.target.value as SplitSide)}><option value="after">向线路序列后方拆出</option><option value="before">向线路序列前方拆出</option></select></Field>
-      <Field label="新线路名称"><input value={name} onChange={event => setName(event.target.value)} /></Field>
-      <Field label="新线路颜色"><input type="color" value={color} onChange={event => setColor(event.target.value)} /></Field>
-      {validStation && <p className="meta-note">保留：{retained.map(stationName).join(' — ')}<br />拆出：{moved.map(stationName).join(' — ')}</p>}
-      <div className="line-dialog-actions"><button type="button" onClick={() => setOpen(false)}>取消</button><button type="button" className="primary" disabled={!validStation || !date} onClick={() => { const result = splitLineAtStation(project, { lineId: line.id, splitStationId: stationId, side, openedAt: date, name, color }); if (result.error) { window.alert(result.error); return } onChange(result.project); setOpen(false) }}>确认拆分</button></div>
-    </>}
-  </section>
-}
 export function Inspector({ project, selection, onChange, onDelete, onAddLineBadge=()=>undefined, onPhasePreview, onStartPhaseDrawing, onOpenStationStyles, embedded=false }: { project: ActualRouteProject; selection: Selection; onChange: (next: ActualRouteProject) => void; onDelete: () => void; onAddLineBadge?: (lineId: string) => void; onPhasePreview: (path: OpeningPhasePath | null) => void; onStartPhaseDrawing: (phaseId: string, lineId: string, stationId: string | null) => void; onOpenStationStyles?: () => void; embedded?: boolean }) {
   const patch = (mutate: (next: ActualRouteProject) => void) => { const next = structuredClone(project); mutate(next); onChange(next) }
   let content: React.ReactNode = <div className="empty-inspector"><span>◎</span><p>选择站点、区间、控制点或线路，查看和修改属性。</p></div>

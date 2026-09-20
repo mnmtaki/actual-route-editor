@@ -76,7 +76,7 @@ describe('AARC common-line cap', () => {
     const native = line('native', 0)
     const imported = line('line-1', 1, 0)
     expect(resolveAarcCommonLineCap(native)).toBe('round')
-    expect(resolveAarcCommonLineCap(imported)).toBe('butt')
+    expect(resolveAarcCommonLineCap(imported)).toBe('round')
   })
 
   it('honors an explicit AARC source cap', () => {

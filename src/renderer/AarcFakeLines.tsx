@@ -122,7 +122,7 @@ function FakeLineArtwork({ project, line }: { project: ActualRouteProject; line:
   const bg = colorValue(config.bgColor, '#ffffff')
   const color = colorValue(native?.color ?? line.color)
   const isTerrain = numberValue(line.type) === 1
-  const lineCap = line.cap === 'round' || line.cap === 'square' || line.cap === 'butt' ? line.cap : isTerrain ? 'round' : 'butt'
+  const lineCap = line.cap === 'round' || line.cap === 'square' || line.cap === 'butt' ? line.cap : 'round'
   const allLines = sourceLines(project)
   const sourceStyleId = resolveSourceStyleId(line, allLines)
   const style = resolveAarcStyle(sourceStyleId, project.aarc?.lineStyles)
@@ -142,7 +142,7 @@ function FakeLineArtwork({ project, line }: { project: ActualRouteProject; line:
     {styleLayers.map((layer, index) => {
       const geometry = resolveAarcLayerGeometry(layer, bodyWidth)
       const stroke = layer.colorMode === 'line' ? color : colorValue(geometry.color, color)
-      return <path key={`${sourceId ?? 'fake'}-style-${index}`} d={path} fill="none" stroke={stroke} strokeWidth={geometry.width} strokeOpacity={geometry.opacity ?? 1} strokeDasharray={geometry.dash?.join(' ')} strokeLinecap={geometry.cap === 'round' || geometry.cap === 'square' || geometry.cap === 'butt' ? geometry.cap : 'butt'} strokeLinejoin={geometry.join === 'miter' || geometry.join === 'bevel' ? geometry.join : 'round'} data-aarc-fake-line-style-layer={index} />
+      return <path key={`${sourceId ?? 'fake'}-style-${index}`} d={path} fill="none" stroke={stroke} strokeWidth={geometry.width} strokeOpacity={geometry.opacity ?? 1} strokeDasharray={geometry.dash?.join(' ')} strokeLinecap={geometry.cap === 'round' || geometry.cap === 'square' || geometry.cap === 'butt' ? geometry.cap : lineCap} strokeLinejoin={geometry.join === 'miter' || geometry.join === 'bevel' ? geometry.join : 'round'} data-aarc-fake-line-style-layer={index} />
     })}
   </g>
 }

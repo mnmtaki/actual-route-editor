@@ -49,6 +49,38 @@ describe('direct manipulation gestures', () => {
     const widths=[...container.querySelectorAll('.segment-main')].map(path=>path.getAttribute('stroke-width'))
     expect(widths).toContain('44');expect(widths).toContain('30');expect(widths).not.toContain('8')
   })
+  it('strokes adjacent AARC station segments as one continuous capped path while keeping each hit target', () => {
+    const project = structuredClone(demoProject)
+    const line = project.lines.find(item => item.id === 'line-a')!
+    line.source = { format: 'aarc', lineId: 1, sourceLineId: 1, raw: { cap: 'square' } }
+    const segments = project.geometry.segments.filter(segment => segment.lineId === line.id)
+    segments.forEach((segment, index) => {
+      segment.source = { format: 'aarc', lineId: 1, sourceLineId: 1, pointIds: [index + 1, index + 2], raw: { sourceSegmentIndex: index } }
+      segment.mode = 'straight'; segment.waypoints = []; segment.structureType = 'underground'; segment.structureNodes = []
+    })
+    const { container } = render(<NetworkCanvas {...baseProps} project={project} />)
+    const group = container.querySelector('[data-aarc-continuous-line="line-a"]')!
+    expect(group.querySelectorAll('.segment-main')).toHaveLength(1)
+    expect(group.querySelector('.segment-main')).toHaveAttribute('stroke-linecap', 'square')
+    expect(group.querySelectorAll('.segment-hit')).toHaveLength(segments.length)
+  })
+
+  it('selects and drags imported AARC line labels through the unified lineLabel selection', () => {
+    const project=structuredClone(demoProject),line=project.lines.find(item=>item.id==='line-a')!
+    project.textTags=[{id:'aarc-line-label',kind:'LineNameLabel',x:200,y:150,lineId:line.id,padding:1,source:{format:'aarc',kind:'text-tag',forId:1,targetKind:'line'}}]
+    project.aarc={format:'aarc',raw:{lines:[{id:1,name:line.name,color:line.color,pts:[]}]}}
+    const onSelect=vi.fn(),onDragCommit=vi.fn()
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} onSelect={onSelect} onDragCommit={onDragCommit}/>)
+    const svg=container.querySelector('svg')!;vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
+    const label=container.querySelector('[data-line-label-id="aarc-line-label"]')!
+    fireEvent.pointerDown(label,{pointerId:19,clientX:200,clientY:150,bubbles:true})
+    fireEvent.pointerMove(svg,{pointerId:19,clientX:240,clientY:175,bubbles:true})
+    fireEvent.pointerUp(svg,{pointerId:19,clientX:240,clientY:175,bubbles:true})
+    expect(onSelect).toHaveBeenCalledWith({type:'lineLabel',id:'aarc-line-label',lineId:'line-a',source:'aarc'})
+    expect(onDragCommit).toHaveBeenCalledTimes(1)
+    expect(onDragCommit.mock.calls[0][1].textTags[0]).toMatchObject({x:240,y:175})
+  })
+
   it('keeps station markers and labels visible when a native line is switched to fake', () => {
     const project = structuredClone(demoProject)
     project.lines.find(line => line.id === 'line-a')!.isFake = true
@@ -133,7 +165,7 @@ describe('direct manipulation gestures', () => {
     const svg=container.querySelector('svg')!;vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
     const badge=container.querySelector('[data-line-badge-id="badge-a"]')!
     fireEvent.pointerDown(badge,{pointerId:14,clientX:200,clientY:150,bubbles:true});fireEvent.pointerMove(svg,{pointerId:14,clientX:275,clientY:185,bubbles:true});fireEvent.pointerUp(svg,{pointerId:14,clientX:275,clientY:185,bubbles:true})
-    expect(onSelect).toHaveBeenCalledWith({type:'lineBadge',id:'badge-a',lineId:'line-a'});expect(onDragCommit).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith({type:'lineLabel',id:'badge-a',lineId:'line-a',source:'native'});expect(onDragCommit).toHaveBeenCalledTimes(1)
     const nextLine=onDragCommit.mock.calls[0][1].lines.find((item:{id:string})=>item.id==='line-a');expect(nextLine.lineBadges.find((item:{id:string})=>item.id==='badge-a')).toMatchObject({x:275,y:185});expect(nextLine.lineBadges.find((item:{id:string})=>item.id==='badge-b')).toMatchObject({x:350,y:250})
   })
   it('drags an independent Structure Node along its Segment with pointer capture', () => {

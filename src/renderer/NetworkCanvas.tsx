@@ -15,6 +15,7 @@ import { LineLegendLayer } from './LineLegend'
 import { LineBadgesLayer } from './LineBadges'
 import { VectorBasemapLayer } from './VectorBasemap'
 import { AarcFakeLinesLayer } from './AarcFakeLines'
+import { compileAarcLineArtworkRuns } from './lineArtworkRuns'
 import { isFakeLine } from '../data/fakeLines'
 import type { DrawingMode, LineDraftPoint } from '../data/basemapPaths'
 import { effectiveLineWidth, effectiveStationStyle, snapLabelOffset } from '../data/style'
@@ -34,7 +35,7 @@ type Gesture =
   | { kind: 'panningCanvas'; pointerId: number; lastClient: Point }
   | { kind: 'calibrationTap'; pointerId: number; startClient: Point; lastClient: Point; moved: boolean }
   | { kind: 'pinchingCanvas'; pointerIds: [number, number]; initialDistance: number; startView: View; startWorld: Point }
-  | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineBadge' | 'draggingMapElement' | 'draggingLineLegend' | 'draggingBackground' | 'draggingBasemapPoint' | 'draggingBasemapPath' | 'draggingRoadPoint'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; ownerRoadId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
+  | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineLabel' | 'draggingMapElement' | 'draggingLineLegend' | 'draggingBackground' | 'draggingBasemapPoint' | 'draggingBasemapPath' | 'draggingRoadPoint'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; ownerRoadId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
 
 type LineDraftState = { lineId: string; phaseId?: string; anchorStationId: string | null; points: LineDraftPoint[]; lastCreatedStationId?: string }
 type DrawingPointSelection = { kind: 'draft'; id: string } | { kind: 'station'; id: string } | null
@@ -308,9 +309,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     } else if (current.kind === 'draggingLabel') {
       const station = next.stations.find(item => item.id === current.id)
       if (station) { const offset=snapLabelOffset(current.origin.x + dx, current.origin.y + dy); station.labelOffsetX = offset.x; station.labelOffsetY = offset.y }
-    } else if (current.kind === 'draggingLineBadge') {
+    } else if (current.kind === 'draggingLineLabel') {
       const badge = next.lines.find(line => line.id === current.ownerLineId)?.lineBadges?.find(item => item.id === current.id)
       if (badge) { badge.x = current.origin.x + dx; badge.y = current.origin.y + dy }
+      const tag = next.textTags?.find(item => item.id === current.id)
+      if (tag) { tag.x = current.origin.x + dx; tag.y = current.origin.y + dy }
     } else if (current.kind === 'draggingMapElement') {
       const element = next.mapElements?.find(item => item.id === current.id)
       if (element) { element.x = current.origin.x + dx; element.y = current.origin.y + dy }
@@ -426,10 +429,22 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
         return [<AarcFakeLinesLayer key={`fake-common-${rawLine.id}`} project={shown} part="common" sourceLineId={sourceId} />]
       }
       const line = lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate)
-      return active.segments.filter(segment => segment.lineId === rawLine.id).map(segment => {
+      const lineSegments = active.segments.filter(segment => segment.lineId === rawLine.id)
+      const hitPaths = lineSegments.map(segment => {
+        const path = getSegmentPath(shown, segment)
+        return <path key={`hit:${segment.id}`} d={path} className="segment-hit" onPointerDown={event => { if (drawing) return; event.stopPropagation(); const projected=projectPointToSvgPath(event.currentTarget,pointerToWorld(event.clientX,event.clientY)), progress=findSegmentProgressForPoint(shown,segment,projected); onSelect({ type: 'segment', id: segment.id, progress }); onSegmentPoint(segment.id, projected) }} />
+      })
+      if (rawLine.source?.format === 'aarc') {
+        const runs = compileAarcLineArtworkRuns(shown, line, lineSegments)
+        return [<g key={rawLine.id} data-aarc-continuous-line={rawLine.id}>
+          {runs.map(run => <SegmentArtwork key={run.id} segment={run.segment} line={line} path={run.path} lineWidth={effectiveLineWidth(line, shown.settings)} renderLegacyStructure={false} style={resolveLineStyle(shown,line,run.segment)}/>)}
+          {hitPaths}
+        </g>]
+      }
+      return lineSegments.map(segment => {
         const path = getSegmentPath(shown, segment)
         const intervals = getSegmentStyleIntervals(shown, segment)
-        return <g key={segment.id}>{intervals.map((interval,index) => { const spans=getSegmentSubpathSpans(shown,segment,interval.start,interval.end); if(!spans.length)return null; const intervalPath=pathSpansToSvgPath(spans), intervalSegment={...segment,structureType:interval.structureType,lineStyleId:interval.lineStyleId}; return <SegmentArtwork key={`${segment.id}:${index}`} segment={intervalSegment} line={line} path={intervalPath} lineWidth={effectiveLineWidth(line, shown.settings)} renderLegacyStructure={false} style={resolveLineStyle(shown,line,interval.lineStyleId===undefined?undefined:intervalSegment)}/> })}<path d={path} className="segment-hit" onPointerDown={event => { if (drawing) return; event.stopPropagation(); const projected=projectPointToSvgPath(event.currentTarget,pointerToWorld(event.clientX,event.clientY)), progress=findSegmentProgressForPoint(shown,segment,projected); onSelect({ type: 'segment', id: segment.id, progress }); onSegmentPoint(segment.id, projected) }} /></g>
+        return <g key={segment.id}>{intervals.map((interval,index) => { const spans=getSegmentSubpathSpans(shown,segment,interval.start,interval.end); if(!spans.length)return null; const intervalPath=pathSpansToSvgPath(spans), intervalSegment={...segment,structureType:interval.structureType,lineStyleId:interval.lineStyleId}; return <SegmentArtwork key={`${segment.id}:${index}`} segment={intervalSegment} line={line} path={intervalPath} lineWidth={effectiveLineWidth(line, shown.settings)} renderLegacyStructure={false} style={resolveLineStyle(shown,line,interval.lineStyleId===undefined?undefined:intervalSegment)}/> })}{hitPaths.find(item=>item.key===`hit:${segment.id}`)}</g>
       })
     })}</g>
     <g data-layer="structure-runs">{elevatedRuns.map(run => { const rawLine = shown.lines.find(item => item.id === run.lineId); const line = rawLine ? lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate) : undefined; return line ? <StructureRunArtwork key={run.id} run={run} line={line} lineWidth={effectiveLineWidth(line, shown.settings)} style={getLineStyle(shown, 'elevated')} /> : null })}</g>
@@ -442,8 +457,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     <AarcPointLinksLayer project={shown} />
     <g data-layer="station-labels">{editorStations.map(station => <StationMarker key={station.id} part="label" project={shown} station={station} time={shown.timeline.currentDate} selected={false} hitRadius={stationHitRadius} onPointerDown={() => {}} onLabelPointerDown={event => { if (drawing) return; if (startObjectDrag('draggingLabel', event, { x: station.labelOffsetX, y: station.labelOffsetY }, station.id)) onSelect({ type: 'station', id: station.id }) }} />)}</g>
     {lineDrawingOverlay}
-    <LineBadgesLayer project={historicalIdentityProject} selectedId={selection?.type === 'lineBadge' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={(event, line, badge) => { if (drawing) return; if (startObjectDrag('draggingLineBadge', event, { x: badge.x, y: badge.y }, badge.id, undefined, line.id)) onSelect({ type: 'lineBadge', id: badge.id, lineId: line.id }) }} />
-    <AarcTextTagsLayer project={historicalIdentityProject} />
+    <LineBadgesLayer project={historicalIdentityProject} selectedId={selection?.type === 'lineLabel' && selection.source === 'native' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={(event, line, badge) => { if (drawing) return; if (startObjectDrag('draggingLineLabel', event, { x: badge.x, y: badge.y }, badge.id, undefined, line.id)) onSelect({ type: 'lineLabel', id: badge.id, lineId: line.id, source: 'native' }) }} />
+    <AarcTextTagsLayer project={historicalIdentityProject} selectedId={selection?.type === 'lineLabel' && selection.source === 'aarc' ? selection.id : undefined} hitRadius={stationHitRadius} onLineLabelPointerDown={(event, tag, lineId) => { if (drawing) return; event.stopPropagation(); if (startObjectDrag('draggingLineLabel', event, { x: tag.x, y: tag.y }, tag.id, undefined, lineId)) onSelect({ type: 'lineLabel', id: tag.id, lineId, source: 'aarc' }) }} />
     <MapElementsLayer project={shown} selectedId={selection?.type === 'mapElement' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={(event, element) => { if (drawing) return; if (startObjectDrag('draggingMapElement', event, { x: element.x, y: element.y }, element.id)) onSelect({ type: 'mapElement', id: element.id }) }} />
     <LineLegendLayer project={historicalIdentityProject} selectedId={selection?.type === 'lineLegend' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={(event, legend) => { if (drawing) return; if (legend.locked) { onSelect({ type: 'lineLegend', id: legend.id }); return } if (startObjectDrag('draggingLineLegend', event, { x: legend.x, y: legend.y }, legend.id)) onSelect({ type: 'lineLegend', id: legend.id }) }} />
     <g data-layer="waypoints" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (()=>{const segmentId=selection.type==='segment'?selection.id:selection.segmentId,segment=shown.geometry.segments.find(item=>item.id===segmentId);if(!segment)return null;const cornerIds=new Set(getSegmentRoundedCornerPlans(shown,segment).map(plan=>plan.waypointId));return segment.waypoints.map(waypoint=>{const isCorner=cornerIds.has(waypoint.id),selected=selection.type==='waypoint'&&selection.id===waypoint.id,selectWaypoint=(event:React.PointerEvent)=>{if(isSegmentGeometryLocked(shown,segmentId)){onSelect({type:'waypoint',id:waypoint.id,segmentId});onEditBlocked?.('线路已锁定');return}if(startObjectDrag('draggingWaypoint',event,{x:waypoint.x,y:waypoint.y},waypoint.id,segmentId))onSelect({type:'waypoint',id:waypoint.id,segmentId})};return <g key={waypoint.id} data-corner-handle={isCorner?'true':undefined} data-waypoint-id={waypoint.id} onPointerDown={selectWaypoint}><circle className="waypoint-hit" cx={waypoint.x} cy={waypoint.y} r={stationHitRadius} fill="transparent" pointerEvents="all"/><circle cx={waypoint.x} cy={waypoint.y} r={isCorner?7:8} className={`waypoint ${isCorner?'corner-waypoint':''} ${selected?'selected':''}`} pointerEvents="none"/></g>})})()}</g>

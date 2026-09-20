@@ -290,7 +290,7 @@ function CommonLineTag({ tag, project, target }: { tag: AarcTextTag; project: Ac
     const xLeft = rectLeft(x, params.anchorX, naturalWidth)
     const yTop = params.anchorY === -1 ? y - totalHeight : params.anchorY === 0 ? y - totalHeight / 2 : y
     return <>
-      <rect x={rectLeft(x, params.anchorX, rectWidth)} y={rectTop(y, params.anchorY, totalHeight)} width={rectWidth} height={totalHeight} fill={target.color} stroke={padding > 0 ? target.color : undefined} strokeWidth={paddingLineWidth} data-aarc-line-name-carpet="true" data-aarc-width-mode="minimum" />
+      <rect x={rectLeft(x, params.anchorX, rectWidth)} y={rectTop(y, params.anchorY, totalHeight)} width={rectWidth} height={totalHeight} fill={target.color} stroke={padding > 0 ? target.color : undefined} strokeWidth={paddingLineWidth} strokeLinejoin="round" data-aarc-line-name-carpet="true" data-aarc-width-mode="minimum" data-aarc-carpet-shape="fill-rect-round-stroke" />
       <g data-aarc-text-render-kind="line-dropcap" data-aarc-dropcap-part={dropCapPart}>
         <text x={xLeft} y={yTop + totalHeight / 2} dominantBaseline="middle" textAnchor="start" fontFamily={giantFont.family} fontSize={giantFont.size} fill={textColor}>{dropCapPart}</text>
         <text x={xLeft + giantWidth + margin} y={yTop + primaryRow / 2} dominantBaseline="middle" textAnchor="start" fontFamily={primaryFont.family} fontSize={primaryFont.size} fill={textColor}>{rest}</text>
@@ -301,7 +301,7 @@ function CommonLineTag({ tag, project, target }: { tag: AarcTextTag; project: Ac
 
   const rectWidth = Math.max(metrics.width, params.width)
   return <>
-    <rect x={rectLeft(x, params.anchorX, rectWidth)} y={rectTop(y, params.anchorY, metrics.totalHeight)} width={rectWidth} height={metrics.totalHeight} fill={target.color} stroke={padding > 0 ? target.color : undefined} strokeWidth={paddingLineWidth} data-aarc-line-name-carpet="true" data-aarc-width-mode="minimum" />
+    <rect x={rectLeft(x, params.anchorX, rectWidth)} y={rectTop(y, params.anchorY, metrics.totalHeight)} width={rectWidth} height={metrics.totalHeight} fill={target.color} stroke={padding > 0 ? target.color : undefined} strokeWidth={paddingLineWidth} strokeLinejoin="round" data-aarc-line-name-carpet="true" data-aarc-width-mode="minimum" data-aarc-carpet-shape="fill-rect-round-stroke" />
     <TextBlock x={x} y={y} params={params} primaryLines={primaryLines} secondaryLines={secondaryLines} primaryFont={primaryFont} secondaryFont={secondaryFont} primaryRow={primaryRow} secondaryRow={secondaryRow} primaryColor={textColor} secondaryColor={textColor} dataKind="line" />
   </>
 }
@@ -342,17 +342,19 @@ function PlainTag({ tag, project }: { tag: AarcTextTag; project: ActualRouteProj
   </>
 }
 
-function Tag({ tag, project }: { tag: AarcTextTag; project: ActualRouteProject }) {
+function Tag({ tag, project, selectedId, hitRadius = 22, onLineLabelPointerDown }: { tag: AarcTextTag; project: ActualRouteProject; selectedId?: string; hitRadius?: number; onLineLabelPointerDown?: (event: React.PointerEvent<SVGGElement>, tag: AarcTextTag, lineId: string) => void }) {
   const target = sourceTarget(project, tag)
   const mode: TagMode = target?.mode ?? 'plain'
   const opacity = tag.opacity || 1, rotation = (tag.rotation ?? 0) * 180 / Math.PI
   const lineId = boundLineId(project, tag)
-  return <g data-aarc-text-tag-id={tag.id} data-aarc-text-tag-kind={tag.kind} data-aarc-text-tag-render-mode={mode} data-text-tag-id={tag.id} data-line-id={lineId ?? ''} opacity={opacity} transform={`rotate(${rotation} ${tag.x} ${tag.y})`}>
+  const isLineLabel = mode === 'line' && Boolean(lineId)
+  return <g className={isLineLabel ? `map-element line-label aarc-line-label ${selectedId === tag.id ? 'selected' : ''}` : undefined} data-line-label-id={isLineLabel ? tag.id : undefined} data-line-label-source={isLineLabel ? 'aarc' : undefined} data-aarc-text-tag-id={tag.id} data-aarc-text-tag-kind={tag.kind} data-aarc-text-tag-render-mode={mode} data-text-tag-id={tag.id} data-line-id={lineId ?? ''} opacity={opacity} transform={`rotate(${rotation} ${tag.x} ${tag.y})`} onPointerDown={isLineLabel && lineId ? event => onLineLabelPointerDown?.(event, tag, lineId) : undefined}>
     {mode === 'line' && target ? <CommonLineTag tag={tag} project={project} target={target} /> : mode === 'terrain' && target ? <TerrainTag tag={tag} project={project} target={target} /> : <PlainTag tag={tag} project={project} />}
+    {isLineLabel && onLineLabelPointerDown && <rect data-editor="true" x={tag.x - hitRadius} y={tag.y - hitRadius} width={hitRadius * 2} height={hitRadius * 2} fill="transparent" pointerEvents="all" />}
   </g>
 }
 
-export const AarcTextTagsLayer = memo(function AarcTextTagsLayer({ project, presentation = false, visibleLineIds, mode = 'notSunken' }: { project: ActualRouteProject; presentation?: boolean; visibleLineIds?: Set<string>; mode?: LayerMode }) {
+export const AarcTextTagsLayer = memo(function AarcTextTagsLayer({ project, presentation = false, visibleLineIds, mode = 'notSunken', selectedId, hitRadius = 22, onLineLabelPointerDown }: { project: ActualRouteProject; presentation?: boolean; visibleLineIds?: Set<string>; mode?: LayerMode; selectedId?: string; hitRadius?: number; onLineLabelPointerDown?: (event: React.PointerEvent<SVGGElement>, tag: AarcTextTag, lineId: string) => void }) {
   const tags = (project.textTags ?? [])
     .map((tag, index) => ({ tag, index, boundLineId: boundLineId(project, tag) }))
     .filter(({ tag, boundLineId: lineId }) => (mode === 'sunken' ? tag.sunken === true : tag.sunken !== true) && (!presentation || !lineId || !visibleLineIds || visibleLineIds.has(lineId)))
@@ -360,5 +362,5 @@ export const AarcTextTagsLayer = memo(function AarcTextTagsLayer({ project, pres
     .map(({ tag }) => tag)
   if (!tags.length) return null
   const layerName = mode === 'sunken' ? 'aarc-text-tags-sunken' : 'aarc-text-tags'
-  return <g data-layer={layerName} data-aarc-text-tag-layer={mode} data-presentation-layer={presentation ? layerName : undefined} pointerEvents="none">{tags.map(tag => <Tag key={tag.id} tag={tag} project={project} />)}</g>
+  return <g data-layer={layerName} data-aarc-text-tag-layer={mode} data-presentation-layer={presentation ? layerName : undefined} pointerEvents={onLineLabelPointerDown ? 'visiblePainted' : 'none'}>{tags.map(tag => <Tag key={tag.id} tag={tag} project={project} selectedId={selectedId} hitRadius={hitRadius} onLineLabelPointerDown={onLineLabelPointerDown} />)}</g>
 })

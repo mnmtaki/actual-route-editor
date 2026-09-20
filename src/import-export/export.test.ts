@@ -68,6 +68,7 @@ describe('project and SVG export', () => {
     expect(migrated.stationLineRelations.find(item=>item.id===relation.id)?.openedAt).toBe('2026-01-01')
     expect(JSON.parse(serializeProject(migrated)).stationLineRelations.find((item:{id:string})=>item.id===relation.id).openedAt).toBe('2026-01-01')
   })
+  it('round-trips an explicit line label corner radius',()=>{const project=structuredClone(demoProject);project.lines[0].lineBadges=[{id:'badge-radius',x:10,y:20,size:40,cornerRadius:7.5,rotation:0,visible:true}];const restored=parseProjectJson(serializeProject(project));expect(restored.lines[0].lineBadges?.[0].cornerRadius).toBe(7.5)})
   it('removes editor handles and optionally removes the background', () => {
     document.body.innerHTML = '<svg viewBox="0 0 100 100"><image href="x"/><path class="art"/><g data-editor="true"><circle/></g><path class="segment-hit"/></svg>'
     const result = exportSvg(document.querySelector('svg')!, false)

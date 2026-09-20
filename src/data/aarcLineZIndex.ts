@@ -81,9 +81,8 @@ export function sortByAarcCommonLineZIndex<T>(
   return result
 }
 
-/** AARC common lines default to butt caps; native ActualRoute lines stay round. */
+/** Lines default to round caps. Imported source data may explicitly override it. */
 export function resolveAarcCommonLineCap(line: Line): AarcCommonLineCap {
-  if (line.source?.format !== 'aarc') return 'round'
-  const cap = line.source.raw?.cap
-  return cap === 'round' || cap === 'square' || cap === 'butt' ? cap : 'butt'
+  const cap = line.source?.format === 'aarc' ? line.source.raw?.cap : undefined
+  return cap === 'round' || cap === 'square' || cap === 'butt' ? cap : 'round'
 }

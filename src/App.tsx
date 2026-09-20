@@ -566,13 +566,14 @@ export default function App() {
       n = deleteStationConsistently(n, selection.id);
     else if (selection.type === "line")
       n = deleteLineAndOrphans(n, selection.id);
-    else if (selection.type === "lineBadge") {
+    else if (selection.type === "lineLabel") {
       n = structuredClone(n);
-      const line = n.lines.find((item) => item.id === selection.lineId);
-      if (line)
-        line.lineBadges = (line.lineBadges ?? []).filter(
-          (item) => item.id !== selection.id,
-        );
+      if (selection.source === "native") {
+        const line = n.lines.find((item) => item.id === selection.lineId);
+        if (line) line.lineBadges = (line.lineBadges ?? []).filter((item) => item.id !== selection.id);
+      } else {
+        n.textTags = (n.textTags ?? []).filter((item) => item.id !== selection.id);
+      }
     } else {
       n = structuredClone(n);
       if (selection.type === "segment") {
@@ -1018,8 +1019,8 @@ export default function App() {
       line.lineBadges.push({ id, x, y, size: 42, rotation: 0, visible: true });
       return next;
     });
-    setSelection({ type: "lineBadge", id, lineId });
-    setNotice("已添加线路标号，可直接拖动");
+    setSelection({ type: "lineLabel", id, lineId, source: "native" });
+    setNotice("已添加线路标签，可直接拖动");
   };
   const addLineLegend = () => {
     if (history.project.lineLegend) {

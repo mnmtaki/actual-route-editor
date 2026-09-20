@@ -215,7 +215,8 @@ function normalizeLineBadge(value: unknown): LineBadge[] {
   if (!value || typeof value !== 'object') return []
   const item=value as Record<string,unknown>,id=typeof item.id==='string'?item.id:''
   if(!id)return []
-  return [{id,x:finiteOr(item.x,0),y:finiteOr(item.y,0),size:positiveOr(item.size,36),rotation:finiteOr(item.rotation,0),visible:item.visible!==false}]
+  const cornerRadius=typeof item.cornerRadius==='number'&&Number.isFinite(item.cornerRadius)&&item.cornerRadius>=0?item.cornerRadius:undefined
+  return [{id,x:finiteOr(item.x,0),y:finiteOr(item.y,0),size:positiveOr(item.size,36),...(cornerRadius!==undefined?{cornerRadius}:{}),rotation:finiteOr(item.rotation,0),visible:item.visible!==false}]
 }
 function normalizeLegacyLineBadge(value: unknown): {lineId:string;badge:LineBadge}[] {
   if (!value || typeof value !== 'object') return []

@@ -92,6 +92,29 @@ describe('AARC TextTag fidelity', () => {
     expect(drop?.textContent).toContain('Metro 12')
   })
 
+  it('matches AARC line-label carpet geometry from source padding instead of an invented radius', () => {
+    const project = createEmptyProject()
+    project.aarc = {
+      format: 'aarc',
+      config: { lineWidth: 16, textTagForLine: { padding: 1.5 } },
+      raw: { lines: [{ id: 1, name: 'R', color: '#2255aa', pts: [] }] },
+    }
+    project.lines = [{ id: 'aarc-line-1', name: 'R', color: '#2255aa', stationSequence: [], lineOrder: 0, visible: true, locked: false, source: { format: 'aarc', sourceLineId: 1 } }]
+    project.textTags = [{ id: 'source-carpet', kind: 'LineNameLabel', x: 0, y: 0, padding: 0, lineId: 'aarc-line-1', source: { format: 'aarc', kind: 'text-tag', forId: 1, targetKind: 'line' } }]
+    const { container, rerender } = render(createElement(AarcTextTagsLayer, { project }))
+    let carpet = container.querySelector('[data-aarc-line-name-carpet="true"]')
+    expect(carpet).toHaveAttribute('stroke-width', '24')
+    expect(carpet).toHaveAttribute('stroke-linejoin', 'round')
+    expect(carpet).not.toHaveAttribute('rx')
+    expect(carpet).not.toHaveAttribute('ry')
+
+    const updated = structuredClone(project)
+    updated.textTags![0].padding = 2
+    rerender(createElement(AarcTextTagsLayer, { project: updated }))
+    carpet = container.querySelector('[data-aarc-line-name-carpet="true"]')
+    expect(carpet).toHaveAttribute('stroke-width', '32')
+  })
+
   it('treats width as a minimum background width without wrapping text', () => {
     const project = createEmptyProject()
     project.aarc = { format: 'aarc', raw: { lines: [{ id: 1, name: 'R', color: '#2255aa', pts: [] }] } }

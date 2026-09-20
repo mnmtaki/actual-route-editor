@@ -120,8 +120,31 @@ describe('direct manipulation gestures', () => {
     const background = container.querySelector('.canvas-bg')!
     fireEvent.pointerDown(background, { pointerId: 8, clientX: 100, clientY: 100, bubbles: true })
     fireEvent.pointerMove(svg, { pointerId: 8, clientX: 140, clientY: 120, bubbles: true })
+    expect(svg.getAttribute('viewBox')).not.toBe('0 0 920 680')
+    expect(setView).not.toHaveBeenCalled()
+    fireEvent.pointerUp(svg, { pointerId: 8, clientX: 140, clientY: 120, bubbles: true })
     expect(setView).toHaveBeenCalledTimes(1)
     expect(onDragCommit).not.toHaveBeenCalled()
+  })
+
+  it('zooms through a live SVG viewBox and commits React view only after wheel idle', () => {
+    vi.useFakeTimers()
+    try {
+      const setView = vi.fn()
+      const { container } = render(<NetworkCanvas {...baseProps} project={demoProject} setView={setView} />)
+      const svg = container.querySelector('svg')!
+      Object.defineProperty(svg, 'clientWidth', { configurable: true, value: 920 })
+      vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+      fireEvent.wheel(svg, { clientX: 460, clientY: 340, deltaY: -100, bubbles: true })
+      expect(svg.getAttribute('viewBox')).not.toBe('0 0 920 680')
+      expect(setView).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(99)
+      expect(setView).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1)
+      expect(setView).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('cancels an object drag and switches safely to pinch when a second pointer arrives', () => {
@@ -140,7 +163,7 @@ describe('direct manipulation gestures', () => {
     fireEvent.pointerUp(svg, { pointerId: 21, clientX: original.x + 30, clientY: original.y + 40, bubbles: true })
     expect(onDragCommit).not.toHaveBeenCalled()
     expect(setView).toHaveBeenCalled()
-    expect(onPreview).toHaveBeenLastCalledWith(demoProject)
+    expect(onPreview).not.toHaveBeenCalled()
   })
 
   it('snaps a rotated bilingual label to the nearest direction without moving its Station',()=>{
@@ -149,13 +172,13 @@ describe('direct manipulation gestures', () => {
     const svg=container.querySelector('svg')!;Object.defineProperty(svg,'clientWidth',{configurable:true,value:920});vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
     const label=container.querySelector('[data-label-rotation="45"]')!;fireEvent.pointerDown(label,{pointerId:12,clientX:station.x+station.labelOffsetX,clientY:station.y+station.labelOffsetY,bubbles:true});fireEvent.pointerMove(svg,{pointerId:12,clientX:station.x+station.labelOffsetX+30,clientY:station.y+station.labelOffsetY+20,bubbles:true});fireEvent.pointerUp(svg,{pointerId:12,clientX:0,clientY:0,bubbles:true});const moved=onDragCommit.mock.calls[0][1].stations.find((item:{id:string})=>item.id==='s4');expect(moved.x).toBe(station.x);expect(moved.y).toBe(station.y);expect(moved.labelOffsetX).toBeCloseTo(Math.hypot(station.labelOffsetX+30,station.labelOffsetY+20));expect(moved.labelOffsetY).toBe(0);expect(moved.labelRotation).toBe(45)
   })
-  it('updates a dragged label preview immediately when it enters the top sector',()=>{
+  it('keeps dragged label preview local to the canvas instead of replacing App history',()=>{
     const project=structuredClone(demoProject),station=project.stations.find(item=>item.id==='s4')!,onPreview=vi.fn(),onDragCommit=vi.fn()
     const {container}=render(<NetworkCanvas {...baseProps} project={project} onPreview={onPreview} onDragCommit={onDragCommit}/>),svg=container.querySelector('svg')!
     vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
     const label=container.querySelector(`[data-label-anchor-x="${station.x+station.labelOffsetX}"]`)!;fireEvent.pointerDown(label,{pointerId:15,clientX:station.x+station.labelOffsetX,clientY:station.y+station.labelOffsetY,bubbles:true});fireEvent.pointerMove(svg,{pointerId:15,clientX:station.x+5,clientY:station.y-100,bubbles:true})
-    const latest=onPreview.mock.calls.at(-1)?.[0] as typeof project,previewStation=latest.stations.find(item=>item.id===station.id)!,previewLabel=container.querySelector(`[data-label-anchor-x="${station.x}"]`)
-    expect(previewStation.labelOffsetX).toBe(0);expect(previewStation.labelOffsetY).toBeCloseTo(-Math.hypot(5,100));expect(previewLabel).toHaveAttribute('data-label-horizontal-anchor','middle');expect(previewLabel).toHaveAttribute('data-label-vertical-anchor','above')
+    const previewLabel=container.querySelector(`[data-label-anchor-x="${station.x}"]`)
+    expect(onPreview).not.toHaveBeenCalled();expect(previewLabel).toHaveAttribute('data-label-horizontal-anchor','middle');expect(previewLabel).toHaveAttribute('data-label-vertical-anchor','above')
     fireEvent.pointerUp(svg,{pointerId:15,clientX:station.x+5,clientY:station.y-100,bubbles:true});expect(onDragCommit).toHaveBeenCalledTimes(1)
   })
   it('selects and freely drags one Line-owned badge without moving its siblings',()=>{

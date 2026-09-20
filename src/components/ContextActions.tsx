@@ -8,7 +8,7 @@ export function ContextActions({ project, selection, onExtend, onInsertStation, 
   onStructureChange: (value: StructureType) => void; onSetStructureAtPoint?: (value: StructureType) => void; onWaypointStructureChange?: (value: WaypointStructureChange) => void; onStructureNodeChange?: (value: StructureType) => void; onDelete: () => void
 }) {
   if (!selection) return null
-  const title = selection.type === 'station' ? project.stations.find(item => item.id === selection.id)?.name ?? '站点' : selection.type === 'segment' ? '线路段' : selection.type === 'waypoint' ? '控制点' : selection.type === 'structureNode' ? '样式点' : selection.type === 'line' ? getLineDisplayName(project, selection.id) || '线路' : '底图'
+  const title = selection.type === 'station' ? project.stations.find(item => item.id === selection.id)?.name ?? '站点' : selection.type === 'segment' ? '线路段' : selection.type === 'waypoint' ? '控制点' : selection.type === 'structureNode' ? '样式点' : selection.type === 'line' ? getLineDisplayName(project, selection.id) || '线路' : selection.type === 'lineLabel' ? '线路标签' : '底图'
   const segment = selection.type === 'segment' ? project.geometry.segments.find(item => item.id === selection.id) : null
   if (segment) {
     const interval = getSegmentStyleIntervalAtProgress(project, segment, selection.type === 'segment' ? selection.progress ?? .5 : .5)

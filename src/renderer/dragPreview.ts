@@ -157,8 +157,35 @@ export function getDragLineLabelOverlay(project: ActualRouteProject, target: Dra
 }
 
 
+export interface DragMapElementOverlay {
+  elementIds: Set<string>
+}
+
+export function getDragMapElementOverlay(target: DragPreviewTarget | null): DragMapElementOverlay {
+  const elementIds = new Set<string>()
+  if (target?.kind === 'draggingMapElement' && target.id) elementIds.add(target.id)
+  return { elementIds }
+}
+
+export interface DragVectorBasemapOverlay {
+  kind: 'road' | 'basemap' | null
+  objectIds: Set<string>
+}
+
+export function getDragVectorBasemapOverlay(target: DragPreviewTarget | null): DragVectorBasemapOverlay {
+  const objectIds = new Set<string>()
+  if (!target) return { kind: null, objectIds }
+  if (target.kind === 'draggingRoadPoint' && target.ownerRoadId) {
+    objectIds.add(target.ownerRoadId)
+    return { kind: 'road', objectIds }
+  }
+  if ((target.kind === 'draggingBasemapPoint' || target.kind === 'draggingBasemapPath') && target.ownerPathId) {
+    objectIds.add(target.ownerPathId)
+    return { kind: 'basemap', objectIds }
+  }
+  return { kind: null, objectIds }
+}
+
 export function dragTouchesVectorBasemap(target: DragPreviewTarget | null): boolean {
-  return target?.kind === 'draggingBasemapPoint'
-    || target?.kind === 'draggingBasemapPath'
-    || target?.kind === 'draggingRoadPoint'
+  return getDragVectorBasemapOverlay(target).kind !== null
 }

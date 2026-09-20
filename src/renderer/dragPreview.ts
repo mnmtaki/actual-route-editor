@@ -120,3 +120,23 @@ export function getDragAffectedLineIds(project: ActualRouteProject, target: Drag
   }
   return ids
 }
+
+
+export interface DragStationOverlay {
+  stationIds: Set<string>
+  markers: boolean
+  labels: boolean
+}
+
+export function getDragStationOverlay(_project: ActualRouteProject, target: DragPreviewTarget | null): DragStationOverlay {
+  const stationIds = new Set<string>()
+  if (!target?.id || (target.kind !== 'draggingStation' && target.kind !== 'draggingLabel')) {
+    return { stationIds, markers: false, labels: false }
+  }
+  stationIds.add(target.id)
+  return {
+    stationIds,
+    markers: target.kind === 'draggingStation',
+    labels: true,
+  }
+}

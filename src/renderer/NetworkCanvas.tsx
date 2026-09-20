@@ -15,6 +15,7 @@ import { LineLegendLayer } from './LineLegend'
 import { LineBadgesLayer } from './LineBadges'
 import { VectorBasemapLayer } from './VectorBasemap'
 import { AarcFakeLinesLayer } from './AarcFakeLines'
+import { compileAarcLineArtworkRuns } from './lineArtworkRuns'
 import { isFakeLine } from '../data/fakeLines'
 import type { DrawingMode, LineDraftPoint } from '../data/basemapPaths'
 import { effectiveLineWidth, effectiveStationStyle, snapLabelOffset } from '../data/style'
@@ -426,10 +427,22 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
         return [<AarcFakeLinesLayer key={`fake-common-${rawLine.id}`} project={shown} part="common" sourceLineId={sourceId} />]
       }
       const line = lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate)
-      return active.segments.filter(segment => segment.lineId === rawLine.id).map(segment => {
+      const lineSegments = active.segments.filter(segment => segment.lineId === rawLine.id)
+      const hitPaths = lineSegments.map(segment => {
+        const path = getSegmentPath(shown, segment)
+        return <path key={`hit:${segment.id}`} d={path} className="segment-hit" onPointerDown={event => { if (drawing) return; event.stopPropagation(); const projected=projectPointToSvgPath(event.currentTarget,pointerToWorld(event.clientX,event.clientY)), progress=findSegmentProgressForPoint(shown,segment,projected); onSelect({ type: 'segment', id: segment.id, progress }); onSegmentPoint(segment.id, projected) }} />
+      })
+      if (rawLine.source?.format === 'aarc') {
+        const runs = compileAarcLineArtworkRuns(shown, line, lineSegments)
+        return [<g key={rawLine.id} data-aarc-continuous-line={rawLine.id}>
+          {runs.map(run => <SegmentArtwork key={run.id} segment={run.segment} line={line} path={run.path} lineWidth={effectiveLineWidth(line, shown.settings)} renderLegacyStructure={false} style={resolveLineStyle(shown,line,run.segment)}/>)}
+          {hitPaths}
+        </g>]
+      }
+      return lineSegments.map(segment => {
         const path = getSegmentPath(shown, segment)
         const intervals = getSegmentStyleIntervals(shown, segment)
-        return <g key={segment.id}>{intervals.map((interval,index) => { const spans=getSegmentSubpathSpans(shown,segment,interval.start,interval.end); if(!spans.length)return null; const intervalPath=pathSpansToSvgPath(spans), intervalSegment={...segment,structureType:interval.structureType,lineStyleId:interval.lineStyleId}; return <SegmentArtwork key={`${segment.id}:${index}`} segment={intervalSegment} line={line} path={intervalPath} lineWidth={effectiveLineWidth(line, shown.settings)} renderLegacyStructure={false} style={resolveLineStyle(shown,line,interval.lineStyleId===undefined?undefined:intervalSegment)}/> })}<path d={path} className="segment-hit" onPointerDown={event => { if (drawing) return; event.stopPropagation(); const projected=projectPointToSvgPath(event.currentTarget,pointerToWorld(event.clientX,event.clientY)), progress=findSegmentProgressForPoint(shown,segment,projected); onSelect({ type: 'segment', id: segment.id, progress }); onSegmentPoint(segment.id, projected) }} /></g>
+        return <g key={segment.id}>{intervals.map((interval,index) => { const spans=getSegmentSubpathSpans(shown,segment,interval.start,interval.end); if(!spans.length)return null; const intervalPath=pathSpansToSvgPath(spans), intervalSegment={...segment,structureType:interval.structureType,lineStyleId:interval.lineStyleId}; return <SegmentArtwork key={`${segment.id}:${index}`} segment={intervalSegment} line={line} path={intervalPath} lineWidth={effectiveLineWidth(line, shown.settings)} renderLegacyStructure={false} style={resolveLineStyle(shown,line,interval.lineStyleId===undefined?undefined:intervalSegment)}/> })}{hitPaths.find(item=>item.key===`hit:${segment.id}`)}</g>
       })
     })}</g>
     <g data-layer="structure-runs">{elevatedRuns.map(run => { const rawLine = shown.lines.find(item => item.id === run.lineId); const line = rawLine ? lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate) : undefined; return line ? <StructureRunArtwork key={run.id} run={run} line={line} lineWidth={effectiveLineWidth(line, shown.settings)} style={getLineStyle(shown, 'elevated')} /> : null })}</g>

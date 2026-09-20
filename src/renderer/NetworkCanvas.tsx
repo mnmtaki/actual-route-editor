@@ -309,9 +309,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     } else if (current.kind === 'draggingLabel') {
       const station = next.stations.find(item => item.id === current.id)
       if (station) { const offset=snapLabelOffset(current.origin.x + dx, current.origin.y + dy); station.labelOffsetX = offset.x; station.labelOffsetY = offset.y }
-    } else if (current.kind === 'draggingLineBadge') {
+    } else if (current.kind === 'draggingLineLabel') {
       const badge = next.lines.find(line => line.id === current.ownerLineId)?.lineBadges?.find(item => item.id === current.id)
       if (badge) { badge.x = current.origin.x + dx; badge.y = current.origin.y + dy }
+      const tag = next.textTags?.find(item => item.id === current.id)
+      if (tag) { tag.x = current.origin.x + dx; tag.y = current.origin.y + dy }
     } else if (current.kind === 'draggingMapElement') {
       const element = next.mapElements?.find(item => item.id === current.id)
       if (element) { element.x = current.origin.x + dx; element.y = current.origin.y + dy }

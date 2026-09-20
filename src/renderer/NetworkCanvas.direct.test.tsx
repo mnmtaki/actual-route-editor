@@ -88,8 +88,32 @@ describe('direct manipulation gestures', () => {
     const background = container.querySelector('.canvas-bg')!
     fireEvent.pointerDown(background, { pointerId: 8, clientX: 100, clientY: 100, bubbles: true })
     fireEvent.pointerMove(svg, { pointerId: 8, clientX: 140, clientY: 120, bubbles: true })
+    expect(setView).not.toHaveBeenCalled()
+    expect(svg.getAttribute('viewBox')).not.toBe('0 0 920 680')
+    fireEvent.pointerUp(svg, { pointerId: 8, clientX: 140, clientY: 120, bubbles: true })
     expect(setView).toHaveBeenCalledTimes(1)
     expect(onDragCommit).not.toHaveBeenCalled()
+  })
+
+  it('zooms the live SVG viewport without re-rendering React on every wheel event', () => {
+    vi.useFakeTimers()
+    try {
+      const setView = vi.fn()
+      const { container } = render(<NetworkCanvas {...baseProps} project={demoProject} setView={setView} />)
+      const svg = container.querySelector('svg')!
+      Object.defineProperty(svg, 'clientWidth', { configurable: true, value: 920 })
+      vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+      fireEvent.wheel(svg, { clientX: 460, clientY: 340, deltaY: -100, bubbles: true })
+      const live = svg.getAttribute('viewBox')
+      expect(live).not.toBe('0 0 920 680')
+      expect(setView).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(89)
+      expect(setView).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(1)
+      expect(setView).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('cancels an object drag and switches safely to pinch when a second pointer arrives', () => {

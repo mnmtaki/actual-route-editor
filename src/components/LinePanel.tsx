@@ -8,7 +8,8 @@ import { getPassengerStationCount, getPassengerStationCountForLine } from '../da
 import { isFakeLine } from '../data/fakeLines'
 import { materializeAarcFakeLineEntries } from '../data/aarcFakeLineEntries'
 import type { OpeningPhasePath } from '../data/openingPhases'
-import { LineDetailPanel } from './LineDetailPanel'
+import { LineBranchPanel, LineDetailPanel } from './LineDetailPanel'
+import { setCurrentLineOwnColor } from '../data/lineColorHistory'
 
 type LineSelectionModifiers = { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }
 
@@ -78,6 +79,7 @@ export function LinePanel({
   const touchLongPress = useRef<{ pointerId: number; lineId: string; x: number; y: number; triggered: boolean } | null>(null)
   const [marquee, setMarquee] = useState<MarqueeState | null>(null)
   const [detailLineId, setDetailLineId] = useState<string | null>(null)
+  const [detailMode, setDetailMode] = useState<'settings'|'branches'>('settings')
   const clearTouchLongPress = () => {
     if (touchLongPressTimer.current !== null) window.clearTimeout(touchLongPressTimer.current)
     touchLongPressTimer.current = null
@@ -196,7 +198,6 @@ export function LinePanel({
     if (suppressClick.current) { suppressClick.current = false; return }
     const modifiers={ ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }
     onSelect(lineId, modifiers)
-    if (!event.ctrlKey && !event.metaKey && !event.shiftKey) setDetailLineId(lineId)
   }
   useEffect(() => {
     const cancel = () => {
@@ -215,7 +216,7 @@ export function LinePanel({
   }, [])
 
   return <aside className="left-panel panel" aria-label="线路结构">
-    {detailLineId && project.lines.some(line=>line.id===detailLineId) ? <LineDetailPanel project={project} lineId={detailLineId} onBack={()=>setDetailLineId(null)} onChange={onChange} onAddBranchLine={onAddBranchLine} onAddLineBadge={onAddLineBadge} onDelete={()=>{onDeleteLine?.(detailLineId);setDetailLineId(null)}} onPhasePreview={onPhasePreview} onStartPhaseDrawing={onStartPhaseDrawing}/> : <>
+    {detailLineId && project.lines.some(line=>line.id===detailLineId) ? (detailMode==='branches' ? <LineBranchPanel project={project} lineId={detailLineId} onBack={()=>setDetailLineId(null)} onChange={onChange} onAddBranchLine={onAddBranchLine}/> : <LineDetailPanel project={project} lineId={detailLineId} onBack={()=>setDetailLineId(null)} onChange={onChange} onAddBranchLine={onAddBranchLine} onAddLineBadge={onAddLineBadge} onDelete={()=>{onDeleteLine?.(detailLineId);setDetailLineId(null)}} onPhasePreview={onPhasePreview} onStartPhaseDrawing={onStartPhaseDrawing}/>) : <>
     <div className="panel-heading"><div><h2>线路</h2><span className="panel-subtitle">线路与图层</span></div><div className="panel-heading-actions"><button className="icon-button" onClick={onAddLine} aria-label="新增线路">＋</button></div></div>
     <div ref={listRef} className="line-list" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={finishPointer} onPointerCancel={event => { endTouchLongPress(event); finishPointer(event, true) }} onContextMenu={event => { if (marqueeRef.current) event.preventDefault() }}>
       {displayLines.map(({ line, depth }) => {
@@ -224,7 +225,10 @@ export function LinePanel({
         const fake = isFakeLine(line)
         const displayName = getLineDisplayName(project, line), color = getEffectiveLineColor(project, line), hasChildren = childrenByParent.has(line.id), collapsed = collapsedParentIds.has(line.id)
         return <div key={line.id} ref={node => { if (node) rowRefs.current.set(line.id, node); else rowRefs.current.delete(line.id) }} data-line-id={line.id} data-fake-line={fake ? 'true' : undefined} className={`line-row ${isSelected ? 'selected' : ''} ${isActive ? 'active' : ''} ${isSelected && !isActive ? 'secondary-selected' : ''}`}>
-          <button type="button" className="line-row-main" onClick={event => onClickMain(event, line.id)}>{hasChildren && <span className="line-tree-toggle" role="button" tabIndex={0} aria-label={collapsed ? '展开支线' : '折叠支线'} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setCollapsedParentIds(previous => { const next = new Set(previous); if (next.has(line.id)) next.delete(line.id); else next.add(line.id); return next }) }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); setCollapsedParentIds(previous => { const next = new Set(previous); if (next.has(line.id)) next.delete(line.id); else next.add(line.id); return next }) } }}>{collapsed ? '▸' : '▾'}</span>}<span aria-hidden="true" className="line-color" style={{ background: color }} /><span className="line-name">{depth ? "└ " : ""}{displayName}{fake && <small className="line-fake-badge">伪线</small>}</span><span className="line-row-chevron" aria-hidden="true">›</span></button>
+          <input className="line-list-color" aria-label={`${displayName}线路颜色`} title={line.parentLineId?'支线颜色继承主线':'线路颜色'} type="color" value={color} disabled={Boolean(line.parentLineId)} onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} onChange={event=>{const next=structuredClone(project);setCurrentLineOwnColor(next.lines.find(item=>item.id===line.id)!,event.target.value);onChange(next)}}/>
+          <button type="button" className="line-row-main" onClick={event => onClickMain(event, line.id)}>{hasChildren && <span className="line-tree-toggle" role="button" tabIndex={0} aria-label={collapsed ? '展开支线' : '折叠支线'} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setCollapsedParentIds(previous => { const next = new Set(previous); if (next.has(line.id)) next.delete(line.id); else next.add(line.id); return next }) }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); setCollapsedParentIds(previous => { const next = new Set(previous); if (next.has(line.id)) next.delete(line.id); else next.add(line.id); return next }) } }}>{collapsed ? '▸' : '▾'}</span>}<span className="line-name">{depth ? "└ " : ""}{displayName}{fake&&<small className="line-fake-badge">伪线</small>}</span></button>
+          <button type="button" className="line-row-action" aria-label={`${displayName}支线设置`} onPointerDown={event=>event.stopPropagation()} onClick={()=>{onSelect(line.id);setDetailMode('branches');setDetailLineId(line.id)}}>支线</button>
+          <button type="button" className="line-row-action" aria-label={`${displayName}线路设置`} onPointerDown={event=>event.stopPropagation()} onClick={()=>{onSelect(line.id);setDetailMode('settings');setDetailLineId(line.id)}}>设置</button>
         </div>
       })}
       {marquee?.active && <div className="line-selection-marquee" data-testid="line-selection-marquee" style={{ left: `${Math.min(marquee.startX, marquee.currentX) - (listRef.current?.getBoundingClientRect().left ?? 0) + (listRef.current?.scrollLeft ?? 0)}px`, top: `${Math.min(marquee.startY, marquee.currentY) - (listRef.current?.getBoundingClientRect().top ?? 0) + (listRef.current?.scrollTop ?? 0)}px`, width: `${Math.abs(marquee.currentX - marquee.startX)}px`, height: `${Math.abs(marquee.currentY - marquee.startY)}px` }} />}

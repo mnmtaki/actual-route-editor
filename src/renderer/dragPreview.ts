@@ -101,3 +101,22 @@ export function cloneProjectForDrag(project: ActualRouteProject, target: DragPre
 
   return next
 }
+
+
+export function getDragAffectedLineIds(project: ActualRouteProject, target: DragPreviewTarget | null): Set<string> {
+  const ids = new Set<string>()
+  if (!target) return ids
+  if (target.kind === 'draggingStation' && target.id) {
+    for (const relation of project.stationLineRelations) if (relation.stationId === target.id) ids.add(relation.lineId)
+    for (const line of project.lines) if (line.stationSequence.includes(target.id)) ids.add(line.id)
+    for (const segment of project.geometry.segments) {
+      if (segment.fromStationId === target.id || segment.toStationId === target.id) ids.add(segment.lineId)
+    }
+    return ids
+  }
+  if ((target.kind === 'draggingWaypoint' || target.kind === 'draggingStructureNode') && target.segmentId) {
+    const lineId = project.geometry.segments.find(segment => segment.id === target.segmentId)?.lineId
+    if (lineId) ids.add(lineId)
+  }
+  return ids
+}

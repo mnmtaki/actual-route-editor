@@ -71,7 +71,6 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
   const shown = preview ?? project
-  const historicalIdentityProject = useMemo(() => projectWithLineColorsAt(projectWithLineParentsAt(shown, shown.timeline.currentDate), shown.timeline.currentDate), [shown])
   const staticHistoricalIdentityProject = useMemo(() => projectWithLineColorsAt(projectWithLineParentsAt(project, project.timeline.currentDate), project.timeline.currentDate), [project])
   const activeLineLabelProject = useMemo(() => {
     if (!preview || dragLineLabelOverlay.source === null || dragLineLabelOverlay.labelIds.size === 0) return null
@@ -86,7 +85,13 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       }),
     }
   }, [dragLineLabelOverlay, preview, shown, staticHistoricalIdentityProject])
+  const activeDragKind = preview ? gesture.current.kind : 'idle'
   const vectorBasemapProject = preview && dragVectorBasemap ? shown : project
+  const mapElementsProject = preview && activeDragKind === 'draggingMapElement' ? shown : project
+  const legendProject = useMemo(() => preview && activeDragKind === 'draggingLineLegend'
+    ? { ...staticHistoricalIdentityProject, lineLegend: shown.lineLegend }
+    : staticHistoricalIdentityProject, [activeDragKind, preview, shown.lineLegend, staticHistoricalIdentityProject])
+  const backgroundProject = preview && activeDragKind === 'draggingBackground' ? shown : project
   const touchHitPixels = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 699px)').matches ? 44 : 28
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
   const structureHitRadius = Math.max(22, touchHitPixels * view.width / canvasWidth)
@@ -468,6 +473,30 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }
   }, [drawing, onSelect, startObjectDrag])
 
+  const handleMapElementPointerDown = useCallback((event: React.PointerEvent<SVGGElement>, element: NonNullable<ActualRouteProject['mapElements']>[number]) => {
+    if (drawing) return
+    if (startObjectDrag('draggingMapElement', event, { x: element.x, y: element.y }, element.id)) {
+      onSelect({ type: 'mapElement', id: element.id })
+    }
+  }, [drawing, onSelect, startObjectDrag])
+
+  const handleLegendPointerDown = useCallback((event: React.PointerEvent<SVGGElement>, legend: NonNullable<ActualRouteProject['lineLegend']>) => {
+    if (drawing) return
+    if (legend.locked) {
+      onSelect({ type: 'lineLegend', id: legend.id })
+      return
+    }
+    if (startObjectDrag('draggingLineLegend', event, { x: legend.x, y: legend.y }, legend.id)) {
+      onSelect({ type: 'lineLegend', id: legend.id })
+    }
+  }, [drawing, onSelect, startObjectDrag])
+
+  const handleBackgroundPointerDown = useCallback((event: React.PointerEvent<SVGImageElement>) => {
+    if (drawing || !backgroundProject.background || backgroundProject.background.locked) return
+    onSelect({ type: 'background' })
+    startObjectDrag('draggingBackground', event, { x: backgroundProject.background.x, y: backgroundProject.background.y })
+  }, [backgroundProject.background, drawing, onSelect, startObjectDrag])
+
   const handleNativeLineLabelPointerDown = useCallback((event: React.PointerEvent<SVGGElement>, line: ActualRouteProject['lines'][number], badge: NonNullable<ActualRouteProject['lines'][number]['lineBadges']>[number]) => {
     if (drawing) return
     if (startObjectDrag('draggingLineLabel', event, { x: badge.x, y: badge.y }, badge.id, undefined, line.id)) {
@@ -593,7 +622,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }}>
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>
     <g data-layer="canvas-background"><rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>
-    {shown.background?.visible && <image data-layer="background-image" href={shown.background.dataUrl} x={shown.background.x} y={shown.background.y} width={shown.background.width} height={shown.background.height} opacity={shown.background.opacity} onPointerDown={event => { if (drawing) return; if (!shown.background?.locked) { onSelect({ type: 'background' }); startObjectDrag('draggingBackground', event, { x: shown.background!.x, y: shown.background!.y }) } }} />}
+    {backgroundProject.background?.visible && <image data-layer="background-image" href={backgroundProject.background.dataUrl} x={backgroundProject.background.x} y={backgroundProject.background.y} width={backgroundProject.background.width} height={backgroundProject.background.height} opacity={backgroundProject.background.opacity} onPointerDown={handleBackgroundPointerDown} />}
     <VectorBasemapLayer
       project={vectorBasemapProject}
       draft={roadDraft}
@@ -688,8 +717,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       includeTagIds={dragLineLabelOverlay.labelIds}
       overlay
     />}
-    <MapElementsLayer project={shown} selectedId={selection?.type === 'mapElement' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={(event, element) => { if (drawing) return; if (startObjectDrag('draggingMapElement', event, { x: element.x, y: element.y }, element.id)) onSelect({ type: 'mapElement', id: element.id }) }} />
-    <LineLegendLayer project={historicalIdentityProject} selectedId={selection?.type === 'lineLegend' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={(event, legend) => { if (drawing) return; if (legend.locked) { onSelect({ type: 'lineLegend', id: legend.id }); return } if (startObjectDrag('draggingLineLegend', event, { x: legend.x, y: legend.y }, legend.id)) onSelect({ type: 'lineLegend', id: legend.id }) }} />
+    <MapElementsLayer project={mapElementsProject} selectedId={selection?.type === 'mapElement' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={handleMapElementPointerDown} />
+    <LineLegendLayer project={legendProject} selectedId={selection?.type === 'lineLegend' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={handleLegendPointerDown} />
     <g data-layer="waypoints" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (()=>{const segmentId=selection.type==='segment'?selection.id:selection.segmentId,segment=shown.geometry.segments.find(item=>item.id===segmentId);if(!segment)return null;const cornerIds=new Set(getSegmentRoundedCornerPlans(shown,segment).map(plan=>plan.waypointId));return segment.waypoints.map(waypoint=>{const isCorner=cornerIds.has(waypoint.id),selected=selection.type==='waypoint'&&selection.id===waypoint.id,selectWaypoint=(event:React.PointerEvent)=>{if(isSegmentGeometryLocked(shown,segmentId)){onSelect({type:'waypoint',id:waypoint.id,segmentId});onEditBlocked?.('线路已锁定');return}if(startObjectDrag('draggingWaypoint',event,{x:waypoint.x,y:waypoint.y},waypoint.id,segmentId))onSelect({type:'waypoint',id:waypoint.id,segmentId})};return <g key={waypoint.id} data-corner-handle={isCorner?'true':undefined} data-waypoint-id={waypoint.id} onPointerDown={selectWaypoint}><circle className="waypoint-hit" cx={waypoint.x} cy={waypoint.y} r={stationHitRadius} fill="transparent" pointerEvents="all"/><circle cx={waypoint.x} cy={waypoint.y} r={isCorner?7:8} className={`waypoint ${isCorner?'corner-waypoint':''} ${selected?'selected':''}`} pointerEvents="none"/></g>})})()}</g>
     <g data-layer="style-points" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (() => { const segmentId = selection.type === 'segment' ? selection.id : selection.segmentId; const segment = shown.geometry.segments.find(item=>item.id===segmentId); if (!segment) return null; return (segment.structureNodes ?? []).map(node => { const point = getStructureNodePoint(shown, segment, node); if (!point) return null; const selected = selection.type === 'structureNode' && selection.id === node.id, attached=Boolean(node.waypointId); return <g key={node.id} transform={`translate(${point.x} ${point.y})`} data-style-point-id={node.id} data-structure-node-id={node.id} data-attached-waypoint-id={node.waypointId ?? ''} onPointerDown={event => { event.stopPropagation(); if (attached) { onSelect({ type: 'structureNode', id: node.id, segmentId }); return }; if (isSegmentGeometryLocked(shown, segmentId)) { onSelect({ type: 'structureNode', id: node.id, segmentId }); onEditBlocked?.('线路已锁定'); return }; if (startObjectDrag('draggingStructureNode', event, point, node.id, segmentId)) onSelect({ type: 'structureNode', id: node.id, segmentId }) }}><circle r={attached?6:structureHitRadius} fill="transparent" pointerEvents="all" /><path d="M 0 -5 L 5 0 L 0 5 L -5 0 Z" fill={selected?'#fff4c9':'#fffdf9'} stroke={selected?'#b98700':'#353b38'} strokeWidth={selected?2:1.5} vectorEffect="non-scaling-stroke" pointerEvents="none" /></g> }) })()}</g>
     <g data-layer="station-actions" data-editor="true">{selection?.type === 'station' && !drawing && (() => { const station = shown.stations.find(item => item.id === selection.id); if (!station) return null; const handle = getStationHandleStyle(shown, station.id, shown.timeline.currentDate); return <g className="station-extend" transform={`translate(${handle.x} ${handle.y})`} onPointerDown={event => { event.stopPropagation(); onExtend(station.id) }}><circle className="station-extend-hit" r={Math.max(stationHitRadius, 18)} fill="transparent" pointerEvents="all" /><circle className="station-extend-button" r="8.5" fill="white" stroke={handle.color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" pointerEvents="none" /><path className="station-extend-plus" d="M -3.2 0 H 3.2 M 0 -3.2 V 3.2" stroke={handle.color} strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" pointerEvents="none" /></g> })()}</g>

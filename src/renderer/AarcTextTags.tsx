@@ -342,17 +342,19 @@ function PlainTag({ tag, project }: { tag: AarcTextTag; project: ActualRouteProj
   </>
 }
 
-function Tag({ tag, project }: { tag: AarcTextTag; project: ActualRouteProject }) {
+function Tag({ tag, project, selectedId, hitRadius = 22, onLineLabelPointerDown }: { tag: AarcTextTag; project: ActualRouteProject; selectedId?: string; hitRadius?: number; onLineLabelPointerDown?: (event: React.PointerEvent<SVGGElement>, tag: AarcTextTag, lineId: string) => void }) {
   const target = sourceTarget(project, tag)
   const mode: TagMode = target?.mode ?? 'plain'
   const opacity = tag.opacity || 1, rotation = (tag.rotation ?? 0) * 180 / Math.PI
   const lineId = boundLineId(project, tag)
-  return <g data-aarc-text-tag-id={tag.id} data-aarc-text-tag-kind={tag.kind} data-aarc-text-tag-render-mode={mode} data-text-tag-id={tag.id} data-line-id={lineId ?? ''} opacity={opacity} transform={`rotate(${rotation} ${tag.x} ${tag.y})`}>
+  const isLineLabel = mode === 'line' && Boolean(lineId)
+  return <g className={isLineLabel ? `map-element line-label aarc-line-label ${selectedId === tag.id ? 'selected' : ''}` : undefined} data-line-label-id={isLineLabel ? tag.id : undefined} data-line-label-source={isLineLabel ? 'aarc' : undefined} data-aarc-text-tag-id={tag.id} data-aarc-text-tag-kind={tag.kind} data-aarc-text-tag-render-mode={mode} data-text-tag-id={tag.id} data-line-id={lineId ?? ''} opacity={opacity} transform={`rotate(${rotation} ${tag.x} ${tag.y})`} onPointerDown={isLineLabel && lineId ? event => onLineLabelPointerDown?.(event, tag, lineId) : undefined}>
     {mode === 'line' && target ? <CommonLineTag tag={tag} project={project} target={target} /> : mode === 'terrain' && target ? <TerrainTag tag={tag} project={project} target={target} /> : <PlainTag tag={tag} project={project} />}
+    {isLineLabel && onLineLabelPointerDown && <rect data-editor="true" x={tag.x - hitRadius} y={tag.y - hitRadius} width={hitRadius * 2} height={hitRadius * 2} fill="transparent" pointerEvents="all" />}
   </g>
 }
 
-export const AarcTextTagsLayer = memo(function AarcTextTagsLayer({ project, presentation = false, visibleLineIds, mode = 'notSunken' }: { project: ActualRouteProject; presentation?: boolean; visibleLineIds?: Set<string>; mode?: LayerMode }) {
+export const AarcTextTagsLayer = memo(function AarcTextTagsLayer({ project, presentation = false, visibleLineIds, mode = 'notSunken', selectedId, hitRadius = 22, onLineLabelPointerDown }: { project: ActualRouteProject; presentation?: boolean; visibleLineIds?: Set<string>; mode?: LayerMode; selectedId?: string; hitRadius?: number; onLineLabelPointerDown?: (event: React.PointerEvent<SVGGElement>, tag: AarcTextTag, lineId: string) => void }) {
   const tags = (project.textTags ?? [])
     .map((tag, index) => ({ tag, index, boundLineId: boundLineId(project, tag) }))
     .filter(({ tag, boundLineId: lineId }) => (mode === 'sunken' ? tag.sunken === true : tag.sunken !== true) && (!presentation || !lineId || !visibleLineIds || visibleLineIds.has(lineId)))

@@ -468,7 +468,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if ((drawing && !drawingThisBasemap) || path.locked) return
     event.stopPropagation()
     const point = path.points.find(item => item.id === pointId)
-    if (point && startObjectDrag('draggingBasemapPoint', event, point, pointId, undefined, undefined, undefined, path.id)) {
+    if (point && startObjectDrag('draggingBasemapPoint', event, point, pointId, undefined, undefined, path.id)) {
       onSelect({ type: 'basemapPath', id: path.id })
     }
   }, [drawing, onSelect, startObjectDrag])

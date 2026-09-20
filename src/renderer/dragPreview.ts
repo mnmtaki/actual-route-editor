@@ -140,3 +140,18 @@ export function getDragStationOverlay(_project: ActualRouteProject, target: Drag
     labels: true,
   }
 }
+
+
+export interface DragLineLabelOverlay {
+  labelIds: Set<string>
+  source: 'native' | 'aarc' | null
+  ownerLineId?: string
+}
+
+export function getDragLineLabelOverlay(project: ActualRouteProject, target: DragPreviewTarget | null): DragLineLabelOverlay {
+  const labelIds = new Set<string>()
+  if (!target?.id || target.kind !== 'draggingLineLabel') return { labelIds, source: null }
+  labelIds.add(target.id)
+  const source = project.textTags?.some(tag => tag.id === target.id) ? 'aarc' as const : 'native' as const
+  return { labelIds, source, ownerLineId: target.ownerLineId }
+}

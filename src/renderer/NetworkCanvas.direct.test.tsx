@@ -149,7 +149,7 @@ describe('direct manipulation gestures', () => {
     const svg=container.querySelector('svg')!;vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
     const badge=container.querySelector('[data-line-badge-id="badge-a"]')!
     fireEvent.pointerDown(badge,{pointerId:14,clientX:200,clientY:150,bubbles:true});fireEvent.pointerMove(svg,{pointerId:14,clientX:275,clientY:185,bubbles:true});fireEvent.pointerUp(svg,{pointerId:14,clientX:275,clientY:185,bubbles:true})
-    expect(onSelect).toHaveBeenCalledWith({type:'lineBadge',id:'badge-a',lineId:'line-a'});expect(onDragCommit).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith({type:'lineLabel',id:'badge-a',lineId:'line-a',source:'native'});expect(onDragCommit).toHaveBeenCalledTimes(1)
     const nextLine=onDragCommit.mock.calls[0][1].lines.find((item:{id:string})=>item.id==='line-a');expect(nextLine.lineBadges.find((item:{id:string})=>item.id==='badge-a')).toMatchObject({x:275,y:185});expect(nextLine.lineBadges.find((item:{id:string})=>item.id==='badge-b')).toMatchObject({x:350,y:250})
   })
   it('drags an independent Structure Node along its Segment with pointer capture', () => {

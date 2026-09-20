@@ -1,8 +1,9 @@
+import { memo } from 'react'
 import type { LineLegend, ActualRouteProject } from '../data/model'
 import { getLineLegendLayout } from '../data/lineLegend'
 import { getEffectiveLineColor } from '../data/lineIdentity'
 
-export function LineLegendLayer({ project, presentation = false, selectedId, hitRadius = 22, onPointerDown }: {
+export const LineLegendLayer = memo(function LineLegendLayer({ project, presentation = false, selectedId, hitRadius = 22, onPointerDown }: {
   project: ActualRouteProject
   presentation?: boolean
   selectedId?: string
@@ -41,4 +42,4 @@ export function LineLegendLayer({ project, presentation = false, selectedId, hit
     })}
     {!presentation && selectedId === legend.id && <rect data-editor="true" className="map-element-selection line-legend-selection" x="0" y="0" width={layout.width} height={layout.height} rx="4" />}
   </g>
-}
+})

@@ -362,5 +362,5 @@ export const AarcTextTagsLayer = memo(function AarcTextTagsLayer({ project, pres
     .map(({ tag }) => tag)
   if (!tags.length) return null
   const layerName = mode === 'sunken' ? 'aarc-text-tags-sunken' : 'aarc-text-tags'
-  return <g data-layer={layerName} data-aarc-text-tag-layer={mode} data-presentation-layer={presentation ? layerName : undefined} pointerEvents="none">{tags.map(tag => <Tag key={tag.id} tag={tag} project={project} />)}</g>
+  return <g data-layer={layerName} data-aarc-text-tag-layer={mode} data-presentation-layer={presentation ? layerName : undefined} pointerEvents={onLineLabelPointerDown ? 'visiblePainted' : 'none'}>{tags.map(tag => <Tag key={tag.id} tag={tag} project={project} selectedId={selectedId} hitRadius={hitRadius} onLineLabelPointerDown={onLineLabelPointerDown} />)}</g>
 })

@@ -15,6 +15,7 @@ import { LineLegendLayer } from './LineLegend'
 import { LineBadgesLayer } from './LineBadges'
 import { VectorBasemapLayer } from './VectorBasemap'
 import { AarcFakeLinesLayer } from './AarcFakeLines'
+import { AarcTerminalExtensionsLayer } from './AarcTerminalExtensions'
 import { compileAarcLineArtworkRuns } from './lineArtworkRuns'
 import { isFakeLine } from '../data/fakeLines'
 import type { DrawingMode, LineDraftPoint } from '../data/basemapPaths'
@@ -437,6 +438,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       if (rawLine.source?.format === 'aarc') {
         const runs = compileAarcLineArtworkRuns(shown, line, lineSegments)
         return [<g key={rawLine.id} data-aarc-continuous-line={rawLine.id}>
+          <AarcTerminalExtensionsLayer project={shown} line={line} />
           {runs.map(run => <SegmentArtwork key={run.id} segment={run.segment} line={line} path={run.path} lineWidth={effectiveLineWidth(line, shown.settings)} renderLegacyStructure={false} style={resolveLineStyle(shown,line,run.segment)}/>)}
           {hitPaths}
         </g>]

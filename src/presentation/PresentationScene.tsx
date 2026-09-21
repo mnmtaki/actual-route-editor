@@ -19,7 +19,9 @@ import { LineLegendLayer } from '../renderer/LineLegend'
 import { LineBadgesLayer } from '../renderer/LineBadges'
 import { VectorBasemapLayer } from '../renderer/VectorBasemap'
 import { AarcFakeLinesLayer } from '../renderer/AarcFakeLines'
+import { AarcTerminalExtensionsLayer } from '../renderer/AarcTerminalExtensions'
 import { isFakeLine } from '../data/fakeLines'
+import { isLineOperationalAt } from '../data/operationEvents'
 import { effectiveLineWidth, effectiveStationStyle } from '../data/style'
 import { getLineStyle, resolveLineStyle } from '../data/lineStyles'
 import { getStationNameAt } from '../data/stationNameHistory'
@@ -57,7 +59,10 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
       if (renderLine.visible && isFakeLine(renderLine) && renderLine.source?.format === 'aarc' && Number.isFinite(sourceId)) {
         return [<AarcFakeLinesLayer key={`presentation-fake-common-${renderLine.id}`} project={project} part="common" sourceLineId={sourceId} />]
       }
-      return segmentArtwork.filter(item => item.lineId === renderLine.id).map(({ segment, historicalSegment, line }) => {
+      const terminal = renderLine.source?.format === 'aarc' && renderLine.visible && isLineOperationalAt(renderLine, state.historyDate)
+        ? <AarcTerminalExtensionsLayer key={`presentation-terminal-${renderLine.id}`} project={historicalIdentityProject} line={lineWithEffectiveColor(historicalIdentityProject, renderLine, state.historyDate)} />
+        : null
+      const bodies = segmentArtwork.filter(item => item.lineId === renderLine.id).map(({ segment, historicalSegment, line }) => {
         const segmentState = state.segmentStates[segment.id]
         if (!line?.visible || !segmentState || segmentState.revealProgress <= 0 || segmentState.opacity <= 0) return null
         return <g key={segment.id}>{getSegmentStyleIntervals(historicalProject, historicalSegment).map((interval,index)=>{
@@ -73,6 +78,7 @@ export const PresentationScene = memo(function PresentationScene({ project, sequ
           return <SegmentArtwork key={`${segment.id}:${index}`} segment={intervalSegment} line={line} path={pathSpansToSvgPath(spans)} lineWidth={effectiveLineWidth(line, project.settings)} revealProgress={revealProgress} revealFrom={segmentState.revealFrom} opacity={segmentState.opacity} renderLegacyStructure={false} style={resolveLineStyle(project,line,interval.lineStyleId===undefined?undefined:intervalSegment)}/>
         })}</g>
       })
+      return terminal ? [terminal, ...bodies] : bodies
     })}</g>
     <g data-presentation-layer="structure-runs">{elevatedRuns.map(run => { const line = lineMap.get(run.lineId); return line ? <StructureRunArtwork key={run.id} run={run} line={lineWithEffectiveColor(project, line, state.historyDate)} lineWidth={effectiveLineWidth(line, project.settings)} style={getLineStyle(project, 'elevated')} /> : null })}</g>
     <g data-presentation-layer="stations">{project.stations.filter(station => isCompoundStationCanonical(project, station)).map(station => {

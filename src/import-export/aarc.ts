@@ -54,7 +54,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC å
     pointMap.set(id, point)
   }
   const rawLines = source.lines as AarcLine[]
-  const realLines = rawLines.filter(line => isRealTransitLine(line, rawLines, pointMap))
+  const realLines = rawLines.filter(isRealTransitLine)
   const realLineById = new Map(realLines.map(line => [finiteId(line.id), line]).filter((entry): entry is [number, AarcLine] => entry[0] !== null))
   const sourceLineRecords = rawLines as unknown as Array<Record<string, unknown>>
   const sourceConfig = source.config as Record<string, unknown>
@@ -371,22 +371,10 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC å
   return { project: materializeAarcFakeLineEntries(project), summary }
 }
 
-function isRealTransitLine(line: AarcLine, allLines: AarcLine[] = [], points = new Map<number, AarcPoint>()) {
-  if (!line || line.isFake === true || Number(line.type ?? 0) === 1 || !Array.isArray(line.pts) || line.pts.length < 2) return false
-  if (text(line.name)) return true
-  // Unnamed branches are valid AARC service lines and inherit their family
-  // identity from the parent.
-  const parentId = finiteId(line.parent)
-  if (parentId !== null) {
-    const parent = allLines.find(candidate => finiteId(candidate?.id) === parentId)
-    if (parent && parent !== line && parent.isFake !== true && Number(parent.type ?? 0) !== 1 && Array.isArray(parent.pts) && parent.pts.length >= 2) return true
-  }
-  // AARC also permits an unnamed root transit line. Distinguish it from
-  // unnamed helper artwork by requiring at least one actual station point.
-  return line.pts.some(rawId => {
-    const pointId = finiteId(rawId)
-    return pointId !== null && points.get(pointId)?.sta === 1
-  })
+function isRealTransitLine(line: AarcLine) {
+  // AARC uses isFake as the explicit fake-line flag. For common lines,
+  // name, parentage and station count must not change that classification.
+  return Boolean(line && line.isFake !== true && Number(line.type ?? 0) === 0 && Array.isArray(line.pts) && line.pts.length >= 2)
 }
 function isAarcTerrainPath(line: AarcLine) {
   return Boolean(line && line.isFake !== true && Number(line.type) === 1 && Array.isArray(line.pts) && line.pts.length >= 2)

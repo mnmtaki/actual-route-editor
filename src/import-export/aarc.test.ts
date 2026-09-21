@@ -121,4 +121,28 @@ describe('AARC importer with the real 木阳 sample', () => {
     expect(project.geometry.segments.filter(segment => segment.lineId === line?.id)).toHaveLength(1)
   })
 
+  it('does not infer fake status from an unnamed common line having no stations', () => {
+    const raw = {
+      cvsSize: [1000, 1000],
+      config: {},
+      lines: [
+        { id: 1, name: '1号线', color: '#336699', type: 0, pts: [1, 2], width: 1 },
+        { id: 2, name: '', color: '#cc5500', type: 0, pts: [3, 4], width: 1 },
+        { id: 3, name: '伪线', color: '#999999', type: 0, isFake: true, pts: [5, 6], width: 1 },
+      ],
+      points: [
+        { id: 1, pos: [100, 100], dir: 0, sta: 1, name: '甲站', nameP: [0, -20] },
+        { id: 2, pos: [300, 100], dir: 0, sta: 1, name: '乙站', nameP: [0, -20] },
+        { id: 3, pos: [100, 300], dir: 0, sta: 0 },
+        { id: 4, pos: [300, 300], dir: 0, sta: 0 },
+        { id: 5, pos: [100, 500], dir: 0, sta: 1, name: '伪甲', nameP: [0, -20] },
+        { id: 6, pos: [300, 500], dir: 0, sta: 1, name: '伪乙', nameP: [0, -20] },
+      ],
+    }
+    const { project, summary } = convertAarcToActualRouteProject(raw, 'fake-flag.aarc')
+    expect(summary.realLineCount).toBe(2)
+    expect(project.lines.some(line => Number(line.source?.sourceLineId) === 2 && !line.isFake)).toBe(true)
+    expect(project.lines.some(line => Number(line.source?.sourceLineId) === 3 && !line.isFake)).toBe(false)
+  })
+
 })

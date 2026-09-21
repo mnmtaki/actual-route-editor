@@ -10,6 +10,7 @@ import { getPassengerStationCountForLine } from '../data/passengerStats'
 import { compilePresentation } from '../presentation/compiler'
 import { PresentationScene } from '../presentation/PresentationScene'
 import { AarcTextTagsLayer } from '../renderer/AarcTextTags'
+import { getAarcTerminalExtensions } from '../renderer/AarcTerminalExtensions'
 
 type RawLine = { id?: unknown; type?: unknown; isFake?: unknown; pts?: unknown; parent?: unknown }
 type RawTag = { id?: unknown; pos?: unknown; forId?: unknown }
@@ -108,6 +109,17 @@ describe('real AARC project end-to-end regression', () => {
       }
     })
   }
+
+  it('桐洲: preserves source geometry before the first station on line 238', () => {
+    const { project } = convertAarcToActualRouteProject(rawTongzhou, '桐洲地铁未来规划.aarc.json')
+    const line = project.lines.find(item => Number(item.source?.sourceLineId) === 238)
+    expect(line).toBeTruthy()
+    const extensions = line ? getAarcTerminalExtensions(project, line) : []
+    expect(extensions).toHaveLength(1)
+    expect(extensions[0]).toMatchObject({ kind: 'head', sourceLineId: 238 })
+    expect(extensions[0].path).toContain('583.48671')
+    expect(extensions[0].path).toContain('818.50048')
+  })
 
   it('all four real projects compile and render a finite Presentation final frame after round-trip', () => {
     for (const [, filename, raw] of fixtures) {

@@ -101,4 +101,24 @@ describe('AARC importer with the real 木阳 sample', () => {
     expect(project.lines.filter(line => !line.isFake).every(line => line.openedAt === null)).toBe(true)
     expect(summary.warnings.filter(warning => warning.includes('time.open'))).toHaveLength(4)
   })
+  it('imports an unnamed root common line when it contains real stations', () => {
+    const raw = {
+      cvsSize: [1000, 1000],
+      config: {},
+      lines: [{ id: 1, name: '', nameSub: '', color: '#336699', type: 0, pts: [1, 2], width: 1 }],
+      points: [
+        { id: 1, pos: [100, 100], dir: 0, sta: 1, name: '甲站', nameP: [0, -20] },
+        { id: 2, pos: [300, 100], dir: 0, sta: 1, name: '乙站', nameP: [0, -20] },
+      ],
+    }
+    const { project, summary } = convertAarcToActualRouteProject(raw, 'unnamed-root.aarc')
+    const line = project.lines.find(item => item.source?.sourceLineId === 1)
+    expect(line).toBeTruthy()
+    expect(line?.name).toBe('')
+    expect(line?.isFake).not.toBe(true)
+    expect(line?.stationSequence).toEqual(['aarc-station-1', 'aarc-station-2'])
+    expect(summary.realLineCount).toBe(1)
+    expect(project.geometry.segments.filter(segment => segment.lineId === line?.id)).toHaveLength(1)
+  })
+
 })

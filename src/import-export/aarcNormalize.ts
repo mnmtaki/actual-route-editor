@@ -5,6 +5,14 @@ export interface AarcNormalizedConfig extends Record<string, unknown> {
   lineCarpetWiden: number
   lineTurnAreaRadius: number
   lineWidthMapped: Record<string, Record<string, unknown>>
+  ptStaSize: number
+  ptStaLineWidth: number
+  staNameFontSize: number
+  staNameRowHeight: number
+  staNameSubFontSize: number
+  staNameSubRowHeight: number
+  staNameColor: string
+  staNameSubColor: string
   snapOctaClingPtPtDist: number
   snapOctaClingPtPtThrs: number
 }
@@ -48,6 +56,14 @@ export const DEFAULT_AARC_CONFIG: AarcNormalizedConfig = {
   lineCarpetWiden: 7,
   lineTurnAreaRadius: 30,
   lineWidthMapped: {},
+  ptStaSize: 10,
+  ptStaLineWidth: 4,
+  staNameFontSize: 26,
+  staNameRowHeight: 30,
+  staNameSubFontSize: 18,
+  staNameSubRowHeight: 20,
+  staNameColor: '#000000',
+  staNameSubColor: '#888888',
   snapOctaClingPtPtDist: 25,
   snapOctaClingPtPtThrs: 10,
 }
@@ -63,6 +79,14 @@ function normalizeConfig(value: unknown): AarcNormalizedConfig {
     lineWidth: positive(raw.lineWidth) ?? DEFAULT_AARC_CONFIG.lineWidth,
     lineCarpetWiden: finite(raw.lineCarpetWiden) ?? DEFAULT_AARC_CONFIG.lineCarpetWiden,
     lineTurnAreaRadius: positive(raw.lineTurnAreaRadius) ?? DEFAULT_AARC_CONFIG.lineTurnAreaRadius,
+    ptStaSize: positive(raw.ptStaSize) ?? DEFAULT_AARC_CONFIG.ptStaSize,
+    ptStaLineWidth: positive(raw.ptStaLineWidth) ?? DEFAULT_AARC_CONFIG.ptStaLineWidth,
+    staNameFontSize: positive(raw.staNameFontSize) ?? DEFAULT_AARC_CONFIG.staNameFontSize,
+    staNameRowHeight: positive(raw.staNameRowHeight) ?? DEFAULT_AARC_CONFIG.staNameRowHeight,
+    staNameSubFontSize: positive(raw.staNameSubFontSize) ?? DEFAULT_AARC_CONFIG.staNameSubFontSize,
+    staNameSubRowHeight: positive(raw.staNameSubRowHeight) ?? DEFAULT_AARC_CONFIG.staNameSubRowHeight,
+    staNameColor: typeof raw.staNameColor === 'string' && raw.staNameColor ? raw.staNameColor : DEFAULT_AARC_CONFIG.staNameColor,
+    staNameSubColor: typeof raw.staNameSubColor === 'string' && raw.staNameSubColor ? raw.staNameSubColor : DEFAULT_AARC_CONFIG.staNameSubColor,
     snapOctaClingPtPtDist: positive(raw.snapOctaClingPtPtDist) ?? DEFAULT_AARC_CONFIG.snapOctaClingPtPtDist,
     snapOctaClingPtPtThrs: finite(raw.snapOctaClingPtPtThrs) ?? DEFAULT_AARC_CONFIG.snapOctaClingPtPtThrs,
     lineWidthMapped,

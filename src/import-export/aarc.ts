@@ -190,6 +190,12 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC å
       const ownName = text(point.name)
       const ownNameS = typeof point.nameS === 'string' && point.nameS.length ? point.nameS : undefined
       const borrowedName = resolvedName?.name && !resolvedName.name.startsWith('#') ? resolvedName.name : undefined
+      const pointMetrics = aggregateAarcPointMetrics(pointId, sourceLineRecords, sourcePointMemberships, source.config)
+      const pointNameRatio = finiteNumber(point.nameSize) || pointMetrics.ptNameSize
+      const sourceStationRadius = source.config.ptStaSize * pointMetrics.ptSize
+      const sourceStationStrokeWidth = source.config.ptStaLineWidth * pointMetrics.ptSize
+      const sourceStationNameRowHeight = source.config.staNameRowHeight * pointNameRatio
+      const sourceStationSubNameRowHeight = source.config.staNameSubRowHeight * pointNameRatio
       const station: Station = {
         id: `aarc-station-${pointId}`,
         // Preserve the source point's own text exactly when present (including
@@ -199,9 +205,14 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC å
         ...(ownNameS !== undefined ? { nameS: ownNameS } : resolvedName?.nameSub ? { nameS: resolvedName.nameSub } : {}),
         ...(point.free === true ? { free: true } : {}),
         x: position[0], y: position[1],
+        styleOverrides: {
+          stationSize: sourceStationRadius * 2,
+          labelSize: source.config.staNameFontSize * pointNameRatio,
+          foreignLabelSize: source.config.staNameSubFontSize * pointNameRatio,
+        },
         labelOffsetX: nameP?.[0] ?? 14,
         labelOffsetY: nameP?.[1] ?? -14,
-        source: { format: 'aarc', pointId, pointIds: referencedIds, stationNameFontWeight, raw: cloneRecord(point), ...(resolvedName && resolvedName.pointId !== pointId ? { resolvedNameSourcePointId: resolvedName.pointId } : {}), ...(nameP ? { nameP, labelAnchorMode: 'aarc-block' as const } : {}) },
+        source: { format: 'aarc', pointId, pointIds: referencedIds, stationNameFontWeight, sourceStationRadius, sourceStationStrokeWidth, sourceStationNameRowHeight, sourceStationSubNameRowHeight, raw: cloneRecord(point), ...(resolvedName && resolvedName.pointId !== pointId ? { resolvedNameSourcePointId: resolvedName.pointId } : {}), ...(nameP ? { nameP, labelAnchorMode: 'aarc-block' as const } : {}) },
       }
       stations.push(station)
       stationByPoint.set(pointId, station)

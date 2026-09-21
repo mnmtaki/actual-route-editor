@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SETTINGS } from '../data/model'
 import {
-  AARC_BASE_CHINESE_LABEL_VISUAL_HEIGHT,
-  AARC_FOREIGN_TO_CHINESE_VISUAL_RATIO,
-  AARC_SVG_CHINESE_VISIBLE_HEIGHT_PER_FONT_SIZE,
-  AARC_SVG_FOREIGN_VISIBLE_HEIGHT_PER_FONT_SIZE,
+  AARC_DEFAULT_LINE_WIDTH,
+  AARC_DEFAULT_STATION_NAME_FONT_SIZE,
+  AARC_DEFAULT_STATION_RADIUS,
+  AARC_DEFAULT_STATION_STROKE_WIDTH,
   convertAarcVisualStyle,
   getAarcLabelAlignmentOffset,
   getAarcLabelBlockMetrics,
@@ -14,35 +13,50 @@ import {
 
 const config = { lineWidthMapped: { '1.5': { staSize: 0.9, staNameSize: 1.75 } } }
 
-describe('AARC visual calibration', () => {
-  it('reads lineWidthMapped and converts the measured 木阳 multipliers', () => {
+describe('AARC source visual semantics', () => {
+  it('uses current upstream defaults and lineWidthMapped without measured magic numbers', () => {
     const multipliers = resolveAarcVisualMultipliers([{ width: 1.5 }], config)!
     expect(multipliers).toMatchObject({ lineWidth: 1.5, stationSize: 0.9, stationNameSize: 1.75, selectedWidthKey: '1.5' })
     const calibration = convertAarcVisualStyle([{ width: 1.5 }], config)!
-    expect(calibration.settings.lineWidth).toBeCloseTo(22.035, 3)
-    expect(calibration.settings.stationSize).toBeCloseTo(14, 6)
-    expect(calibration.chineseVisualHeight).toBeCloseTo(44.485, 3)
-    expect(calibration.foreignVisualHeight).toBeCloseTo(30.25, 2)
-    expect(calibration.settings.stationLabelSize * AARC_SVG_CHINESE_VISIBLE_HEIGHT_PER_FONT_SIZE).toBeCloseTo(44.485, 3)
-    expect(calibration.settings.stationForeignLabelSize * AARC_SVG_FOREIGN_VISIBLE_HEIGHT_PER_FONT_SIZE).toBeCloseTo(30.25, 2)
+    expect(calibration.settings.lineWidth).toBe(AARC_DEFAULT_LINE_WIDTH)
+    expect(calibration.settings.aarcLineWidthReferenceRatio).toBe(1)
+    expect(calibration.settings.stationSize).toBe(AARC_DEFAULT_STATION_RADIUS * 0.9 * 2)
+    expect(calibration.stationStrokeWidth).toBe(AARC_DEFAULT_STATION_STROKE_WIDTH * 0.9)
+    expect(calibration.settings.stationLabelSize).toBe(AARC_DEFAULT_STATION_NAME_FONT_SIZE * 1.75)
+    expect(calibration.settings.stationForeignLabelSize).toBe(18 * 1.75)
   })
 
-  it('keeps the accepted transfer proportions relative to the calibrated global line width', () => {
-    const settings = convertAarcVisualStyle([{ width: 1.5 }], config)!.settings
-    expect(settings.transferMinorAxis / settings.lineWidth).toBeCloseTo(DEFAULT_SETTINGS.transferMinorAxis / DEFAULT_SETTINGS.lineWidth)
-    expect(settings.transferEndPadding / settings.lineWidth).toBeCloseTo(DEFAULT_SETTINGS.transferEndPadding / DEFAULT_SETTINGS.lineWidth)
-    expect(settings.transferDotGap).toBe(5)
+  it('honors explicit AARC config bases exactly', () => {
+    const calibration = convertAarcVisualStyle([{ width: 2 }], {
+      lineWidth: 16,
+      ptStaSize: 12,
+      ptStaLineWidth: 5,
+      staNameFontSize: 30,
+      staNameRowHeight: 36,
+      staNameSubFontSize: 20,
+      staNameSubRowHeight: 24,
+      lineWidthMapped: { '2': { staSize: 1.25, staNameSize: 0.8 } },
+    })!
+    expect(calibration.settings.lineWidth).toBe(16)
+    expect(calibration.settings.stationSize).toBe(30)
+    expect(calibration.stationStrokeWidth).toBe(6.25)
+    expect(calibration.settings.stationLabelSize).toBe(24)
+    expect(calibration.settings.stationForeignLabelSize).toBe(16)
+    expect(calibration.mainRowHeight).toBe(28.8)
+    expect(calibration.subRowHeight).toBeCloseTo(19.2)
   })
 
-  it('falls back to line.width when the AARC mapping is unavailable', () => {
+  it('falls back exactly like AARC saveStore when lineWidthMapped is absent', () => {
     const calibration = convertAarcVisualStyle([{ width: 1.5 }], {})!
-    expect(calibration.multipliers.selectedWidthKey).toBe('1.5')
     expect(calibration.multipliers.stationSize).toBe(1.5)
-    expect(calibration.settings.lineWidth).toBeCloseTo(22.035, 3)
+    expect(calibration.multipliers.stationNameSize).toBe(1.5)
+    expect(calibration.settings.lineWidth).toBe(14)
+    expect(calibration.settings.stationSize).toBe(30)
+    expect(calibration.settings.stationLabelSize).toBe(39)
   })
 })
 
-describe('AARC bilingual label block anchors', () => {
+describe('AARC station-label anchors', () => {
   it.each([
     [[16.2, 0], 'start', 'middle'],
     [[-16.2, 0], 'end', 'middle'],
@@ -53,22 +67,16 @@ describe('AARC bilingual label block anchors', () => {
     [[16.2, 16.2], 'start', 'top'],
     [[-16.2, 16.2], 'end', 'top'],
   ] as const)('maps %j to %s/%s without changing the vector', (nameP, horizontalAlign, verticalAlign) => {
-    const resolved = resolveAarcLabelAnchor(nameP)
-    expect(resolved).toEqual({ anchorX: nameP[0], anchorY: nameP[1], horizontalAlign, verticalAlign })
+    expect(resolveAarcLabelAnchor(nameP)).toEqual({ anchorX: nameP[0], anchorY: nameP[1], horizontalAlign, verticalAlign })
   })
 
-  it('computes one block height for Chinese plus multiple foreign lines', () => {
-    const labelSize = AARC_BASE_CHINESE_LABEL_VISUAL_HEIGHT * 1.75 / AARC_SVG_CHINESE_VISIBLE_HEIGHT_PER_FONT_SIZE
-    const foreignSize = labelSize * AARC_FOREIGN_TO_CHINESE_VISUAL_RATIO
-    const one = getAarcLabelBlockMetrics(labelSize, foreignSize, 3, 1)
-    const two = getAarcLabelBlockMetrics(labelSize, foreignSize, 3, 2)
-    expect(two.height).toBeGreaterThan(one.height)
-    expect(two.foreignBaselines).toHaveLength(2)
-    expect(two.primaryBaseline).toBe(one.primaryBaseline)
+  it('uses AARC row heights instead of browser glyph measurements', () => {
+    const metrics = getAarcLabelBlockMetrics(45.5, 31.5, 0, 2, 52.5, 35)
+    expect(metrics).toEqual({ height: 122.5, primaryBaseline: 26.25, foreignBaselines: [70, 105] })
   })
 
-  it('keeps font edge compensation separate from the untouched nameP vector', () => {
-    expect(getAarcLabelAlignmentOffset('start', 'top')).toEqual({ x: 0, y: 0.412 })
-    expect(getAarcLabelAlignmentOffset('end', 'bottom')).toEqual({ x: -0.326, y: 0.47 })
+  it('does not apply browser-measured anchor compensation', () => {
+    expect(getAarcLabelAlignmentOffset('start', 'top')).toEqual({ x: 0, y: 0 })
+    expect(getAarcLabelAlignmentOffset('end', 'bottom')).toEqual({ x: 0, y: 0 })
   })
 })

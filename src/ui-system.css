@@ -300,6 +300,31 @@ summary:focus-visible,
   color: var(--ui-text-muted) !important;
 }
 
+.brand-project-name-input {
+  width: 138px;
+  min-width: 0;
+  max-width: 168px;
+  height: 20px;
+  min-height: 20px;
+  margin: 0;
+  padding: 0 2px !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--ui-border-strong) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--ui-text-muted) !important;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  box-shadow: none;
+}
+
+.brand-project-name-input:focus-visible {
+  outline: none;
+  border-bottom-color: #c99b26 !important;
+  box-shadow: 0 1px 0 #c99b26;
+}
+
 .tool-group {
   border-left-color: var(--ui-divider);
 }

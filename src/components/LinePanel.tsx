@@ -3,19 +3,13 @@ import type { PointerEvent as ReactPointerEvent } from 'react'
 import type { ActualRouteProject, Selection } from '../data/model'
 import { getSegmentCurveLength } from '../geometry/path'
 import { worldUnitsToKilometers } from '../data/distance'
-import { setLineLocked, setLineVisibility } from '../data/editorCommands'
 import { getEffectiveLineColor, getLineDisplayName } from '../data/lineIdentity'
 import { getPassengerStationCount, getPassengerStationCountForLine } from '../data/passengerStats'
-import { isFakeLine, setLineFake } from '../data/fakeLines'
+import { isFakeLine } from '../data/fakeLines'
 import { materializeAarcFakeLineEntries } from '../data/aarcFakeLineEntries'
-
-function EyeIcon({ hidden = false }: { hidden?: boolean }) {
-  return <svg aria-hidden="true" viewBox="0 0 24 24" className="line-state-icon"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />{!hidden && <circle cx="12" cy="12" r="2.5" fill="currentColor" />}{hidden && <path d="m4 4 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />}</svg>
-}
-
-function LockIcon({ locked = false }: { locked?: boolean }) {
-  return <svg aria-hidden="true" viewBox="0 0 24 24" className="line-state-icon"><rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" />{locked ? <path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /> : <path d="M9 10V7a3 3 0 0 1 5.5-1.7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />}</svg>
-}
+import type { OpeningPhasePath } from '../data/openingPhases'
+import { LineBranchPanel, LineDetailPanel } from './LineDetailPanel'
+import { setCurrentLineOwnColor } from '../data/lineColorHistory'
 
 type LineSelectionModifiers = { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }
 
@@ -41,6 +35,10 @@ export function LinePanel({
   onChange,
   onAddLine,
   onAddBranchLine,
+  onAddLineBadge,
+  onDeleteLine,
+  onPhasePreview,
+  onStartPhaseDrawing,
   mobileMode = false,
   onMobileLongPress,
 }: {
@@ -54,6 +52,10 @@ export function LinePanel({
   onChange: (project: ActualRouteProject) => void
   onAddLine: () => void
   onAddBranchLine?: (parentLineId: string) => void
+  onAddLineBadge?: (lineId: string) => void
+  onDeleteLine?: (lineId: string) => void
+  onPhasePreview?: (path: OpeningPhasePath | null) => void
+  onStartPhaseDrawing?: (phaseId: string, lineId: string, stationId: string | null) => void
   mobileMode?: boolean
   onMobileLongPress?: (lineId: string) => void
 }) {
@@ -63,9 +65,11 @@ export function LinePanel({
   }, [project, onChange])
 
   const lineStats = project.lines.map(line => ({ line, length: worldUnitsToKilometers(project.geometry.segments.filter(segment => segment.lineId === line.id).reduce((sum, segment) => sum + getSegmentCurveLength(project, segment), 0), project), stations: getPassengerStationCountForLine(project, line.id) }))
-  const childrenByParent = new Map<string, typeof project.lines>(); project.lines.forEach(line => { if (line.parentLineId) childrenByParent.set(line.parentLineId, [...(childrenByParent.get(line.parentLineId) ?? []), line]) });
-  const [collapsedParentIds, setCollapsedParentIds] = useState<Set<string>>(new Set())
-  const displayLines: Array<{ line: typeof project.lines[number]; depth: number }> = []; const visited = new Set<string>(); const appendLine = (line: typeof project.lines[number], depth: number) => { if (visited.has(line.id)) return; visited.add(line.id); displayLines.push({ line, depth }); if (!collapsedParentIds.has(line.id)) for (const child of childrenByParent.get(line.id) ?? []) appendLine(child, depth + 1) }; for (const line of project.lines.filter(item => !item.parentLineId || !project.lines.some(parent => parent.id === item.parentLineId))) appendLine(line, 0); for (const line of project.lines) appendLine(line, 0)
+  const lineIds = new Set(project.lines.map(line => line.id))
+  // First-level list is for root/independent lines only. Real child lines live
+  // inside their parent's branch-management panel. AARC fake lines remain
+  // directly manageable even when their source record carries a parent.
+  const displayLines = project.lines.filter(line => isFakeLine(line) || !line.parentLineId || !lineIds.has(line.parentLineId))
   const totalLength = lineStats.filter(item => !isFakeLine(item.line)).reduce((sum, item) => sum + item.length, 0)
   const totalStations = getPassengerStationCount(project)
   const listRef = useRef<HTMLDivElement>(null)
@@ -76,6 +80,8 @@ export function LinePanel({
   const touchLongPressTimer = useRef<number | null>(null)
   const touchLongPress = useRef<{ pointerId: number; lineId: string; x: number; y: number; triggered: boolean } | null>(null)
   const [marquee, setMarquee] = useState<MarqueeState | null>(null)
+  const [detailLineId, setDetailLineId] = useState<string | null>(null)
+  const [detailMode, setDetailMode] = useState<'settings'|'branches'>('settings')
   const clearTouchLongPress = () => {
     if (touchLongPressTimer.current !== null) window.clearTimeout(touchLongPressTimer.current)
     touchLongPressTimer.current = null
@@ -192,7 +198,8 @@ export function LinePanel({
   }
   const onClickMain = (event: React.MouseEvent, lineId: string) => {
     if (suppressClick.current) { suppressClick.current = false; return }
-    onSelect(lineId, { ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey })
+    const modifiers={ ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey }
+    onSelect(lineId, modifiers)
   }
   useEffect(() => {
     const cancel = () => {
@@ -210,26 +217,28 @@ export function LinePanel({
     return () => { window.removeEventListener('blur', cancel); window.removeEventListener('keydown', onKeyDown); cancel() }
   }, [])
 
-  const activeLine = activeLineId ? project.lines.find(line => line.id === activeLineId) : undefined
-  const activeLineName = activeLine ? getLineDisplayName(project, activeLine) : ''
   return <aside className="left-panel panel" aria-label="线路结构">
-    <div className="panel-heading"><div><h2>线路</h2><span className="panel-subtitle">线路与图层</span></div><div className="panel-heading-actions"><button className="icon-button" onClick={onAddLine} aria-label="新增线路">＋</button>{activeLine && !isFakeLine(activeLine) && !activeLine.locked && <button className="icon-button branch-line-add" onClick={() => onAddBranchLine?.(activeLine.id)} aria-label={`在${activeLineName || '当前线路'}下新建支线`} title="新建支线">支＋</button>}</div></div>
+    {detailLineId && project.lines.some(line=>line.id===detailLineId) ? (detailMode==='branches' ? <LineBranchPanel project={project} lineId={detailLineId} onBack={()=>setDetailLineId(null)} onChange={onChange} onAddBranchLine={onAddBranchLine} onOpenBranchSettings={id=>{onSelect(id);setDetailMode('branches');setDetailLineId(id)}} onOpenLineSettings={id=>{onSelect(id);setDetailMode('settings');setDetailLineId(id)}}/> : <LineDetailPanel project={project} lineId={detailLineId} onBack={()=>setDetailLineId(null)} onChange={onChange} onAddBranchLine={onAddBranchLine} onAddLineBadge={onAddLineBadge} onDelete={()=>{onDeleteLine?.(detailLineId);setDetailLineId(null)}} onPhasePreview={onPhasePreview} onStartPhaseDrawing={onStartPhaseDrawing}/>) : <>
+    <div className="panel-heading"><div><h2>线路</h2><span className="panel-subtitle">线路与图层</span></div><div className="panel-heading-actions"><button className="icon-button" onClick={onAddLine} aria-label="新增线路">＋</button></div></div>
     <div ref={listRef} className="line-list" onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={finishPointer} onPointerCancel={event => { endTouchLongPress(event); finishPointer(event, true) }} onContextMenu={event => { if (marqueeRef.current) event.preventDefault() }}>
-      {displayLines.map(({ line, depth }) => {
+      {displayLines.map(line => {
         const isSelected = selected.has(line.id)
         const isActive = activeLineId === line.id
         const fake = isFakeLine(line)
-        const displayName = getLineDisplayName(project, line), color = getEffectiveLineColor(project, line), hasChildren = childrenByParent.has(line.id), collapsed = collapsedParentIds.has(line.id)
+        const displayName = fake && !line.name.trim() ? '伪线' : (getLineDisplayName(project, line) || '未命名线路')
+        const color = getEffectiveLineColor(project, line)
         return <div key={line.id} ref={node => { if (node) rowRefs.current.set(line.id, node); else rowRefs.current.delete(line.id) }} data-line-id={line.id} data-fake-line={fake ? 'true' : undefined} className={`line-row ${isSelected ? 'selected' : ''} ${isActive ? 'active' : ''} ${isSelected && !isActive ? 'secondary-selected' : ''}`}>
-          <button type="button" className="line-row-main" onClick={event => onClickMain(event, line.id)}>{hasChildren && <span className="line-tree-toggle" role="button" tabIndex={0} aria-label={collapsed ? '展开支线' : '折叠支线'} onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setCollapsedParentIds(previous => { const next = new Set(previous); if (next.has(line.id)) next.delete(line.id); else next.add(line.id); return next }) }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); setCollapsedParentIds(previous => { const next = new Set(previous); if (next.has(line.id)) next.delete(line.id); else next.add(line.id); return next }) } }}>{collapsed ? '▸' : '▾'}</span>}<span aria-hidden="true" className="line-color" style={{ background: color }} /><span className="line-name">{depth ? "└ " : ""}{displayName}{fake && <small className="line-fake-badge">（伪线）</small>}</span></button>
-          <button type="button" className={`line-state-button fake-line-toggle ${fake ? 'is-on' : ''}`} aria-label={fake ? `${displayName}恢复为普通线路` : `${displayName}设为伪线`} title={fake ? '恢复为普通线路' : '设为伪线'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onChange(setLineFake(project, line.id, !fake))}><span aria-hidden="true">伪</span></button>
-          <button type="button" className={`line-state-button ${line.visible ? 'is-on' : ''}`} aria-label={line.visible ? `${displayName}隐藏线路` : `${displayName}显示线路`} title={line.visible ? '隐藏线路' : '显示线路'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onChange(setLineVisibility(project, line.id, !line.visible))}><span aria-hidden="true"><EyeIcon hidden={!line.visible} /></span></button>
-          <button type="button" className={`line-state-button ${line.locked ? 'is-on' : ''}`} aria-label={line.locked ? `${displayName}解锁线路` : `${displayName}锁定线路`} title={line.locked ? '解锁线路' : '锁定线路'} onPointerDown={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()} onClick={() => onChange(setLineLocked(project, line.id, !line.locked))}><span aria-hidden="true"><LockIcon locked={line.locked} /></span></button>
+          <input className="line-list-color" aria-label={`${displayName}线路颜色`} title={line.parentLineId?'支线颜色继承主线':'线路颜色'} type="color" value={color} disabled={Boolean(line.parentLineId)} onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} onChange={event=>{const next=structuredClone(project);setCurrentLineOwnColor(next.lines.find(item=>item.id===line.id)!,event.target.value);onChange(next)}}/>
+          <button type="button" className="line-row-main" onClick={event => onClickMain(event, line.id)}><span className="line-name">{displayName}</span></button>
+          {!fake && <button type="button" className="line-row-action" aria-label={`${displayName}支线设置`} onPointerDown={event=>event.stopPropagation()} onClick={()=>{onSelect(line.id);setDetailMode('branches');setDetailLineId(line.id)}}>支线</button>}
+          <button type="button" className="line-row-action" aria-label={`${displayName}线路设置`} onPointerDown={event=>event.stopPropagation()} onClick={()=>{onSelect(line.id);setDetailMode('settings');setDetailLineId(line.id)}}>设置</button>
         </div>
       })}
       {marquee?.active && <div className="line-selection-marquee" data-testid="line-selection-marquee" style={{ left: `${Math.min(marquee.startX, marquee.currentX) - (listRef.current?.getBoundingClientRect().left ?? 0) + (listRef.current?.scrollLeft ?? 0)}px`, top: `${Math.min(marquee.startY, marquee.currentY) - (listRef.current?.getBoundingClientRect().top ?? 0) + (listRef.current?.scrollTop ?? 0)}px`, width: `${Math.abs(marquee.currentX - marquee.startX)}px`, height: `${Math.abs(marquee.currentY - marquee.startY)}px` }} />}
     </div>
     <details className="network-overview"><summary>线网概览</summary><div className="network-summary" aria-label="线网统计"><div className="network-total"><strong>全网</strong><span>{totalLength.toFixed(1)} km</span><span>{totalStations} 座车站</span></div><details className="network-line-details"><summary>查看线路详情</summary><div className="network-line-stats">{lineStats.map(({ line, length, stations }) => <div key={line.id}><i style={{ background: getEffectiveLineColor(project, line) }} /><strong>{getLineDisplayName(project, line)}{isFakeLine(line) ? '（伪线）' : ''}</strong><span>{length.toFixed(1)} km</span><span>{stations} 站</span></div>)}</div></details></div></details>
     <details className="panel-help"><summary>操作提示</summary><p>直接拖动车站；拖动空白平移。选中车站可延伸线路，选中区间可插入车站或路径点。</p></details>
+
+    </>}
   </aside>
 }

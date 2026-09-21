@@ -1,17 +1,17 @@
 import type { ProjectSettings } from '../data/model'
 import { DEFAULT_SETTINGS } from '../data/model'
 
-export const AARC_COORDINATE_UNIT_TO_PX = 2.36
-export const AARC_BASE_LINE_WIDTH = 14.69
-export const AARC_BASE_STATION_DIAMETER = 15.5555555556
-export const AARC_BASE_CHINESE_LABEL_VISUAL_HEIGHT = 25.42
-export const AARC_FOREIGN_TO_CHINESE_VISUAL_RATIO = 0.68
-
-// Edge 140, using the editor's real SVG font stack and weights. These are
-// visible getBBox() metrics, not CSS em-box guesses.
-export const AARC_SVG_CHINESE_VISIBLE_HEIGHT_PER_FONT_SIZE = 1.45
-export const AARC_SVG_FOREIGN_VISIBLE_HEIGHT_PER_FONT_SIZE = 1.4756
-export const AARC_SVG_GLYPH_TOP_FROM_BASELINE_PER_FONT_SIZE = 1.16
+/**
+ * These are the actual defaults from AARC's current configStore.ts.
+ * Keep source semantics here; do not replace them with browser measurements.
+ */
+export const AARC_DEFAULT_LINE_WIDTH = 14
+export const AARC_DEFAULT_STATION_RADIUS = 10
+export const AARC_DEFAULT_STATION_STROKE_WIDTH = 4
+export const AARC_DEFAULT_STATION_NAME_FONT_SIZE = 26
+export const AARC_DEFAULT_STATION_NAME_ROW_HEIGHT = 30
+export const AARC_DEFAULT_STATION_SUB_NAME_FONT_SIZE = 18
+export const AARC_DEFAULT_STATION_SUB_NAME_ROW_HEIGHT = 20
 
 export interface AarcVisualMultipliers {
   lineWidth: number
@@ -29,21 +29,36 @@ export interface AarcVisualCalibration {
     'transferDotGap' | 'stationLabelSize' | 'stationLabelFontFamily' | 'stationLabelFontWeight' | 'stationLabelColor' |
     'stationForeignLabelSize' | 'stationForeignLabelFontFamily' | 'stationForeignLabelFontWeight' | 'stationForeignLabelColor' | 'foreignLabelGap' | 'aarcLineWidthReferenceRatio'>
   multipliers: AarcVisualMultipliers
-  chineseVisualHeight: number
-  foreignVisualHeight: number
+  stationRadius: number
+  stationStrokeWidth: number
+  mainRowHeight: number
+  subRowHeight: number
 }
 
 interface AarcVisualLine { width?: unknown }
 interface AarcLineWidthMapping { staSize?: unknown; staNameSize?: unknown; staSnapSize?: unknown; staNameSnapSize?: unknown }
 
-function positive(value: unknown): number | null {
+function finite(value: unknown): number | null {
   const number = typeof value === 'number' ? value : Number(value)
-  return Number.isFinite(number) && number > 0 ? number : null
+  return Number.isFinite(number) ? number : null
+}
+function positive(value: unknown): number | null {
+  const number = finite(value)
+  return number !== null && number > 0 ? number : null
+}
+function configObject(config: unknown): Record<string, unknown> {
+  return config && typeof config === 'object' && !Array.isArray(config) ? config as Record<string, unknown> : {}
+}
+function configPositive(config: unknown, key: string, fallback: number) {
+  return positive(configObject(config)[key]) ?? fallback
+}
+function configString(config: unknown, key: string, fallback: string) {
+  const value = configObject(config)[key]
+  return typeof value === 'string' && value ? value : fallback
 }
 
 function readMapping(config: unknown, width: number): { key: string; mapping: AarcLineWidthMapping } | null {
-  if (!config || typeof config !== 'object') return null
-  const raw = (config as { lineWidthMapped?: unknown }).lineWidthMapped
+  const raw = configObject(config).lineWidthMapped
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const entries = Object.entries(raw as Record<string, unknown>)
   const entry = entries.find(([key]) => key === String(width))
@@ -57,65 +72,87 @@ export function resolveAarcVisualMultipliers(lines: AarcVisualLine[], config: un
   const lineWidth = distinctLineWidths[0]
   if (!lineWidth) return null
   const resolved = readMapping(config, lineWidth)
-  // AARC's saveStore falls back to line.width when no lineWidthMapped entry
-  // exists. Keep that source behavior instead of rejecting valid geometry.
+  // Mirrors AARC saveStore: per-line override -> lineWidthMapped -> line.width.
   const stationSize = positive(resolved?.mapping.staSize) ?? lineWidth
   const stationNameSize = positive(resolved?.mapping.staNameSize) ?? lineWidth
-  const stationSnapSize = positive(resolved?.mapping.staSnapSize) ?? stationSize
-  const stationNameSnapSize = positive(resolved?.mapping.staNameSnapSize) ?? stationSnapSize
+  const stationSnapSize = finite(resolved?.mapping.staSnapSize) ?? stationSize
+  const stationNameSnapSize = finite(resolved?.mapping.staNameSnapSize) ?? stationSize
   return { lineWidth, stationSize, stationNameSize, stationSnapSize, stationNameSnapSize, selectedWidthKey: resolved?.key ?? String(lineWidth), distinctLineWidths }
 }
 
 export function convertAarcVisualStyle(lines: AarcVisualLine[], config: unknown): AarcVisualCalibration | null {
   const multipliers = resolveAarcVisualMultipliers(lines, config)
   if (!multipliers) return null
-  const lineWidth = AARC_BASE_LINE_WIDTH * multipliers.lineWidth
-  const stationSize = AARC_BASE_STATION_DIAMETER * multipliers.stationSize
-  const chineseVisualHeight = AARC_BASE_CHINESE_LABEL_VISUAL_HEIGHT * multipliers.stationNameSize
-  const foreignVisualHeight = chineseVisualHeight * AARC_FOREIGN_TO_CHINESE_VISUAL_RATIO
-  const stationLabelSize = chineseVisualHeight / AARC_SVG_CHINESE_VISIBLE_HEIGHT_PER_FONT_SIZE
-  const stationForeignLabelSize = foreignVisualHeight / AARC_SVG_FOREIGN_VISIBLE_HEIGHT_PER_FONT_SIZE
-  const scaleFromEditorBaseline = lineWidth / DEFAULT_SETTINGS.lineWidth
+
+  const lineWidthBase = configPositive(config, 'lineWidth', AARC_DEFAULT_LINE_WIDTH)
+  const stationRadiusBase = configPositive(config, 'ptStaSize', AARC_DEFAULT_STATION_RADIUS)
+  const stationStrokeBase = configPositive(config, 'ptStaLineWidth', AARC_DEFAULT_STATION_STROKE_WIDTH)
+  const stationNameFontSizeBase = configPositive(config, 'staNameFontSize', AARC_DEFAULT_STATION_NAME_FONT_SIZE)
+  const stationNameRowHeightBase = configPositive(config, 'staNameRowHeight', AARC_DEFAULT_STATION_NAME_ROW_HEIGHT)
+  const stationSubFontSizeBase = configPositive(config, 'staNameSubFontSize', AARC_DEFAULT_STATION_SUB_NAME_FONT_SIZE)
+  const stationSubRowHeightBase = configPositive(config, 'staNameSubRowHeight', AARC_DEFAULT_STATION_SUB_NAME_ROW_HEIGHT)
   const stationNameFontWeight = resolveAarcFontWeight(config)
+  const stationNameFontFamily = configString(config, 'staNameFont', 'sans-serif')
+  const stationSubFontFamily = configString(config, 'staNameSubFont', stationNameFontFamily)
+
+  // Actual Route stores ordinary station size as a diameter; AARC stores
+  // ptStaSize as a radius. Line width remains the AARC config base (14 by
+  // default); imported Line.source.sourceWidthRatio applies line.width later.
+  const stationRadius = stationRadiusBase * multipliers.stationSize
+  const stationStrokeWidth = stationStrokeBase * multipliers.stationSize
+  const stationSize = stationRadius * 2
+  const stationLabelSize = stationNameFontSizeBase * multipliers.stationNameSize
+  const stationForeignLabelSize = stationSubFontSizeBase * multipliers.stationNameSize
+  const mainRowHeight = stationNameRowHeightBase * multipliers.stationNameSize
+  const subRowHeight = stationSubRowHeightBase * multipliers.stationNameSize
+
   return {
     settings: {
-      lineWidth,
-      aarcLineWidthReferenceRatio: multipliers.lineWidth,
+      lineWidth: lineWidthBase,
+      aarcLineWidthReferenceRatio: 1,
       stationSize,
-      transferMinorAxis: lineWidth * (DEFAULT_SETTINGS.transferMinorAxis / DEFAULT_SETTINGS.lineWidth),
-      transferEndPadding: lineWidth * (DEFAULT_SETTINGS.transferEndPadding / DEFAULT_SETTINGS.lineWidth),
-      transferDotGap: 5,
+      // AARC transfer clusters have different geometry from Actual Route's
+      // capsule transfer renderer. Keep native transfer controls stable rather
+      // than deriving fake values from the line width.
+      transferMinorAxis: DEFAULT_SETTINGS.transferMinorAxis,
+      transferEndPadding: DEFAULT_SETTINGS.transferEndPadding,
+      transferDotGap: DEFAULT_SETTINGS.transferDotGap,
       stationLabelSize,
-      stationLabelFontFamily: 'sans-serif',
+      stationLabelFontFamily: stationNameFontFamily,
       stationLabelFontWeight: stationNameFontWeight,
-      stationLabelColor: '#202526',
+      stationLabelColor: configString(config, 'staNameColor', '#000000'),
       stationForeignLabelSize,
-      stationForeignLabelFontFamily: 'sans-serif',
-      stationForeignLabelFontWeight: stationNameFontWeight,
-      stationForeignLabelColor: '#999999',
-      foreignLabelGap: DEFAULT_SETTINGS.foreignLabelGap * scaleFromEditorBaseline,
+      stationForeignLabelFontFamily: stationSubFontFamily,
+      stationForeignLabelFontWeight: resolveAarcSubFontWeight(config, stationNameFontWeight),
+      stationForeignLabelColor: configString(config, 'staNameSubColor', '#888888'),
+      // AARC uses explicit main/sub row heights rather than a free-standing gap.
+      foreignLabelGap: 0,
     },
     multipliers,
-    chineseVisualHeight,
-    foreignVisualHeight,
+    stationRadius,
+    stationStrokeWidth,
+    mainRowHeight,
+    subRowHeight,
   }
 }
 
 function resolveAarcFontWeight(config:unknown){
-  const value=config&&typeof config==='object'?(config as {staNameFontWeight?:unknown}).staNameFontWeight:undefined
+  const value=configObject(config).staNameFontWeight
   if(value==='bold')return 700
   if(value==='normal')return 400
   const numeric=typeof value==='number'?value:Number(value)
   return Number.isFinite(numeric)&&numeric>=100&&numeric<=900?numeric:400
 }
+function resolveAarcSubFontWeight(config: unknown, fallback: number) {
+  const value = configObject(config).staNameSubFontWeight
+  if (value === 'bold') return 700
+  if (value === 'normal') return 400
+  const numeric = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(numeric) && numeric >= 100 && numeric <= 900 ? numeric : fallback
+}
 
 export type AarcLabelHorizontalAlign = 'start' | 'middle' | 'end'
 export type AarcLabelVerticalAlign = 'top' | 'middle' | 'bottom'
-
-// Visible edge compensation measured from the real stroked SVG labels in Edge.
-// nameP itself remains untouched; this only aligns the rendered ink bbox to it.
-const AARC_LABEL_HORIZONTAL_EDGE_COMPENSATION: Record<AarcLabelHorizontalAlign, number> = { start: 0, middle: 0, end: -0.326 }
-const AARC_LABEL_VERTICAL_EDGE_COMPENSATION: Record<AarcLabelVerticalAlign, number> = { top: 0.412, middle: 0.441, bottom: 0.47 }
 
 export function resolveAarcLabelAnchor(nameP: readonly [number, number], epsilon = 1e-6) {
   const [anchorX, anchorY] = nameP
@@ -124,21 +161,24 @@ export function resolveAarcLabelAnchor(nameP: readonly [number, number], epsilon
   return { anchorX, anchorY, horizontalAlign, verticalAlign }
 }
 
-export function getAarcLabelAlignmentOffset(horizontalAlign: AarcLabelHorizontalAlign, verticalAlign: AarcLabelVerticalAlign) {
-  return { x: AARC_LABEL_HORIZONTAL_EDGE_COMPENSATION[horizontalAlign], y: AARC_LABEL_VERTICAL_EDGE_COMPENSATION[verticalAlign] }
+/** AARC anchors directly on nameP; no browser-measured correction belongs here. */
+export function getAarcLabelAlignmentOffset(_horizontalAlign: AarcLabelHorizontalAlign, _verticalAlign: AarcLabelVerticalAlign) {
+  return { x: 0, y: 0 }
 }
 
-export function getAarcLabelBlockMetrics(labelSize: number, foreignLabelSize: number, foreignLabelGap: number, foreignLineCount: number) {
-  const primaryHeight = labelSize * AARC_SVG_CHINESE_VISIBLE_HEIGHT_PER_FONT_SIZE
-  const primaryBaseline = labelSize * AARC_SVG_GLYPH_TOP_FROM_BASELINE_PER_FONT_SIZE
-  if (!foreignLineCount) return { height: primaryHeight, primaryBaseline, foreignBaselines: [] as number[] }
-  const foreignHeight = foreignLabelSize * AARC_SVG_FOREIGN_VISIBLE_HEIGHT_PER_FONT_SIZE
-  const foreignTop = primaryHeight + foreignLabelGap
-  const foreignAdvance = foreignLabelSize * 1.02
+/**
+ * Mirror AARC drawText row geometry. SVG text is positioned at each row center
+ * (with dominantBaseline=middle in StationLabel), so no measured glyph magic
+ * numbers are needed.
+ */
+export function getAarcLabelBlockMetrics(labelSize: number, _foreignLabelSize: number, _foreignLabelGap: number, foreignLineCount: number, sourceMainRowHeight?: number, sourceSubRowHeight?: number) {
+  const ratio = labelSize > 0 ? labelSize / AARC_DEFAULT_STATION_NAME_FONT_SIZE : 1
+  const mainRowHeight = sourceMainRowHeight && sourceMainRowHeight > 0 ? sourceMainRowHeight : AARC_DEFAULT_STATION_NAME_ROW_HEIGHT * ratio
+  const subRowHeight = sourceSubRowHeight && sourceSubRowHeight > 0 ? sourceSubRowHeight : AARC_DEFAULT_STATION_SUB_NAME_ROW_HEIGHT * ratio
+  const height = mainRowHeight + foreignLineCount * subRowHeight
   return {
-    height: foreignTop + foreignHeight + (foreignLineCount - 1) * foreignAdvance,
-    primaryBaseline,
-    foreignBaselines: Array.from({ length: foreignLineCount }, (_, index) =>
-      foreignTop + foreignLabelSize * AARC_SVG_GLYPH_TOP_FROM_BASELINE_PER_FONT_SIZE + index * foreignAdvance),
+    height,
+    primaryBaseline: mainRowHeight / 2,
+    foreignBaselines: Array.from({ length: foreignLineCount }, (_, index) => mainRowHeight + (index + .5) * subRowHeight),
   }
 }

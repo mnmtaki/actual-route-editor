@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import rawChangling from './__fixtures__/常陵.aarc-9.json'
 import rawPinglan from './__fixtures__/平岚.aarc (9).json'
+import rawTongzhou from './__fixtures__/桐洲地铁未来规划.aarc.json'
 import rawMinimal from './__fixtures__/测试.aarc (1).json'
 import { convertAarcToActualRouteProject } from './aarc'
 import { parseProjectJson, serializeProject } from './projectJson'
@@ -10,11 +11,28 @@ import { formalizeAarcBasemapPoints } from '../data/aarcBasemapGeometry'
 import { reconstructAarcLineGeometry } from './aarcGeometry'
 
 describe('AARC terrain calibration', () => {
-  it('resolves known presets before raw colors', () => {
+  it('resolves all AARC terrain presets before raw colors', () => {
+    expect(resolveAarcTerrainPreset(1)).toEqual({ category: 'other', color: '#CCCCCC' })
     expect(resolveAarcTerrainPreset(2)).toEqual({ category: 'water', color: '#C3E5EB' })
     expect(resolveAarcTerrainPreset('3')).toEqual({ category: 'terrain', color: '#CEEDA4' })
+    expect(resolveAarcTerrainPreset(4)).toEqual({ category: 'other', color: '#FFFFFF' })
+    expect(resolveAarcTerrainAppearance(1, '#000000').color).toBe('#CCCCCC')
     expect(resolveAarcTerrainAppearance(2, '#000000').color).toBe('#C3E5EB')
     expect(resolveAarcTerrainAppearance(3, '#000000').color).toBe('#CEEDA4')
+    expect(resolveAarcTerrainAppearance(4, '#000000').color).toBe('#FFFFFF')
+  })
+
+  it('uses project-level AARC preset colors before defaults', () => {
+    const config = {
+      colorPresetArea: '#112233',
+      colorPresetWater: '#224466',
+      colorPresetGreenland: '#336699',
+      colorPresetIsland: '#fefefe',
+    }
+    expect(resolveAarcTerrainAppearance(1, '#000000', config).color).toBe('#112233')
+    expect(resolveAarcTerrainAppearance(2, '#000000', config).color).toBe('#224466')
+    expect(resolveAarcTerrainAppearance(3, '#000000', config).color).toBe('#336699')
+    expect(resolveAarcTerrainAppearance(4, '#000000', config).color).toBe('#fefefe')
   })
 
   it('keeps valid custom colors and has stable fallbacks', () => {
@@ -122,6 +140,14 @@ describe('AARC type=1 terrain importer', () => {
     expect(paths[0]).toMatchObject({ category: 'terrain', color: '#CEEDA4', width: 14, closed: false, isFilled: false, zIndex: 0 })
     expect(paths[1]).toMatchObject({ category: 'terrain', color: '#CEEDA4', width: 14, closed: true, isFilled: true, zIndex: 0 })
     expect(paths[1].points).toHaveLength(5)
+  })
+
+  it('applies colorPre=1 area preset to the real 桐洲 terrain instead of raw black', () => {
+    const { project } = convertAarcToActualRouteProject(rawTongzhou, '桐洲地铁未来规划.aarc.json')
+    const path = project.basemapPaths?.find(item => item.source?.sourceLineId === 226)
+    expect(path).toMatchObject({ name: '桐洲全梗博物馆', category: 'other', color: '#CCCCCC' })
+    expect(path?.source?.sourceColor).toBe('#000000')
+    expect(path?.source?.sourceColorPre).toBe(1)
   })
 
   it('applies the preset to 常陵 庆江 while preserving the source point count', () => {

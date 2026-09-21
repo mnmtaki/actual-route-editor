@@ -1171,6 +1171,14 @@ export default function App() {
             onChange={history.commit}
             onAddLine={startLine}
             onAddBranchLine={startBranchLine}
+            onAddLineBadge={addLineBadge}
+            onDeleteLine={(lineId) => {
+              if (isLineLocked(history.project, lineId)) { setNotice("线路已锁定"); return }
+              history.commit(deleteLineAndOrphans(history.project, lineId))
+              if (selection?.type === "line" && selection.id === lineId) clearLineSelection()
+            }}
+            onPhasePreview={setPhasePreview}
+            onStartPhaseDrawing={startPhaseDrawing}
           />
           <section className="canvas-wrap">
             <div className="canvas-status">

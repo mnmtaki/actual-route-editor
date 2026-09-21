@@ -149,7 +149,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
     })
     if (points.length < 2) { warnings.push(`AARC 底图路径 ${sourceLineId} 少于两个有效路径点，已跳过`); return [] }
     const repeated = points[0].id === points.at(-1)?.id || (points[0].x === points.at(-1)?.x && points[0].y === points.at(-1)?.y)
-    const appearance = resolveAarcTerrainAppearance(rawLine.colorPre, rawLine.color)
+    const appearance = resolveAarcTerrainAppearance(rawLine.colorPre, rawLine.color, source.config)
     if (appearance.usedFallbackColor) warnings.push(`AARC 地形路径 ${sourceLineId} 的颜色无效，已使用底图默认颜色`)
     const width = parseAarcTerrainWidth(rawLine.width)
     if (rawLine.width !== undefined && rawLine.width !== null && width.usedDefault) warnings.push(`AARC 地形路径 ${sourceLineId} 的 width 无效，已使用默认值 1`)

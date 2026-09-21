@@ -52,6 +52,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const svgRef = useRef<SVGSVGElement>(null)
   const liveViewRef = useRef<View>(view)
   const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const wheelAnimationFrame = useRef<number | null>(null)
+  const wheelTargetViewRef = useRef<View | null>(null)
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingPreview = useRef<ActualRouteProject | null>(null)
   const lastPreviewAt = useRef(0)
@@ -100,6 +102,29 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     svgRef.current?.setAttribute('viewBox', `${next.x} ${next.y} ${next.width} ${next.height}`)
   }
   const commitLiveView = () => setView(liveViewRef.current)
+  const continueWheelZoom = () => {
+    const target = wheelTargetViewRef.current
+    if (!target) {
+      wheelAnimationFrame.current = null
+      return
+    }
+    const current = liveViewRef.current
+    const next = {
+      x: current.x + (target.x - current.x) * .38,
+      y: current.y + (target.y - current.y) * .38,
+      width: current.width + (target.width - current.width) * .38,
+      height: current.height + (target.height - current.height) * .38,
+    }
+    const settled = Math.abs(next.width - target.width) <= Math.max(.01, target.width * .00035)
+      && Math.abs(next.height - target.height) <= Math.max(.01, target.height * .00035)
+    applyLiveView(settled ? target : next)
+    if (settled) {
+      wheelTargetViewRef.current = null
+      wheelAnimationFrame.current = null
+      return
+    }
+    wheelAnimationFrame.current = requestAnimationFrame(continueWheelZoom)
+  }
   const panLiveView = (fromClient: Point, toClient: Point) => {
     const currentView = liveViewRef.current
     const before = screenPointToWorld(svgRef.current!, fromClient.x, fromClient.y, currentView)
@@ -146,6 +171,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   }, [])
   useEffect(() => () => {
     if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
+    if (wheelAnimationFrame.current !== null) cancelAnimationFrame(wheelAnimationFrame.current)
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
   }, [])
   useEffect(() => { if (!drawing) drawingClick.current = null }, [drawing])
@@ -605,20 +631,38 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     onDoubleClick={event => { if (drawing && drawing.kind !== 'line') { event.preventDefault(); drawingClick.current = null; if (pointerDoubleFinish.current) { pointerDoubleFinish.current = false; return } onFinishDrawing?.() } }}
     onWheel={event => {
       event.preventDefault()
-      const currentView = liveViewRef.current
-      const point = screenPointToWorld(svgRef.current!, event.clientX, event.clientY, currentView)
-      const factor = event.deltaY > 0 ? 1.12 : .88
+      const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, svgRef.current?.clientHeight ?? 680) : 1
+      const delta = Math.max(-120, Math.min(120, event.deltaY * modeScale))
+      if (Math.abs(delta) < .01) return
+      const baseView = wheelTargetViewRef.current ?? liveViewRef.current
+      const point = screenPointToWorld(svgRef.current!, event.clientX, event.clientY, baseView)
+      const factor = Math.exp(delta * .00128)
+      const target = {
+        x: point.x - (point.x - baseView.x) * factor,
+        y: point.y - (point.y - baseView.y) * factor,
+        width: baseView.width * factor,
+        height: baseView.height * factor,
+      }
+      wheelTargetViewRef.current = target
+      const current = liveViewRef.current
       applyLiveView({
-        x: point.x - (point.x - currentView.x) * factor,
-        y: point.y - (point.y - currentView.y) * factor,
-        width: currentView.width * factor,
-        height: currentView.height * factor,
+        x: current.x + (target.x - current.x) * .32,
+        y: current.y + (target.y - current.y) * .32,
+        width: current.width + (target.width - current.width) * .32,
+        height: current.height + (target.height - current.height) * .32,
       })
+      if (wheelAnimationFrame.current === null) wheelAnimationFrame.current = requestAnimationFrame(continueWheelZoom)
       if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
       wheelCommitTimer.current = setTimeout(() => {
         wheelCommitTimer.current = null
+        if (wheelTargetViewRef.current) {
+          applyLiveView(wheelTargetViewRef.current)
+          wheelTargetViewRef.current = null
+        }
+        if (wheelAnimationFrame.current !== null) cancelAnimationFrame(wheelAnimationFrame.current)
+        wheelAnimationFrame.current = null
         commitLiveView()
-      }, 100)
+      }, 120)
     }}>
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>
     <g data-layer="canvas-background"><rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>

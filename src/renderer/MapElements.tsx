@@ -1,14 +1,18 @@
+import { memo } from 'react'
 import type { ActualRouteProject, MapElement } from '../data/model'
 
-export function MapElementsLayer({ project, presentation = false, visibleLineIds, selectedId, hitRadius = 22, onPointerDown }: {
+export const MapElementsLayer = memo(function MapElementsLayer({ project, presentation = false, visibleLineIds, selectedId, hitRadius = 22, onPointerDown, includeElementIds, excludeElementIds, overlay = false }: {
   project: ActualRouteProject
   presentation?: boolean
   visibleLineIds?: Set<string>
   selectedId?: string
   hitRadius?: number
   onPointerDown?: (event: React.PointerEvent<SVGGElement>, element: MapElement) => void
+  includeElementIds?: ReadonlySet<string>
+  excludeElementIds?: ReadonlySet<string>
+  overlay?: boolean
 }) {
-  return <g data-layer="map-elements">{(project.mapElements ?? []).filter(element => element.visible).map(element => {
+  return <g data-layer={overlay ? "map-elements-active-overlay" : "map-elements"} pointerEvents={overlay ? "none" : undefined}>{(project.mapElements ?? []).filter(element => element.visible && (!includeElementIds || includeElementIds.has(element.id)) && !excludeElementIds?.has(element.id)).map(element => {
     const lines = element.text.split('\n'), anchor = element.textAlign === 'start' ? 'start' : element.textAlign === 'end' ? 'end' : 'middle'
     const estimatedWidth = Math.max(1, ...lines.map(line => [...line].length)) * element.fontSize, height = Math.max(1, lines.length) * element.fontSize * 1.2
     return <g key={element.id} className={`map-element free-text ${selectedId === element.id ? 'selected' : ''}`} data-map-element-id={element.id} transform={`translate(${element.x} ${element.y}) rotate(${element.rotation})`} onPointerDown={event => onPointerDown?.(event, element)}>
@@ -17,4 +21,4 @@ export function MapElementsLayer({ project, presentation = false, visibleLineIds
       {!presentation && selectedId === element.id && <rect data-editor="true" className="map-element-selection" x={element.textAlign === 'start' ? -4 : element.textAlign === 'end' ? -estimatedWidth - 4 : -estimatedWidth / 2 - 4} y={-element.fontSize - 4} width={estimatedWidth + 8} height={height + 8} rx="4" />}
     </g>
   })}</g>
-}
+})

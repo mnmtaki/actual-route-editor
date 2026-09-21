@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { ActualRouteProject, Road } from '../data/model'
 import { sortedVectorBasemapObjects } from '../data/roads'
 import { AarcTerrainTransitionsArtwork, BasemapPathArtwork } from './BasemapPaths'
@@ -5,7 +6,7 @@ import { RoadArtwork } from './Roads'
 import { AarcTextTagsLayer } from './AarcTextTags'
 import { AarcFakeLinesLayer } from './AarcFakeLines'
 
-export function VectorBasemapLayer({
+export const VectorBasemapLayer = memo(function VectorBasemapLayer({
   project,
   presentation = false,
   visibleLineIds,
@@ -16,6 +17,9 @@ export function VectorBasemapLayer({
   onPointPointerDown,
   onRoadPointerDown,
   onRoadPointPointerDown,
+  includeObjectIds,
+  excludeObjectIds,
+  overlay = false,
 }: {
   project: ActualRouteProject
   presentation?: boolean
@@ -27,10 +31,14 @@ export function VectorBasemapLayer({
   onPointPointerDown?: React.ComponentProps<typeof BasemapPathArtwork>['onPointPointerDown']
   onRoadPointerDown?: React.ComponentProps<typeof RoadArtwork>['onPointerDown']
   onRoadPointPointerDown?: React.ComponentProps<typeof RoadArtwork>['onPointPointerDown']
+  includeObjectIds?: ReadonlySet<string>
+  excludeObjectIds?: ReadonlySet<string>
+  overlay?: boolean
 }) {
-  return <g data-layer="vector-basemap">
-    <AarcTerrainTransitionsArtwork project={project} part="carpet" />
-    {sortedVectorBasemapObjects(project).map(item => {
+  const objectVisible = (id: string) => (!includeObjectIds || includeObjectIds.has(id)) && !excludeObjectIds?.has(id)
+  return <g data-layer={overlay ? "vector-basemap-active-overlay" : "vector-basemap"} pointerEvents={overlay ? "none" : undefined}>
+    {!overlay && <AarcTerrainTransitionsArtwork project={project} part="carpet" />}
+    {sortedVectorBasemapObjects(project).filter(item => objectVisible(item.object.id)).map(item => {
       if (item.kind === 'basemap') {
         const path = item.object as import('../data/model').BasemapPath
         if (!path.visible) return null
@@ -40,9 +48,9 @@ export function VectorBasemapLayer({
       if (!road.visible) return null
       return <RoadArtwork key={`road-${road.id}`} road={road} project={project} presentation={presentation} selected={selectedId === road.id} hitRadius={hitRadius} onPointerDown={onRoadPointerDown} onPointPointerDown={onRoadPointPointerDown} />
     })}
-    <AarcTerrainTransitionsArtwork project={project} part="body" />
-    <AarcFakeLinesLayer project={project} part="terrain" />
-    <AarcTextTagsLayer project={project} presentation={presentation} visibleLineIds={visibleLineIds} mode="sunken" />
-    {draft && <RoadArtwork road={draft} project={project} presentation={false} selected hitRadius={hitRadius} onPointerDown={onRoadPointerDown} onPointPointerDown={onRoadPointPointerDown} />}
+    {!overlay && <AarcTerrainTransitionsArtwork project={project} part="body" />}
+    {!overlay && <AarcFakeLinesLayer project={project} part="terrain" />}
+    {!overlay && <AarcTextTagsLayer project={project} presentation={presentation} visibleLineIds={visibleLineIds} mode="sunken" />}
+    {!overlay && draft && <RoadArtwork road={draft} project={project} presentation={false} selected hitRadius={hitRadius} onPointerDown={onRoadPointerDown} onPointPointerDown={onRoadPointPointerDown} />}
   </g>
-}
+})

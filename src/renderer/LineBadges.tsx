@@ -1,15 +1,19 @@
+import { memo } from 'react'
 import type { ActualRouteProject, Line, LineBadge } from '../data/model'
 import { getEffectiveLineColor, getLineDisplayName } from '../data/lineIdentity'
 
-export function LineBadgesLayer({ project, presentation = false, visibleLineIds, selectedId, hitRadius = 22, onPointerDown }: {
+export const LineBadgesLayer = memo(function LineBadgesLayer({ project, presentation = false, visibleLineIds, selectedId, hitRadius = 22, onPointerDown, includeLabelIds, excludeLabelIds, overlay = false }: {
   project: ActualRouteProject
   presentation?: boolean
   visibleLineIds?: Set<string>
   selectedId?: string
   hitRadius?: number
   onPointerDown?: (event: React.PointerEvent<SVGGElement>, line: Line, badge: LineBadge) => void
+  includeLabelIds?: ReadonlySet<string>
+  excludeLabelIds?: ReadonlySet<string>
+  overlay?: boolean
 }) {
-  return <g data-layer="line-badges" data-line-label-layer="native">{project.lines.flatMap(line => (line.lineBadges ?? []).filter(badge => badge.visible).map(badge => {
+  return <g data-layer={overlay ? "line-badges-active-overlay" : "line-badges"} data-line-label-layer="native" pointerEvents={overlay ? "none" : undefined}>{project.lines.flatMap(line => (line.lineBadges ?? []).filter(badge => badge.visible && (!includeLabelIds || includeLabelIds.has(badge.id)) && !excludeLabelIds?.has(badge.id)).map(badge => {
     if (presentation && visibleLineIds && !visibleLineIds.has(line.id)) return null
     const displayName = getLineDisplayName(project, line)
     const color = getEffectiveLineColor(project, line)
@@ -23,4 +27,4 @@ export function LineBadgesLayer({ project, presentation = false, visibleLineIds,
       {!presentation && selectedId === badge.id && <rect data-editor="true" className="map-element-selection" x={-size / 2 - 5} y={-size / 2 - 5} width={size + 10} height={size + 10} rx={Math.min((size + 10) / 2, radius + 4)} />}
     </g>
   }))}</g>
-}
+})

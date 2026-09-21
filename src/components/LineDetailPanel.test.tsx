@@ -81,6 +81,23 @@ describe('branch settings',()=>{
     expect(onAddBranchLine).toHaveBeenCalledWith('line-a')
   })
 
+
+  it('lists only real child lines and exposes branch/settings navigation',()=>{
+    const project=structuredClone(demoProject),openBranch=vi.fn(),openSettings=vi.fn()
+    project.lines.push(
+      {id:'real-branch',name:'机场支线',color:'#000000',parentLineId:'line-a',stationSequence:['s1','s2'],lineOrder:3,visible:true,locked:false},
+      {id:'fake-branch',name:'',color:'#000000',parentLineId:'line-a',isFake:true,stationSequence:[],lineOrder:4,visible:true,locked:false},
+    )
+    render(<LineBranchPanel project={project} lineId="line-a" onBack={()=>{}} onChange={()=>{}} onOpenBranchSettings={openBranch} onOpenLineSettings={openSettings}/>)
+    expect(screen.getByText('机场支线')).toBeTruthy()
+    expect(screen.queryByText('伪线')).toBeNull()
+    const section=screen.getByText('所属支线').closest('section')!
+    fireEvent.click(section.querySelectorAll('button')[0])
+    fireEvent.click(section.querySelectorAll('button')[1])
+    expect(openBranch).toHaveBeenCalledWith('real-branch')
+    expect(openSettings).toHaveBeenCalledWith('real-branch')
+  })
+
   it('updates the latest relationship entry instead of inventing another baseline',()=>{
     const project=structuredClone(demoProject),line=project.lines.find(item=>item.id==='line-a')!,onChange=vi.fn()
     line.parentHistory=[

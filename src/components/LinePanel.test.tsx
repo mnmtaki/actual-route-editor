@@ -53,15 +53,15 @@ describe('line structure panel',()=>{
   expect(onSelect).toHaveBeenCalledWith('line-b',{ctrlKey:true,metaKey:false,shiftKey:false})
   expect(screen.queryByTestId('line-detail-panel')).toBeNull()
  })
- it('renders parent and child lines as a collapsible hierarchy',()=>{
+ it('keeps real child lines out of the first-level list and exposes them from branch settings',()=>{
   const project=structuredClone(demoProject)
-  project.lines.push({id:'line-a-branch',name:'',color:'#000000',parentLineId:'line-a',stationSequence:['s1','s2'],lineOrder:3,visible:true,locked:false})
+  project.lines.push({id:'line-a-branch',name:'机场支线',color:'#000000',parentLineId:'line-a',stationSequence:['s1','s2'],lineOrder:3,visible:true,locked:false})
   const view=render(<LinePanel project={project} selection={null} activeLineId={null} onSelect={()=>{}} onChange={()=>{}} onAddLine={()=>{}}/>)
-  expect(view.container.querySelectorAll('[data-line-id]')).toHaveLength(project.lines.length)
-  expect(screen.getByText(/└ 支线/)).toBeTruthy()
-  fireEvent.click(screen.getByRole('button',{name:'折叠支线'}))
-  expect(screen.queryByText(/└ 支线/)).toBeNull()
-  expect(screen.getByRole('button',{name:'展开支线'})).toBeTruthy()
+  expect(view.container.querySelectorAll('[data-line-id]')).toHaveLength(project.lines.length-1)
+  expect(screen.queryByText('机场支线')).toBeNull()
+  fireEvent.click(screen.getByRole('button',{name:'澄川线支线设置'}))
+  expect(screen.getByText('机场支线')).toBeTruthy()
+  expect(screen.getByRole('button',{name:'设置'})).toBeTruthy()
  })
  it('offers branch creation inside branch settings, not in the top-level heading',()=>{
   const onAddBranchLine=vi.fn()

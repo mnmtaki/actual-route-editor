@@ -10,7 +10,7 @@ import { getPassengerStationCountForLine } from '../data/passengerStats'
 import { compilePresentation } from '../presentation/compiler'
 import { PresentationScene } from '../presentation/PresentationScene'
 import { AarcTextTagsLayer } from '../renderer/AarcTextTags'
-import { getAarcTerminalExtensions } from '../renderer/AarcTerminalExtensions'
+import { AarcTerminalExtensionsLayer, getAarcTerminalExtensions } from '../renderer/AarcTerminalExtensions'
 
 type RawLine = { id?: unknown; type?: unknown; isFake?: unknown; pts?: unknown; parent?: unknown }
 type RawTag = { id?: unknown; pos?: unknown; forId?: unknown }
@@ -119,6 +119,8 @@ describe('real AARC project end-to-end regression', () => {
     expect(extensions[0]).toMatchObject({ kind: 'head', sourceLineId: 238 })
     expect(extensions[0].path).toContain('583.48671')
     expect(extensions[0].path).toContain('818.50048')
+    const { container } = render(<svg><AarcTerminalExtensionsLayer project={project} line={line!} /></svg>)
+    expect(container.querySelector('[data-aarc-terminal-extension="head"]')).not.toBeNull()
   })
 
   it('all four real projects compile and render a finite Presentation final frame after round-trip', () => {

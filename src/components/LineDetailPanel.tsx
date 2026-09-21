@@ -61,18 +61,20 @@ function LineSplitEditor({project,lineId,onChange}:{project:ActualRouteProject;l
 }
 
 
-export function LineBranchPanel({project,lineId,onBack,onChange,onAddBranchLine}:{
+export function LineBranchPanel({project,lineId,onBack,onChange,onAddBranchLine,onOpenBranchSettings,onOpenLineSettings}:{
   project:ActualRouteProject
   lineId:string
   onBack:()=>void
   onChange:(next:ActualRouteProject)=>void
   onAddBranchLine?:(parentLineId:string)=>void
+  onOpenBranchSettings?:(lineId:string)=>void
+  onOpenLineSettings?:(lineId:string)=>void
 }){
   const line=project.lines.find(item=>item.id===lineId)
   if(!line)return null
   const parentHistory=normalizeLineParentHistory(line)??[{id:`parent-base-${line.id}`,effectiveAt:null,parentLineId:line.parentLineId??null}]
   const currentEntry=parentHistory.at(-1)!
-  const children=project.lines.filter(item=>item.parentLineId===line.id)
+  const children=project.lines.filter(item=>item.parentLineId===line.id&&!isFakeLine(item))
   const patchParent=(entry:{id:string;effectiveAt:string|null;parentLineId:string|null})=>{
     const next=structuredClone(project)
     try{updateLineParentHistoryEntry(next,line.id,entry);onChange(next)}
@@ -87,7 +89,7 @@ export function LineBranchPanel({project,lineId,onBack,onChange,onAddBranchLine}
         {!line.parentLineId&&!isFakeLine(line)&&!line.locked&&<button onClick={()=>onAddBranchLine?.(line.id)}>＋ 新建支线</button>}
       </section>
       <section className="line-detail-section"><h3>所属支线</h3>
-        {children.length?children.map(child=><div className="line-detail-readonly" key={child.id}><span>{getLineDisplayName(project,child)||'支线'}</span><strong>{resolveCurrentLineDisplayCode(child)}</strong></div>):<p className="line-detail-note">当前没有直属支线。</p>}
+        {children.length?children.map(child=><div className="line-detail-readonly" key={child.id}><span>{getLineDisplayName(project,child)||'支线'}</span><div className="line-detail-inline-actions"><button type="button" onClick={()=>onOpenBranchSettings?.(child.id)}>支线</button><button type="button" onClick={()=>onOpenLineSettings?.(child.id)}>设置</button></div></div>):<p className="line-detail-note">当前没有直属支线。</p>}
       </section>
       <section className="line-detail-section"><h3>关系历史</h3>
         {parentHistory.map(entry=><div className="line-history-row" key={entry.id}><strong>{entry.effectiveAt??'初始'}</strong>{entry.effectiveAt!==null&&<input aria-label="主支关系生效日期" type="date" value={entry.effectiveAt} onChange={e=>patchParent({...entry,effectiveAt:e.target.value||null})}/>}<select aria-label="历史线路身份" value={entry.parentLineId??''} onChange={e=>patchParent({...entry,parentLineId:e.target.value||null})}><option value="">独立线路</option>{project.lines.filter(item=>item.id!==line.id&&!item.isFake).map(item=><option key={item.id} value={item.id}>作为「{getLineDisplayName(project,item)||item.id}」的支线</option>)}</select>{entry.effectiveAt!==null&&<button onClick={()=>{const next=structuredClone(project);try{removeLineParentHistoryEntry(next,line.id,entry.id);onChange(next)}catch(error){window.alert(error instanceof Error?error.message:'主支关系历史无效')}}}>删除</button>}</div>)}

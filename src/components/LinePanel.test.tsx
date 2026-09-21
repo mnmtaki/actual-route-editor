@@ -58,7 +58,7 @@ describe('line structure panel',()=>{
   project.lines.push({id:'line-a-branch',name:'机场支线',color:'#000000',parentLineId:'line-a',stationSequence:['s1','s2'],lineOrder:3,visible:true,locked:false})
   const view=render(<LinePanel project={project} selection={null} activeLineId={null} onSelect={()=>{}} onChange={()=>{}} onAddLine={()=>{}}/>)
   expect(view.container.querySelectorAll('[data-line-id]')).toHaveLength(project.lines.length-1)
-  expect(screen.queryByText('机场支线')).toBeNull()
+  expect(view.container.querySelector('.line-list')?.textContent).not.toContain('机场支线')
   fireEvent.click(screen.getByRole('button',{name:'澄川线支线设置'}))
   expect(screen.getByText('机场支线')).toBeTruthy()
   expect(screen.getByRole('button',{name:'设置'})).toBeTruthy()

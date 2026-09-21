@@ -371,13 +371,11 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC å
   return { project: materializeAarcFakeLineEntries(project), summary }
 }
 
-function isRealTransitLine(line: AarcLine, allLines: AarcLine[] = []) {
-  if (!line || line.isFake === true || Number(line.type) === 1 || !Array.isArray(line.pts) || line.pts.length < 2) return false
-  if (text(line.name)) return true
-  const parentId = finiteId(line.parent)
-  if (parentId === null) return false
-  const parent = allLines.find(candidate => finiteId(candidate?.id) === parentId)
-  return Boolean(parent && parent !== line && parent.isFake !== true && Number(parent.type) !== 1 && Array.isArray(parent.pts) && parent.pts.length >= 2 && text(parent.name))
+function isRealTransitLine(line: AarcLine, _allLines: AarcLine[] = []) {
+  // AARC does not require a common transit line to have a name. Treat every
+  // non-fake type-0 line with a real point chain as transit, including unnamed
+  // root lines; name is presentation metadata, not a service discriminator.
+  return Boolean(line && line.isFake !== true && Number(line.type ?? 0) !== 1 && Array.isArray(line.pts) && line.pts.length >= 2)
 }
 function isAarcTerrainPath(line: AarcLine) {
   return Boolean(line && line.isFake !== true && Number(line.type) === 1 && Array.isArray(line.pts) && line.pts.length >= 2)

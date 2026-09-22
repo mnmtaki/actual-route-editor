@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ActualRouteProject, Road, Selection } from '../data/model'
 import { uid } from '../data/model'
 import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPlans, getSegmentSubpathSpans, pathSpansToSvgPath } from '../geometry/path'
@@ -128,7 +128,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     cameraViewportRef.current?.setAttribute('transform', `matrix(${scaleX} 0 0 ${scaleY} ${translateX} ${translateY})`)
     applyCanvasCamera(next)
   }
-  const commitLiveView = () => setView(liveViewRef.current)
+  const commitLiveView = () => { const next = liveViewRef.current; startTransition(() => setView(next)) }
   const panLiveView = (fromClient: Point, toClient: Point) => {
     const currentView = liveViewRef.current
     const before = screenToWorld(fromClient.x, fromClient.y, currentView)
@@ -235,7 +235,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }
     const startView = liveViewRef.current
     gesture.current = { kind: 'pinchingCanvas', pointerIds: [firstId, secondId], initialDistance, startView, startWorld: screenToWorld(center.x, center.y, startView) }
-  }, [cancelScheduledPreview])
+  }, [cancelScheduledPreview, screenToWorld])
   const startObjectDrag = useCallback((kind: Extract<Gesture, { before: ActualRouteProject }>['kind'], event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string, ownerPathId?: string, ownerRoadId?: string) => {
     event.stopPropagation(); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); capture(event)
     if (pointers.current.size >= 2) { beginPinch(); return false }

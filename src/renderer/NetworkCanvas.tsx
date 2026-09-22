@@ -41,6 +41,7 @@ type DrawingCanvasPointer = { pointerId: number; startClient: Point; lastClient:
 const WHEEL_ZOOM_IDLE_MS = 100
 const WHEEL_ZOOM_TIME_CONSTANT_MS = 32
 const WHEEL_ZOOM_SETTLE_RATIO = .001
+const WHEEL_ZOOM_SENSITIVITY = .0004
 
 function interpolateView(from: View, to: View, amount: number): View {
   const lerp = (a: number, b: number) => a + (b - a) * amount
@@ -673,7 +674,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       if (Math.abs(delta) < .01) return
       const baseView = wheelTargetViewRef.current ?? liveViewRef.current
       const point = screenPointToWorld(svgRef.current!, event.clientX, event.clientY, baseView)
-      const factor = Math.exp(delta * .00128)
+      const factor = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY)
       wheelTargetViewRef.current = {
         x: point.x - (point.x - baseView.x) * factor,
         y: point.y - (point.y - baseView.y) * factor,

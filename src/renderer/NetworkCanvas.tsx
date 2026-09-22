@@ -686,37 +686,24 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     <g ref={cameraViewportRef} data-layer="camera-viewport" style={{ willChange: 'transform' }}>
     <g data-layer="canvas-background"><rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>
     {backgroundProject.background?.visible && <image data-layer="background-image" href={backgroundProject.background.dataUrl} x={backgroundProject.background.x} y={backgroundProject.background.y} width={backgroundProject.background.width} height={backgroundProject.background.height} opacity={backgroundProject.background.opacity} onPointerDown={handleBackgroundPointerDown} />}
-    {preview && dragVectorBasemapOverlay.kind === 'basemap'
-      ? <VectorBasemapLayer
-          project={shown}
-          draft={roadDraft}
-          selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
-          hitRadius={stationHitRadius}
-          onRoadPointerDown={handleRoadPointerDown}
-          onRoadPointPointerDown={handleRoadPointPointerDown}
-          onPathPointerDown={handleBasemapPathPointerDown}
-          onPointPointerDown={handleBasemapPointPointerDown}
-        />
-      : <>
-          <VectorBasemapLayer
-            project={project}
-            draft={roadDraft}
-            selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
-            hitRadius={stationHitRadius}
-            excludeObjectIds={preview && dragVectorBasemapOverlay.kind === 'road' ? dragVectorBasemapOverlay.objectIds : undefined}
-            onRoadPointerDown={handleRoadPointerDown}
-            onRoadPointPointerDown={handleRoadPointPointerDown}
-            onPathPointerDown={handleBasemapPathPointerDown}
-            onPointPointerDown={handleBasemapPointPointerDown}
-          />
-          {preview && dragVectorBasemapOverlay.kind === 'road' && dragVectorBasemapOverlay.objectIds.size > 0 && <VectorBasemapLayer
-            project={shown}
-            selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : undefined}
-            hitRadius={stationHitRadius}
-            includeObjectIds={dragVectorBasemapOverlay.objectIds}
-            overlay
-          />}
-        </>}
+    <VectorBasemapLayer
+      project={project}
+      draft={roadDraft}
+      selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
+      hitRadius={stationHitRadius}
+      excludeObjectIds={preview && dragVectorBasemapOverlay.kind ? dragVectorBasemapOverlay.objectIds : undefined}
+      onRoadPointerDown={handleRoadPointerDown}
+      onRoadPointPointerDown={handleRoadPointPointerDown}
+      onPathPointerDown={handleBasemapPathPointerDown}
+      onPointPointerDown={handleBasemapPointPointerDown}
+    />
+    {preview && dragVectorBasemapOverlay.kind && dragVectorBasemapOverlay.objectIds.size > 0 && <VectorBasemapLayer
+      project={shown}
+      selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
+      hitRadius={stationHitRadius}
+      includeObjectIds={dragVectorBasemapOverlay.objectIds}
+      overlay
+    />}
     {basemapDrawingOverlay}
     <NetworkLineLayer
       project={project}

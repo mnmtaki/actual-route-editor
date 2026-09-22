@@ -135,10 +135,13 @@ describe('direct manipulation gestures', () => {
       const svg = container.querySelector('svg')!
       Object.defineProperty(svg, 'clientWidth', { configurable: true, value: 920 })
       vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+      const viewport = container.querySelector('[data-layer="camera-viewport"]')!
       fireEvent.wheel(svg, { clientX: 460, clientY: 340, deltaY: -100, bubbles: true })
-      expect(svg.getAttribute('viewBox')).not.toBe('0 0 920 680')
+      vi.advanceTimersByTime(16)
+      expect(svg.getAttribute('viewBox')).toBe('0 0 920 680')
+      expect(viewport.getAttribute('transform')).toMatch(/^matrix\(/)
       expect(setView).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(119)
+      vi.advanceTimersByTime(83)
       expect(setView).not.toHaveBeenCalled()
       vi.advanceTimersByTime(1)
       expect(setView).toHaveBeenCalledTimes(1)
@@ -148,20 +151,27 @@ describe('direct manipulation gestures', () => {
   })
 
   it('uses wheel delta magnitude instead of fixed zoom steps', () => {
-    const renderViewWidth = (deltaY: number) => {
-      const { container, unmount } = render(<NetworkCanvas {...baseProps} project={demoProject} />)
-      const svg = container.querySelector('svg')!
-      Object.defineProperty(svg, 'clientWidth', { configurable: true, value: 920 })
-      vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
-      fireEvent.wheel(svg, { clientX: 460, clientY: 340, deltaY, bubbles: true })
-      const width = Number(svg.getAttribute('viewBox')!.split(' ')[2])
-      unmount()
-      return width
+    vi.useFakeTimers()
+    try {
+      const renderCommittedWidth = (deltaY: number) => {
+        const setView = vi.fn()
+        const { container, unmount } = render(<NetworkCanvas {...baseProps} project={demoProject} setView={setView} />)
+        const svg = container.querySelector('svg')!
+        Object.defineProperty(svg, 'clientWidth', { configurable: true, value: 920 })
+        vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+        fireEvent.wheel(svg, { clientX: 460, clientY: 340, deltaY, bubbles: true })
+        vi.advanceTimersByTime(100)
+        const width = setView.mock.calls.at(-1)?.[0].width as number
+        unmount()
+        return width
+      }
+      const gentle = renderCommittedWidth(-10)
+      const strong = renderCommittedWidth(-100)
+      expect(920 - gentle).toBeGreaterThan(0)
+      expect(920 - strong).toBeGreaterThan(920 - gentle)
+    } finally {
+      vi.useRealTimers()
     }
-    const gentle = renderViewWidth(-10)
-    const strong = renderViewWidth(-100)
-    expect(920 - gentle).toBeGreaterThan(0)
-    expect(920 - strong).toBeGreaterThan(920 - gentle)
   })
 
   it('cancels an object drag and switches safely to pinch when a second pointer arrives', () => {

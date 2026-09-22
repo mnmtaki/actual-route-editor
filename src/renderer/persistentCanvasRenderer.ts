@@ -24,8 +24,12 @@ export interface RasterizedScene {
   bleed: number
 }
 
+let documentCssCache: { sheetCount: number; value: string } | undefined
+
 function collectDocumentCss() {
   if (typeof document === 'undefined') return ''
+  const sheetCount = document.styleSheets.length
+  if (documentCssCache?.sheetCount === sheetCount) return documentCssCache.value
   const chunks: string[] = []
   for (const sheet of Array.from(document.styleSheets)) {
     try {
@@ -34,7 +38,9 @@ function collectDocumentCss() {
       // Ignore cross-origin stylesheets. The editor's own styles remain available.
     }
   }
-  return chunks.join('\n')
+  const value = chunks.join('\n')
+  documentCssCache = { sheetCount, value }
+  return value
 }
 
 function loadImage(url: string) {

@@ -50,6 +50,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   // so App/history does not rerender on every pointer movement.
   void onPreview
   const svgRef = useRef<SVGSVGElement>(null)
+  const cameraViewportRef = useRef<SVGGElement>(null)
+  const committedViewRef = useRef<View>(view)
   const liveViewRef = useRef<View>(view)
   const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const wheelAnimationFrame = useRef<number | null>(null)
@@ -99,31 +101,18 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
 
   const applyLiveView = (next: View) => {
     liveViewRef.current = next
-    svgRef.current?.setAttribute('viewBox', `${next.x} ${next.y} ${next.width} ${next.height}`)
+    const base = committedViewRef.current
+    const scaleX = base.width / next.width
+    const scaleY = base.height / next.height
+    const translateX = base.x - next.x * scaleX
+    const translateY = base.y - next.y * scaleY
+    cameraViewportRef.current?.setAttribute('transform', `matrix(${scaleX} 0 0 ${scaleY} ${translateX} ${translateY})`)
   }
   const commitLiveView = () => setView(liveViewRef.current)
-  const continueWheelZoom = () => {
+  const flushWheelView = () => {
+    wheelAnimationFrame.current = null
     const target = wheelTargetViewRef.current
-    if (!target) {
-      wheelAnimationFrame.current = null
-      return
-    }
-    const current = liveViewRef.current
-    const next = {
-      x: current.x + (target.x - current.x) * .38,
-      y: current.y + (target.y - current.y) * .38,
-      width: current.width + (target.width - current.width) * .38,
-      height: current.height + (target.height - current.height) * .38,
-    }
-    const settled = Math.abs(next.width - target.width) <= Math.max(.01, target.width * .00035)
-      && Math.abs(next.height - target.height) <= Math.max(.01, target.height * .00035)
-    applyLiveView(settled ? target : next)
-    if (settled) {
-      wheelTargetViewRef.current = null
-      wheelAnimationFrame.current = null
-      return
-    }
-    wheelAnimationFrame.current = requestAnimationFrame(continueWheelZoom)
+    if (target) applyLiveView(target)
   }
   const panLiveView = (fromClient: Point, toClient: Point) => {
     const currentView = liveViewRef.current
@@ -157,8 +146,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   }, [])
 
   useLayoutEffect(() => {
+    committedViewRef.current = view
     liveViewRef.current = view
     svgRef.current?.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`)
+    cameraViewportRef.current?.removeAttribute('transform')
   }, [view])
   useLayoutEffect(() => {
     const element = svgRef.current
@@ -637,34 +628,25 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const baseView = wheelTargetViewRef.current ?? liveViewRef.current
       const point = screenPointToWorld(svgRef.current!, event.clientX, event.clientY, baseView)
       const factor = Math.exp(delta * .00128)
-      const target = {
+      wheelTargetViewRef.current = {
         x: point.x - (point.x - baseView.x) * factor,
         y: point.y - (point.y - baseView.y) * factor,
         width: baseView.width * factor,
         height: baseView.height * factor,
       }
-      wheelTargetViewRef.current = target
-      const current = liveViewRef.current
-      applyLiveView({
-        x: current.x + (target.x - current.x) * .32,
-        y: current.y + (target.y - current.y) * .32,
-        width: current.width + (target.width - current.width) * .32,
-        height: current.height + (target.height - current.height) * .32,
-      })
-      if (wheelAnimationFrame.current === null) wheelAnimationFrame.current = requestAnimationFrame(continueWheelZoom)
+      if (wheelAnimationFrame.current === null) wheelAnimationFrame.current = requestAnimationFrame(flushWheelView)
       if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
       wheelCommitTimer.current = setTimeout(() => {
         wheelCommitTimer.current = null
-        if (wheelTargetViewRef.current) {
-          applyLiveView(wheelTargetViewRef.current)
-          wheelTargetViewRef.current = null
-        }
         if (wheelAnimationFrame.current !== null) cancelAnimationFrame(wheelAnimationFrame.current)
         wheelAnimationFrame.current = null
+        if (wheelTargetViewRef.current) applyLiveView(wheelTargetViewRef.current)
+        wheelTargetViewRef.current = null
         commitLiveView()
-      }, 120)
+      }, 100)
     }}>
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>
+    <g ref={cameraViewportRef} data-layer="camera-viewport" style={{ willChange: 'transform' }}>
     <g data-layer="canvas-background"><rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>
     {backgroundProject.background?.visible && <image data-layer="background-image" href={backgroundProject.background.dataUrl} x={backgroundProject.background.x} y={backgroundProject.background.y} width={backgroundProject.background.width} height={backgroundProject.background.height} opacity={backgroundProject.background.opacity} onPointerDown={handleBackgroundPointerDown} />}
     {preview && dragVectorBasemapOverlay.kind === 'basemap'
@@ -803,5 +785,6 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     {drawing?.kind === 'line' && !lineDraft?.anchorStationId && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置起点站</text></g>}
     {drawing?.kind === 'basemap' && !(shown.basemapPaths?.find(path => path.id === drawing.pathId)?.points.length) && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置第一个地形节点</text></g>}
     {calibration && <g data-editor="true" data-layer="calibration-overlay"><rect x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="transparent" pointerEvents="all" onPointerDown={event => handleCanvasPointerDown(event as unknown as React.PointerEvent<SVGSVGElement>)} /><line x1={calibration.points[0]?.x ?? 0} y1={calibration.points[0]?.y ?? 0} x2={calibration.points[1]?.x ?? calibration.points[0]?.x ?? 0} y2={calibration.points[1]?.y ?? calibration.points[0]?.y ?? 0} stroke="#c89521" strokeWidth="2" strokeDasharray="8 5" pointerEvents="none" />{calibration.points.map((point,index)=><circle key={index} cx={point.x} cy={point.y} r="8" fill="#fff9e8" stroke="#c89521" strokeWidth="2" pointerEvents="none" />)}<text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#765c1a" fontSize="16" pointerEvents="none">{calibration.points.length ? '再点一下选择第二个点' : '点击地图上的第一个点'}</text></g>}
+    </g>
   </svg>
 }

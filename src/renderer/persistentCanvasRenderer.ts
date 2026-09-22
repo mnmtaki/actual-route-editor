@@ -56,7 +56,7 @@ export async function rasterizeVisibleMap(
   bleed = DEFAULT_BLEED,
 ): Promise<RasterizedScene | null> {
   if (typeof document === 'undefined' || typeof Image === 'undefined' || typeof XMLSerializer === 'undefined') return null
-  if (typeof URL?.createObjectURL !== 'function' || typeof URL?.revokeObjectURL !== 'function') return null
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function' || typeof URL.revokeObjectURL !== 'function') return null
   if (!(cssWidth > 1) || !(cssHeight > 1)) return null
 
   const bounds = expandedView(baseView, bleed)

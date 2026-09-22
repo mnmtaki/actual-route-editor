@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CANVAS_SCENE_BLEED, canvasCameraTransform, prepareRasterSource } from './persistentCanvasRenderer'
+import { CANVAS_SCENE_BLEED, canvasCameraTransform, prepareRasterSource, preparedRasterMarkupForBounds } from './persistentCanvasRenderer'
 
 describe('persistent canvas camera', () => {
   const base = { x: 0, y: 0, width: 920, height: 680 }
@@ -38,6 +38,28 @@ describe('persistent canvas camera', () => {
     expect(source?.markup).not.toContain('line-legend')
     expect(source?.markup).not.toContain('data-editor')
     expect(source?.markup).not.toContain('matrix(2 0 0 2 1 1)')
+  })
+
+  it('keeps only buffered-view chunks when cached world bounds are available', () => {
+    const source = {
+      markup: '<g id="fallback"/>',
+      fixedMarkup: '<defs/>',
+      chunks: [
+        { markup: '<g id="near"/>', bounds: { x: 20, y: 20, width: 10, height: 10 } },
+        { markup: '<g id="far"/>', bounds: { x: 800, y: 800, width: 10, height: 10 } },
+        { markup: '<g id="unknown"/>' },
+      ],
+    }
+    const markup = preparedRasterMarkupForBounds(source, { x: 0, y: 0, width: 100, height: 100 })
+    expect(markup).toContain('near')
+    expect(markup).toContain('unknown')
+    expect(markup).not.toContain('far')
+    expect(markup).toContain('camera-viewport')
+  })
+
+  it('falls back to the complete cleaned scene when chunk bounds are unavailable', () => {
+    expect(preparedRasterMarkupForBounds({ markup: '<g id="all"/>' }, { x: 0, y: 0, width: 100, height: 100 }))
+      .toBe('<g id="all"/>')
   })
 
   it('uses the same twenty percent bleed as the AARC-inspired viewport cache', () => {

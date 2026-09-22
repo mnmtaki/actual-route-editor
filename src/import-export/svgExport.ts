@@ -7,6 +7,7 @@ export function exportSvg(svg: SVGSVGElement, includeBackground: boolean): strin
   const clone = svg.cloneNode(true) as SVGSVGElement
   clone.querySelectorAll('[data-editor="true"], .segment-hit, .station-hit > circle:last-child, .station-selection-ring, [data-layer="opening-phase-preview"]').forEach(node => node.remove())
   clone.querySelectorAll('.segment-selected,.selected').forEach(node => node.classList.remove('segment-selected','selected'))
+  clone.querySelector('[data-layer="camera-viewport"]')?.removeAttribute('transform')
   clone.querySelector('[data-layer="canvas-background"]')?.remove()
   if (!includeBackground) clone.querySelectorAll('image').forEach(node => node.remove())
   const bounds=measureCompleteContent(clone) ?? parseViewBox(svg.getAttribute('viewBox')) ?? {x:0,y:0,width:1000,height:700}

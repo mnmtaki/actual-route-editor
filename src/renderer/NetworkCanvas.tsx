@@ -24,6 +24,7 @@ import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, 
 import { cloneProjectForDrag, getDragAffectedLineIds, getDragLineLabelOverlay, getDragMapElementOverlay, getDragStationOverlay, getDragVectorBasemapOverlay, type DragLineLabelOverlay, type DragMapElementOverlay, type DragStationOverlay, type DragVectorBasemapOverlay } from './dragPreview'
 import { NetworkLineLayer } from './NetworkLineLayer'
 import { NetworkStationLayer } from './NetworkStationLayer'
+import { createRasterZoomSnapshot, type RasterZoomSnapshot } from './rasterZoomSnapshot'
 
 type View = { x: number; y: number; width: number; height: number }
 type Point = { x: number; y: number }
@@ -57,6 +58,12 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const committedViewRef = useRef<View>(view)
   const liveViewRef = useRef<View>(view)
   const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const zoomSnapshotViewportRef = useRef<SVGGElement>(null)
+  const zoomSnapshotImageRef = useRef<SVGImageElement>(null)
+  const zoomSnapshotRef = useRef<RasterZoomSnapshot | null>(null)
+  const zoomSnapshotBuildTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const zoomSnapshotBuildGeneration = useRef(0)
+  const rasterZoomActiveRef = useRef(false)
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingPreview = useRef<ActualRouteProject | null>(null)
   const lastPreviewAt = useRef(0)
@@ -100,6 +107,40 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
   const structureHitRadius = Math.max(22, touchHitPixels * view.width / canvasWidth)
 
+  const sameView = (a: View, b: View) =>
+    Math.abs(a.x - b.x) < 1e-6 &&
+    Math.abs(a.y - b.y) < 1e-6 &&
+    Math.abs(a.width - b.width) < 1e-6 &&
+    Math.abs(a.height - b.height) < 1e-6
+
+  const cancelZoomSnapshotBuild = () => {
+    zoomSnapshotBuildGeneration.current += 1
+    if (zoomSnapshotBuildTimer.current !== null) clearTimeout(zoomSnapshotBuildTimer.current)
+    zoomSnapshotBuildTimer.current = null
+  }
+
+  const deactivateRasterZoom = () => {
+    rasterZoomActiveRef.current = false
+    zoomSnapshotViewportRef.current?.setAttribute('display', 'none')
+    zoomSnapshotViewportRef.current?.removeAttribute('transform')
+    cameraViewportRef.current?.removeAttribute('display')
+  }
+
+  const activateRasterZoomIfReady = () => {
+    const snapshot = zoomSnapshotRef.current
+    const image = zoomSnapshotImageRef.current
+    if (!snapshot || !image || !sameView(snapshot.baseView, committedViewRef.current)) return false
+    image.setAttribute('href', snapshot.url)
+    image.setAttribute('x', String(snapshot.bounds.x))
+    image.setAttribute('y', String(snapshot.bounds.y))
+    image.setAttribute('width', String(snapshot.bounds.width))
+    image.setAttribute('height', String(snapshot.bounds.height))
+    cameraViewportRef.current?.setAttribute('display', 'none')
+    zoomSnapshotViewportRef.current?.removeAttribute('display')
+    rasterZoomActiveRef.current = true
+    return true
+  }
+
   const applyLiveView = (next: View) => {
     liveViewRef.current = next
     const base = committedViewRef.current
@@ -107,7 +148,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     const scaleY = base.height / next.height
     const translateX = base.x - next.x * scaleX
     const translateY = base.y - next.y * scaleY
-    cameraViewportRef.current?.setAttribute('transform', `matrix(${scaleX} 0 0 ${scaleY} ${translateX} ${translateY})`)
+    const target = rasterZoomActiveRef.current ? zoomSnapshotViewportRef.current : cameraViewportRef.current
+    target?.setAttribute('transform', `matrix(${scaleX} 0 0 ${scaleY} ${translateX} ${translateY})`)
   }
   const commitLiveView = () => setView(liveViewRef.current)
   const panLiveView = (fromClient: Point, toClient: Point) => {
@@ -147,6 +189,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
     wheelCommitTimer.current = null
     svgRef.current?.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`)
+    deactivateRasterZoom()
     cameraViewportRef.current?.removeAttribute('transform')
   }, [view])
   useLayoutEffect(() => {
@@ -158,8 +201,35 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     observer?.observe(element)
     return () => observer?.disconnect()
   }, [])
+  useEffect(() => {
+    cancelZoomSnapshotBuild()
+    zoomSnapshotBuildTimer.current = setTimeout(() => {
+      zoomSnapshotBuildTimer.current = null
+      const element = svgRef.current
+      if (!element) return
+      const generation = ++zoomSnapshotBuildGeneration.current
+      const baseView = { ...committedViewRef.current }
+      void createRasterZoomSnapshot(element, baseView).then(snapshot => {
+        if (!snapshot) return
+        if (generation !== zoomSnapshotBuildGeneration.current || !sameView(baseView, committedViewRef.current)) {
+          URL.revokeObjectURL(snapshot.url)
+          return
+        }
+        const previous = zoomSnapshotRef.current
+        zoomSnapshotRef.current = snapshot
+        if (previous) URL.revokeObjectURL(previous.url)
+      }).catch(() => {
+        // Experimental optimization only: SVG zoom remains the fallback.
+      })
+    }, 180)
+    return cancelZoomSnapshotBuild
+  }, [view, project, selection, selectedStationIds, drawing, roadDraft, phasePreview, calibration, preview, canvasWidth])
   useEffect(() => () => {
     if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
+    cancelZoomSnapshotBuild()
+    const snapshot = zoomSnapshotRef.current
+    if (snapshot) URL.revokeObjectURL(snapshot.url)
+    zoomSnapshotRef.current = null
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
   }, [])
   useEffect(() => { if (!drawing) drawingClick.current = null }, [drawing])
@@ -622,6 +692,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, svgRef.current?.clientHeight ?? 680) : 1
       const delta = Math.max(-120, Math.min(120, event.deltaY * modeScale))
       if (Math.abs(delta) < .01) return
+      cancelZoomSnapshotBuild()
+      if (!rasterZoomActiveRef.current) activateRasterZoomIfReady()
       const baseView = liveViewRef.current
       const point = screenPointToWorld(svgRef.current!, event.clientX, event.clientY, baseView)
       const factor = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY)
@@ -638,6 +710,9 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       }, WHEEL_ZOOM_IDLE_MS)
     }}>
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>
+    <g ref={zoomSnapshotViewportRef} data-layer="zoom-raster-snapshot" display="none" pointerEvents="none" style={{ willChange: 'transform' }}>
+      <image ref={zoomSnapshotImageRef} preserveAspectRatio="none" />
+    </g>
     <g ref={cameraViewportRef} data-layer="camera-viewport" style={{ willChange: 'transform' }}>
     <g data-layer="canvas-background"><rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>
     {backgroundProject.background?.visible && <image data-layer="background-image" href={backgroundProject.background.dataUrl} x={backgroundProject.background.x} y={backgroundProject.background.y} width={backgroundProject.background.width} height={backgroundProject.background.height} opacity={backgroundProject.background.opacity} onPointerDown={handleBackgroundPointerDown} />}

@@ -4,6 +4,16 @@ const DEFAULT_BLEED = .2
 const MAX_BITMAP_DIMENSION = 2600
 const MAX_PIXEL_RATIO = 1.5
 
+export interface PreparedRasterSource {
+  markup: string
+}
+
+export interface RasterizedScene {
+  canvas: HTMLCanvasElement
+  baseView: CanvasView
+  bleed: number
+}
+
 function collectDocumentCss() {
   if (typeof document === 'undefined') return ''
   const chunks: string[] = []
@@ -37,43 +47,27 @@ function expandedView(view: CanvasView, bleed = DEFAULT_BLEED): CanvasView {
 
 function stripEditorArtifacts(svg: SVGSVGElement) {
   svg.querySelectorAll(
-    '[data-editor="true"],.segment-hit,.station-hit-target,.station-selection-ring,[data-layer="opening-phase-preview"],[data-layer$="-active-overlay"],[data-layer="vector-basemap-active-overlay"],[data-layer="background-image"],[data-layer="line-legend"]',
+    '[data-editor="true"],.segment-hit,.station-hit-target,.station-selection-ring,[data-layer="opening-phase-preview"],[data-layer$="-active-overlay"],[data-layer="vector-basemap-active-overlay"],[data-layer="background-image"],[data-layer="line-legend"],[data-layer="canvas-background"]',
   ).forEach(node => node.remove())
   svg.querySelectorAll('.segment-selected,.selected').forEach(node => node.classList.remove('segment-selected', 'selected'))
+  svg.querySelector('[data-layer="camera-viewport"]')?.removeAttribute('transform')
 }
 
-export interface RasterizedScene {
-  canvas: HTMLCanvasElement
-  baseView: CanvasView
-  bleed: number
-}
-
-export async function rasterizeVisibleMap(
-  sourceSvg: SVGSVGElement,
-  baseView: CanvasView,
-  cssWidth: number,
-  cssHeight: number,
-  bleed = DEFAULT_BLEED,
-): Promise<RasterizedScene | null> {
-  if (typeof document === 'undefined' || typeof Image === 'undefined' || typeof XMLSerializer === 'undefined') return null
-  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function' || typeof URL.revokeObjectURL !== 'function') return null
-  if (!(cssWidth > 1) || !(cssHeight > 1)) return null
-
-  const bounds = expandedView(baseView, bleed)
+/**
+ * Prepare the formal map once when project/static artwork changes. View changes
+ * reuse this serialized vector source, avoiding cloneNode/XML serialization on
+ * every wheel commit.
+ */
+export function prepareRasterSource(sourceSvg: SVGSVGElement): PreparedRasterSource | null {
+  if (typeof document === 'undefined' || typeof XMLSerializer === 'undefined') return null
   const clone = sourceSvg.cloneNode(true) as SVGSVGElement
   stripEditorArtifacts(clone)
   clone.removeAttribute('id')
-  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
-  clone.setAttribute('viewBox', `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`)
-
-  const ratio = Math.min(MAX_PIXEL_RATIO, Math.max(1, window.devicePixelRatio || 1))
-  const desiredWidth = Math.max(1, Math.round(cssWidth * (1 + bleed * 2) * ratio))
-  const desiredHeight = Math.max(1, Math.round(cssHeight * (1 + bleed * 2) * ratio))
-  const sizeScale = Math.min(1, MAX_BITMAP_DIMENSION / Math.max(desiredWidth, desiredHeight))
-  const bitmapWidth = Math.max(1, Math.round(desiredWidth * sizeScale))
-  const bitmapHeight = Math.max(1, Math.round(desiredHeight * sizeScale))
-  clone.setAttribute('width', String(bitmapWidth))
-  clone.setAttribute('height', String(bitmapHeight))
+  clone.removeAttribute('class')
+  clone.removeAttribute('style')
+  clone.removeAttribute('viewBox')
+  clone.removeAttribute('width')
+  clone.removeAttribute('height')
 
   const css = collectDocumentCss()
   if (css) {
@@ -82,8 +76,37 @@ export async function rasterizeVisibleMap(
     clone.insertBefore(style, clone.firstChild)
   }
 
-  const source = new XMLSerializer().serializeToString(clone)
-  const url = URL.createObjectURL(new Blob([source], { type: 'image/svg+xml;charset=utf-8' }))
+  return { markup: clone.innerHTML }
+}
+
+function rasterBackground(bounds: CanvasView, gridVisible: boolean) {
+  const base = `<rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="#f3f0e9"/>`
+  if (!gridVisible) return base
+  return base + `<rect x="${bounds.x}" y="${bounds.y}" width="${bounds.width}" height="${bounds.height}" fill="url(#grid)"/>`
+}
+
+export async function rasterizePreparedMap(
+  source: PreparedRasterSource,
+  baseView: CanvasView,
+  cssWidth: number,
+  cssHeight: number,
+  options?: { bleed?: number; gridVisible?: boolean },
+): Promise<RasterizedScene | null> {
+  if (typeof document === 'undefined' || typeof Image === 'undefined') return null
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function' || typeof URL.revokeObjectURL !== 'function') return null
+  if (!(cssWidth > 1) || !(cssHeight > 1)) return null
+
+  const bleed = options?.bleed ?? DEFAULT_BLEED
+  const bounds = expandedView(baseView, bleed)
+  const ratio = Math.min(MAX_PIXEL_RATIO, Math.max(1, window.devicePixelRatio || 1))
+  const desiredWidth = Math.max(1, Math.round(cssWidth * (1 + bleed * 2) * ratio))
+  const desiredHeight = Math.max(1, Math.round(cssHeight * (1 + bleed * 2) * ratio))
+  const sizeScale = Math.min(1, MAX_BITMAP_DIMENSION / Math.max(desiredWidth, desiredHeight))
+  const bitmapWidth = Math.max(1, Math.round(desiredWidth * sizeScale))
+  const bitmapHeight = Math.max(1, Math.round(desiredHeight * sizeScale))
+
+  const sourceSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}" width="${bitmapWidth}" height="${bitmapHeight}">${rasterBackground(bounds, Boolean(options?.gridVisible))}${source.markup}</svg>`
+  const url = URL.createObjectURL(new Blob([sourceSvg], { type: 'image/svg+xml;charset=utf-8' }))
   try {
     const image = await loadImage(url)
     const buffer = document.createElement('canvas')
@@ -96,6 +119,18 @@ export async function rasterizeVisibleMap(
   } finally {
     URL.revokeObjectURL(url)
   }
+}
+
+/** Convenience path used by tests/fallback callers. */
+export async function rasterizeVisibleMap(
+  sourceSvg: SVGSVGElement,
+  baseView: CanvasView,
+  cssWidth: number,
+  cssHeight: number,
+  bleed = DEFAULT_BLEED,
+): Promise<RasterizedScene | null> {
+  const source = prepareRasterSource(sourceSvg)
+  return source ? rasterizePreparedMap(source, baseView, cssWidth, cssHeight, { bleed }) : null
 }
 
 export function commitRasterizedScene(target: HTMLCanvasElement, scene: RasterizedScene) {

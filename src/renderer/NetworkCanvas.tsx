@@ -39,24 +39,7 @@ type DrawingPointSelection = { kind: 'draft'; id: string } | { kind: 'station'; 
 type DrawingCanvasPointer = { pointerId: number; startClient: Point; lastClient: Point; moved: boolean }
 
 const WHEEL_ZOOM_IDLE_MS = 100
-const WHEEL_ZOOM_TIME_CONSTANT_MS = 32
-const WHEEL_ZOOM_SETTLE_RATIO = .001
 const WHEEL_ZOOM_SENSITIVITY = .0004
-
-function interpolateView(from: View, to: View, amount: number): View {
-  const lerp = (a: number, b: number) => a + (b - a) * amount
-  return { x: lerp(from.x, to.x), y: lerp(from.y, to.y), width: lerp(from.width, to.width), height: lerp(from.height, to.height) }
-}
-
-function viewsAreVisuallySettled(current: View, target: View): boolean {
-  const scale = Math.max(1, target.width, target.height)
-  return Math.max(
-    Math.abs(current.x - target.x),
-    Math.abs(current.y - target.y),
-    Math.abs(current.width - target.width),
-    Math.abs(current.height - target.height),
-  ) / scale <= WHEEL_ZOOM_SETTLE_RATIO
-}
 
 export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, view, setView }: {
   project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; roadDraft?: Road | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
@@ -74,10 +57,6 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const committedViewRef = useRef<View>(view)
   const liveViewRef = useRef<View>(view)
   const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const wheelAnimationFrame = useRef<number | null>(null)
-  const wheelTargetViewRef = useRef<View | null>(null)
-  const wheelInputIdleRef = useRef(true)
-  const wheelLastFrameAtRef = useRef<number | null>(null)
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingPreview = useRef<ActualRouteProject | null>(null)
   const lastPreviewAt = useRef(0)
@@ -131,27 +110,6 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     cameraViewportRef.current?.setAttribute('transform', `matrix(${scaleX} 0 0 ${scaleY} ${translateX} ${translateY})`)
   }
   const commitLiveView = () => setView(liveViewRef.current)
-  const flushWheelView = (timestamp: number) => {
-    wheelAnimationFrame.current = null
-    const target = wheelTargetViewRef.current
-    if (!target) { wheelLastFrameAtRef.current = null; return }
-    const previousTimestamp = wheelLastFrameAtRef.current
-    const elapsed = previousTimestamp === null ? 1000 / 60 : Math.max(1, Math.min(34, timestamp - previousTimestamp))
-    wheelLastFrameAtRef.current = timestamp
-    const amount = 1 - Math.exp(-elapsed / WHEEL_ZOOM_TIME_CONSTANT_MS)
-    const next = interpolateView(liveViewRef.current, target, amount)
-    if (viewsAreVisuallySettled(next, target)) {
-      applyLiveView(target)
-      wheelLastFrameAtRef.current = null
-      if (wheelInputIdleRef.current) {
-        wheelTargetViewRef.current = null
-        commitLiveView()
-      }
-      return
-    }
-    applyLiveView(next)
-    wheelAnimationFrame.current = requestAnimationFrame(flushWheelView)
-  }
   const panLiveView = (fromClient: Point, toClient: Point) => {
     const currentView = liveViewRef.current
     const before = screenPointToWorld(svgRef.current!, fromClient.x, fromClient.y, currentView)
@@ -186,13 +144,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   useLayoutEffect(() => {
     committedViewRef.current = view
     liveViewRef.current = view
-    wheelTargetViewRef.current = null
-    wheelInputIdleRef.current = true
-    wheelLastFrameAtRef.current = null
     if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
     wheelCommitTimer.current = null
-    if (wheelAnimationFrame.current !== null) cancelAnimationFrame(wheelAnimationFrame.current)
-    wheelAnimationFrame.current = null
     svgRef.current?.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`)
     cameraViewportRef.current?.removeAttribute('transform')
   }, [view])
@@ -207,9 +160,6 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   }, [])
   useEffect(() => () => {
     if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
-    if (wheelAnimationFrame.current !== null) cancelAnimationFrame(wheelAnimationFrame.current)
-    wheelTargetViewRef.current = null
-    wheelLastFrameAtRef.current = null
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
   }, [])
   useEffect(() => { if (!drawing) drawingClick.current = null }, [drawing])
@@ -672,28 +622,19 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, svgRef.current?.clientHeight ?? 680) : 1
       const delta = Math.max(-120, Math.min(120, event.deltaY * modeScale))
       if (Math.abs(delta) < .01) return
-      const baseView = wheelTargetViewRef.current ?? liveViewRef.current
+      const baseView = liveViewRef.current
       const point = screenPointToWorld(svgRef.current!, event.clientX, event.clientY, baseView)
       const factor = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY)
-      wheelTargetViewRef.current = {
+      applyLiveView({
         x: point.x - (point.x - baseView.x) * factor,
         y: point.y - (point.y - baseView.y) * factor,
         width: baseView.width * factor,
         height: baseView.height * factor,
-      }
-      wheelInputIdleRef.current = false
-      if (wheelAnimationFrame.current === null) {
-        wheelLastFrameAtRef.current = null
-        wheelAnimationFrame.current = requestAnimationFrame(flushWheelView)
-      }
+      })
       if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
       wheelCommitTimer.current = setTimeout(() => {
         wheelCommitTimer.current = null
-        wheelInputIdleRef.current = true
-        if (wheelAnimationFrame.current === null && wheelTargetViewRef.current) {
-          wheelLastFrameAtRef.current = null
-          wheelAnimationFrame.current = requestAnimationFrame(flushWheelView)
-        }
+        commitLiveView()
       }, WHEEL_ZOOM_IDLE_MS)
     }}>
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>

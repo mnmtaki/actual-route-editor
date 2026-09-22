@@ -655,7 +655,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     </g>
   })()
 
-  return <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''}`} tabIndex={0} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
+  return <div ref={stackRef} className="network-canvas-stack">
+    <div ref={rasterCameraRef} className="network-raster-camera" aria-hidden="true">
+      <canvas ref={rasterCanvasRef} className="network-raster-canvas" />
+    </div>
+    <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''}`} tabIndex={0} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
     onPointerDown={handleCanvasPointerDown} onPointerMove={handlePointerMove} onPointerUp={endGesture} onPointerCancel={endGesture} onContextMenu={event=>event.preventDefault()}
     onDoubleClick={event => { if (drawing && drawing.kind !== 'line') { event.preventDefault(); drawingClick.current = null; if (pointerDoubleFinish.current) { pointerDoubleFinish.current = false; return } onFinishDrawing?.() } }}
     onWheel={event => {
@@ -819,5 +823,6 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     {drawing?.kind === 'basemap' && !(shown.basemapPaths?.find(path => path.id === drawing.pathId)?.points.length) && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置第一个地形节点</text></g>}
     {calibration && <g data-editor="true" data-layer="calibration-overlay"><rect x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="transparent" pointerEvents="all" onPointerDown={event => handleCanvasPointerDown(event as unknown as React.PointerEvent<SVGSVGElement>)} /><line x1={calibration.points[0]?.x ?? 0} y1={calibration.points[0]?.y ?? 0} x2={calibration.points[1]?.x ?? calibration.points[0]?.x ?? 0} y2={calibration.points[1]?.y ?? calibration.points[0]?.y ?? 0} stroke="#c89521" strokeWidth="2" strokeDasharray="8 5" pointerEvents="none" />{calibration.points.map((point,index)=><circle key={index} cx={point.x} cy={point.y} r="8" fill="#fff9e8" stroke="#c89521" strokeWidth="2" pointerEvents="none" />)}<text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#765c1a" fontSize="16" pointerEvents="none">{calibration.points.length ? '再点一下选择第二个点' : '点击地图上的第一个点'}</text></g>}
     </g>
-  </svg>
+    </svg>
+  </div>
 }

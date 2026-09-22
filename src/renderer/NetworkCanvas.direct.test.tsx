@@ -129,7 +129,7 @@ describe('direct manipulation gestures', () => {
     expect(onDragCommit).not.toHaveBeenCalled()
   })
 
-  it('eases wheel zoom across animation frames and commits React view only after settling', () => {
+  it('applies each small wheel zoom immediately and commits React view only after wheel idle', () => {
     vi.useFakeTimers()
     try {
       const setView = vi.fn()
@@ -139,18 +139,19 @@ describe('direct manipulation gestures', () => {
       vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
       const viewport = container.querySelector('[data-layer="camera-viewport"]')!
       fireEvent.wheel(svg, { clientX: 460, clientY: 340, deltaY: -100, bubbles: true })
-      vi.advanceTimersByTime(17)
       expect(svg.getAttribute('viewBox')).toBe('0 0 920 680')
       const firstTransform = viewport.getAttribute('transform')
       expect(firstTransform).toMatch(/^matrix\(/)
       expect(setView).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(17)
+      vi.advanceTimersByTime(50)
+      expect(viewport.getAttribute('transform')).toBe(firstTransform)
+      fireEvent.wheel(svg, { clientX: 460, clientY: 340, deltaY: -100, bubbles: true })
       const secondTransform = viewport.getAttribute('transform')
       expect(secondTransform).toMatch(/^matrix\(/)
       expect(secondTransform).not.toBe(firstTransform)
-      vi.advanceTimersByTime(66)
+      vi.advanceTimersByTime(99)
       expect(setView).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(300)
+      vi.advanceTimersByTime(1)
       expect(setView).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
@@ -167,7 +168,7 @@ describe('direct manipulation gestures', () => {
         Object.defineProperty(svg, 'clientWidth', { configurable: true, value: 920 })
         vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
         fireEvent.wheel(svg, { clientX: 460, clientY: 340, deltaY, bubbles: true })
-        vi.advanceTimersByTime(400)
+        vi.advanceTimersByTime(100)
         const width = setView.mock.calls.at(-1)?.[0].width as number
         unmount()
         return width

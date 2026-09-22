@@ -82,6 +82,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const [dragMapElementOverlay, setDragMapElementOverlay] = useState<DragMapElementOverlay>(() => ({ elementIds: new Set() }))
   const [dragVectorBasemapOverlay, setDragVectorBasemapOverlay] = useState<DragVectorBasemapOverlay>(() => ({ kind: null, objectIds: new Set() }))
   const [canvasWidth, setCanvasWidth] = useState(920)
+  const [canvasHeight, setCanvasHeight] = useState(680)
   const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
   const shown = preview ?? project
@@ -177,6 +178,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       viewportRectRef.current = { left: rect.left, top: rect.top, width: Math.max(1, rect.width), height: Math.max(1, rect.height) }
       viewportSizeRef.current = { width: Math.max(1, rect.width), height: Math.max(1, rect.height) }
       setCanvasWidth(Math.max(1, rect.width))
+      setCanvasHeight(Math.max(1, rect.height))
       applyCanvasCamera(liveViewRef.current)
     }
     update()
@@ -203,7 +205,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       .catch(() => {
         // Keep the SVG fallback visible if the retained Canvas cannot be built.
       })
-  }, [project, view, canvasWidth, dragAffectedLineIds, dragStationOverlay, dragLineLabelOverlay, dragMapElementOverlay, dragVectorBasemapOverlay])
+  }, [project, view, canvasWidth, canvasHeight, dragAffectedLineIds, dragStationOverlay, dragLineLabelOverlay, dragMapElementOverlay, dragVectorBasemapOverlay])
   useEffect(() => () => {
     rasterGenerationRef.current += 1
     if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)

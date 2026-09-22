@@ -118,9 +118,11 @@ describe('direct manipulation gestures', () => {
     Object.defineProperty(svg, 'clientWidth', { configurable: true, value: 920 })
     vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
     const background = container.querySelector('.canvas-bg')!
+    const viewport = container.querySelector('[data-layer="camera-viewport"]')!
     fireEvent.pointerDown(background, { pointerId: 8, clientX: 100, clientY: 100, bubbles: true })
     fireEvent.pointerMove(svg, { pointerId: 8, clientX: 140, clientY: 120, bubbles: true })
-    expect(svg.getAttribute('viewBox')).not.toBe('0 0 920 680')
+    expect(svg.getAttribute('viewBox')).toBe('0 0 920 680')
+    expect(viewport.getAttribute('transform')).toMatch(/^matrix\(/)
     expect(setView).not.toHaveBeenCalled()
     fireEvent.pointerUp(svg, { pointerId: 8, clientX: 140, clientY: 120, bubbles: true })
     expect(setView).toHaveBeenCalledTimes(1)

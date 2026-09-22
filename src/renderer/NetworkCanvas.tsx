@@ -516,7 +516,9 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }
     if (current.kind === 'panningCanvas') {
       if (current.pointerId === event.pointerId) commitLiveView()
-      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragMapElementOverlay({ elementIds: new Set() }); setDragVectorBasemapOverlay({ kind: null, objectIds: new Set() }); setPreview(null); return
+      gesture.current = { kind: 'idle' }
+      setPreview(null)
+      return
     }
     if ('before' in current && current.pointerId === event.pointerId && current.moved) {
       cancelScheduledPreview()

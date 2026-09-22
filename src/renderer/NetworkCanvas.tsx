@@ -24,7 +24,7 @@ import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, 
 import { cloneProjectForDrag, getDragAffectedLineIds, getDragLineLabelOverlay, getDragMapElementOverlay, getDragStationOverlay, getDragVectorBasemapOverlay, type DragLineLabelOverlay, type DragMapElementOverlay, type DragStationOverlay, type DragVectorBasemapOverlay } from './dragPreview'
 import { NetworkLineLayer } from './NetworkLineLayer'
 import { NetworkStationLayer } from './NetworkStationLayer'
-import { CANVAS_SCENE_BLEED, canvasCameraTransform, commitRasterizedScene, rasterizeVisibleMap } from './persistentCanvasRenderer'
+import { CANVAS_SCENE_BLEED, canvasCameraTransform, commitRasterizedScene, prepareRasterSource, rasterizePreparedMap, type PreparedRasterSource } from './persistentCanvasRenderer'
 
 type View = { x: number; y: number; width: number; height: number }
 type Point = { x: number; y: number }
@@ -59,6 +59,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const rasterCameraRef = useRef<HTMLDivElement>(null)
   const rasterCanvasRef = useRef<HTMLCanvasElement>(null)
   const rasterSnapshotViewRef = useRef<View | null>(null)
+  const rasterSourceRef = useRef<PreparedRasterSource | null>(null)
   const rasterGenerationRef = useRef(0)
   const viewportSizeRef = useRef({ width: 920, height: 680 })
   const viewportRectRef = useRef({ left: 0, top: 0, width: 920, height: 680 })
@@ -186,26 +187,42 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     observer?.observe(element)
     return () => observer?.disconnect()
   }, [])
+  const requestRaster = useCallback((source: PreparedRasterSource, baseView: View) => {
+    const target = rasterCanvasRef.current
+    const { width, height } = viewportSizeRef.current
+    if (!target || width < 2 || height < 2) return
+    const generation = ++rasterGenerationRef.current
+    void rasterizePreparedMap(source, baseView, width, height, {
+      bleed: CANVAS_SCENE_BLEED,
+      gridVisible: project.settings.gridVisible,
+    }).then(scene => {
+      if (!scene || generation !== rasterGenerationRef.current) return
+      if (!commitRasterizedScene(target, scene)) return
+      rasterSnapshotViewRef.current = scene.baseView
+      stackRef.current?.classList.add('raster-ready')
+      applyCanvasCamera(liveViewRef.current)
+    }).catch(() => {
+      // Keep the formal SVG fallback available if Canvas rasterization fails.
+    })
+  }, [project.settings.gridVisible])
+
   useEffect(() => {
     const element = svgRef.current
-    const target = rasterCanvasRef.current
-    if (!element || !target) return
-    const rect = element.getBoundingClientRect()
-    if (rect.width < 2 || rect.height < 2) return
-    const generation = ++rasterGenerationRef.current
-    const baseView = { ...committedViewRef.current }
-    void rasterizeVisibleMap(element, baseView, rect.width, rect.height, CANVAS_SCENE_BLEED)
-      .then(scene => {
-        if (!scene || generation !== rasterGenerationRef.current) return
-        if (!commitRasterizedScene(target, scene)) return
-        rasterSnapshotViewRef.current = scene.baseView
-        stackRef.current?.classList.add('raster-ready')
-        applyCanvasCamera(liveViewRef.current)
-      })
-      .catch(() => {
-        // Keep the SVG fallback visible if the retained Canvas cannot be built.
-      })
-  }, [project, view, canvasWidth, canvasHeight, dragAffectedLineIds, dragStationOverlay, dragLineLabelOverlay, dragMapElementOverlay, dragVectorBasemapOverlay])
+    if (!element) return
+    const timer = setTimeout(() => {
+      const source = prepareRasterSource(element)
+      if (!source) return
+      rasterSourceRef.current = source
+      requestRaster(source, { ...committedViewRef.current })
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [project, roadDraft, dragAffectedLineIds, dragStationOverlay, dragLineLabelOverlay, dragMapElementOverlay, dragVectorBasemapOverlay, requestRaster])
+
+  useEffect(() => {
+    const source = rasterSourceRef.current
+    if (!source) return
+    requestRaster(source, { ...committedViewRef.current })
+  }, [view, canvasWidth, canvasHeight, requestRaster])
   useEffect(() => () => {
     rasterGenerationRef.current += 1
     if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)

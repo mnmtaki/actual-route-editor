@@ -110,8 +110,13 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
   const structureHitRadius = Math.max(22, touchHitPixels * view.width / canvasWidth)
 
-  const screenToWorld = useCallback((clientX: number, clientY: number, worldView: View) =>
-    screenPointToWorldFallback(viewportRectRef.current, worldView, clientX, clientY), [])
+  const screenToWorld = useCallback((clientX: number, clientY: number, worldView: View) => {
+    const cached = viewportRectRef.current
+    const rect = cached.width > 1 && cached.height > 1
+      ? cached
+      : svgRef.current?.getBoundingClientRect() ?? cached
+    return screenPointToWorldFallback(rect, worldView, clientX, clientY)
+  }, [])
 
   const applyCanvasCamera = (next: View) => {
     const base = rasterSnapshotViewRef.current

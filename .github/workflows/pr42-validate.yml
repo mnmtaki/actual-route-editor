@@ -1,4 +1,5 @@
 name: PR 42 validation
+# synchronize after workflow exists
 
 on:
   pull_request:

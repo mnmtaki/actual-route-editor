@@ -23,7 +23,8 @@ import { isCompoundStationCanonical } from '../data/compoundStation'
 import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, demoteTerminalStationToDrawingPoint } from '../data/operations'
 import { cloneProjectForDrag, getDragAffectedLineIds, getDragLineLabelOverlay, getDragMapElementOverlay, getDragStationOverlay, getDragVectorBasemapOverlay, type DragLineLabelOverlay, type DragMapElementOverlay, type DragStationOverlay, type DragVectorBasemapOverlay } from './dragPreview'
 import { NetworkLineLayer } from './NetworkLineLayer'
-import { NetworkStationLayer } from './NetworkStationLayer'\nimport { CANVAS_SCENE_BLEED, canvasCameraTransform, commitRasterizedScene, rasterizeVisibleMap } from './persistentCanvasRenderer'
+import { NetworkStationLayer } from './NetworkStationLayer'
+import { CANVAS_SCENE_BLEED, canvasCameraTransform, commitRasterizedScene, rasterizeVisibleMap } from './persistentCanvasRenderer'
 
 type View = { x: number; y: number; width: number; height: number }
 type Point = { x: number; y: number }

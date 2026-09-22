@@ -1,4 +1,5 @@
 name: PR 42 validation
+# temporary branch-only verification
 
 on:
   pull_request:

@@ -37,7 +37,7 @@ function expandedView(view: CanvasView, bleed = DEFAULT_BLEED): CanvasView {
 
 function stripEditorArtifacts(svg: SVGSVGElement) {
   svg.querySelectorAll(
-    '[data-editor="true"],.segment-hit,.station-hit-target,.station-selection-ring,[data-layer="opening-phase-preview"],[data-layer$="-active-overlay"],[data-layer="vector-basemap-active-overlay"],[data-layer="background-image"]',
+    '[data-editor="true"],.segment-hit,.station-hit-target,.station-selection-ring,[data-layer="opening-phase-preview"],[data-layer$="-active-overlay"],[data-layer="vector-basemap-active-overlay"],[data-layer="background-image"],[data-layer="line-legend"]',
   ).forEach(node => node.remove())
   svg.querySelectorAll('.segment-selected,.selected').forEach(node => node.classList.remove('segment-selected', 'selected'))
 }

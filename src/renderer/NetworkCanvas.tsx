@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { ActualRouteProject, Road, Selection } from '../data/model'
 import { uid } from '../data/model'
 import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPlans, getSegmentSubpathSpans, pathSpansToSvgPath } from '../geometry/path'
-import { projectPointToSvgPath, screenPointToWorld } from '../geometry/screenPoint'
+import { projectPointToSvgPath, screenPointToWorldFallback } from '../geometry/screenPoint'
 import { getStationHandleStyle } from './stationHandle'
 import { getSegmentStyleIntervalAtProgress, getStructureNodePoint } from '../data/structure'
 import { MapElementsLayer } from './MapElements'
@@ -61,6 +61,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const rasterSnapshotViewRef = useRef<View | null>(null)
   const rasterGenerationRef = useRef(0)
   const viewportSizeRef = useRef({ width: 920, height: 680 })
+  const viewportRectRef = useRef({ left: 0, top: 0, width: 920, height: 680 })
   const committedViewRef = useRef<View>(view)
   const liveViewRef = useRef<View>(view)
   const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -107,6 +108,9 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
   const structureHitRadius = Math.max(22, touchHitPixels * view.width / canvasWidth)
 
+  const screenToWorld = useCallback((clientX: number, clientY: number, worldView: View) =>
+    screenPointToWorldFallback(viewportRectRef.current, worldView, clientX, clientY), [])
+
   const applyCanvasCamera = (next: View) => {
     const base = rasterSnapshotViewRef.current
     const camera = rasterCameraRef.current
@@ -127,8 +131,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const commitLiveView = () => setView(liveViewRef.current)
   const panLiveView = (fromClient: Point, toClient: Point) => {
     const currentView = liveViewRef.current
-    const before = screenPointToWorld(svgRef.current!, fromClient.x, fromClient.y, currentView)
-    const after = screenPointToWorld(svgRef.current!, toClient.x, toClient.y, currentView)
+    const before = screenToWorld(fromClient.x, fromClient.y, currentView)
+    const after = screenToWorld(toClient.x, toClient.y, currentView)
     applyLiveView({ ...currentView, x: currentView.x - (after.x - before.x), y: currentView.y - (after.y - before.y) })
   }
   const flushPreview = () => {
@@ -170,6 +174,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (!element) return
     const update = () => {
       const rect = element.getBoundingClientRect()
+      viewportRectRef.current = { left: rect.left, top: rect.top, width: Math.max(1, rect.width), height: Math.max(1, rect.height) }
       viewportSizeRef.current = { width: Math.max(1, rect.width), height: Math.max(1, rect.height) }
       setCanvasWidth(Math.max(1, rect.width))
       applyCanvasCamera(liveViewRef.current)
@@ -212,7 +217,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     setDrawingPointSelection(null)
   }, [drawing?.kind, drawing?.kind === 'line' ? drawing.lineId : undefined, drawing?.kind === 'line' ? drawing.phaseId : undefined, drawing?.kind === 'line' ? drawing.anchorStationId : undefined])
 
-  const pointerToWorld = useCallback((clientX: number, clientY: number): Point => screenPointToWorld(svgRef.current!, clientX, clientY, liveViewRef.current), [])
+  const pointerToWorld = useCallback((clientX: number, clientY: number): Point => screenToWorld(clientX, clientY, liveViewRef.current), [screenToWorld])
   const capture = useCallback((event: React.PointerEvent) => event.currentTarget.setPointerCapture?.(event.pointerId), [])
   const beginPinch = useCallback(() => {
     const points = [...pointers.current.entries()].slice(0, 2)
@@ -229,7 +234,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       setPreview(null)
     }
     const startView = liveViewRef.current
-    gesture.current = { kind: 'pinchingCanvas', pointerIds: [firstId, secondId], initialDistance, startView, startWorld: screenPointToWorld(svgRef.current!, center.x, center.y, startView) }
+    gesture.current = { kind: 'pinchingCanvas', pointerIds: [firstId, secondId], initialDistance, startView, startWorld: screenToWorld(center.x, center.y, startView) }
   }, [cancelScheduledPreview])
   const startObjectDrag = useCallback((kind: Extract<Gesture, { before: ActualRouteProject }>['kind'], event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string, ownerPathId?: string, ownerRoadId?: string) => {
     event.stopPropagation(); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); capture(event)
@@ -391,7 +396,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const scale = Math.max(.2, Math.min(5, current.initialDistance / distance))
       const width = current.startView.width * scale, height = current.startView.height * scale
       const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
-      const underStart = screenPointToWorld(svgRef.current!, center.x, center.y, current.startView)
+      const underStart = screenToWorld(center.x, center.y, current.startView)
       applyLiveView({ x: current.startWorld.x - (underStart.x - current.startView.x) * scale, y: current.startWorld.y - (underStart.y - current.startView.y) * scale, width, height })
       return
     }
@@ -596,7 +601,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     event.stopPropagation()
     const projected = projectPointToSvgPath(
       event.currentTarget,
-      screenPointToWorld(svgRef.current!, event.clientX, event.clientY, liveViewRef.current),
+      screenToWorld(event.clientX, event.clientY, liveViewRef.current),
     )
     const progress = findSegmentProgressForPoint(project, segment, projected)
     onSelect({ type: 'segment', id: segment.id, progress })
@@ -669,7 +674,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const delta = Math.max(-120, Math.min(120, event.deltaY * modeScale))
       if (Math.abs(delta) < .01) return
       const baseView = liveViewRef.current
-      const point = screenPointToWorld(svgRef.current!, event.clientX, event.clientY, baseView)
+      const point = screenToWorld(event.clientX, event.clientY, baseView)
       const factor = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY)
       applyLiveView({
         x: point.x - (point.x - baseView.x) * factor,

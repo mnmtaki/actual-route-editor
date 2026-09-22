@@ -23,6 +23,7 @@ export interface GuangzhouStationPillProps {
   height?: number
   strokeWidth?: number
   className?: string
+  scaleStrokeWithZoom?: boolean
 }
 
 const DEFAULT_STROKE = '#596161'
@@ -58,13 +59,13 @@ function fontSize(value: string, metrics: GuangzhouStationPillMetrics): number {
  * Shared Guangzhou station artwork.  The outer pill remains white; only its
  * border and divider carry the passenger-facing service color.
  */
-export function GuangzhouStationPill({ x, y, lineCode = '', stationCode = '', serviceColor = DEFAULT_STROKE, lineId, width, height = DEFAULT_HEIGHT, strokeWidth = 1.25, className }: GuangzhouStationPillProps) {
+export function GuangzhouStationPill({ x, y, lineCode = '', stationCode = '', serviceColor = DEFAULT_STROKE, lineId, width, height = DEFAULT_HEIGHT, strokeWidth = 1.25, className, scaleStrokeWithZoom = false }: GuangzhouStationPillProps) {
   const left = clean(lineCode), right = clean(stationCode)
   const metrics = getGuangzhouStationPillMetrics(left, right, width, height)
   const textStyle: CSSProperties = { fontFamily: 'inherit' }
   return <g className={className} data-guangzhou-pill="true" data-line-id={lineId} data-guangzhou-pill-line-code={left} data-guangzhou-pill-station-code={right}>
-    <rect data-guangzhou-pill-background="true" data-station-shape="capsule" x={x - metrics.width / 2} y={y - metrics.height / 2} width={metrics.width} height={metrics.height} rx={metrics.radius} fill="white" stroke={serviceColor || DEFAULT_STROKE} strokeWidth={strokeWidth} vectorEffect="non-scaling-stroke" />
-    <line data-guangzhou-divider="true" x1={x} y1={y - metrics.height / 2 + strokeWidth} x2={x} y2={y + metrics.height / 2 - strokeWidth} stroke={serviceColor || DEFAULT_STROKE} strokeWidth={strokeWidth} vectorEffect="non-scaling-stroke" />
+    <rect data-guangzhou-pill-background="true" data-station-shape="capsule" x={x - metrics.width / 2} y={y - metrics.height / 2} width={metrics.width} height={metrics.height} rx={metrics.radius} fill="white" stroke={serviceColor || DEFAULT_STROKE} strokeWidth={strokeWidth} vectorEffect={scaleStrokeWithZoom ? undefined : 'non-scaling-stroke'} />
+    <line data-guangzhou-divider="true" x1={x} y1={y - metrics.height / 2 + strokeWidth} x2={x} y2={y + metrics.height / 2 - strokeWidth} stroke={serviceColor || DEFAULT_STROKE} strokeWidth={strokeWidth} vectorEffect={scaleStrokeWithZoom ? undefined : 'non-scaling-stroke'} />
     <text className="station-number-pill-label" data-guangzhou-pill-line="true" x={x - metrics.cellWidth / 2} y={y + fontSize(left, metrics) * .35} textAnchor="middle" fill="#202526" fontSize={fontSize(left, metrics)} fontWeight="700" style={textStyle}>{left}</text>
     <text className="station-number-pill-label" data-guangzhou-pill-station="true" x={x + metrics.cellWidth / 2} y={y + fontSize(right, metrics) * .35} textAnchor="middle" fill="#202526" fontSize={fontSize(right, metrics)} fontWeight="700" style={textStyle}>{right}</text>
   </g>

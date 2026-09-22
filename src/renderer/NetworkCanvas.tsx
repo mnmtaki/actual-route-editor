@@ -52,8 +52,14 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   // onPreview is retained for API compatibility; drag previews are intentionally local
   // so App/history does not rerender on every pointer movement.
   void onPreview
+  const stackRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const cameraViewportRef = useRef<SVGGElement>(null)
+  const rasterCameraRef = useRef<HTMLDivElement>(null)
+  const rasterCanvasRef = useRef<HTMLCanvasElement>(null)
+  const rasterSnapshotViewRef = useRef<View | null>(null)
+  const rasterGenerationRef = useRef(0)
+  const viewportSizeRef = useRef({ width: 920, height: 680 })
   const committedViewRef = useRef<View>(view)
   const liveViewRef = useRef<View>(view)
   const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -100,6 +106,13 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
   const structureHitRadius = Math.max(22, touchHitPixels * view.width / canvasWidth)
 
+  const applyCanvasCamera = (next: View) => {
+    const base = rasterSnapshotViewRef.current
+    const camera = rasterCameraRef.current
+    if (!base || !camera) return
+    const { width, height } = viewportSizeRef.current
+    camera.style.transform = canvasCameraTransform(base, next, width, height)
+  }
   const applyLiveView = (next: View) => {
     liveViewRef.current = next
     const base = committedViewRef.current
@@ -108,6 +121,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     const translateX = base.x - next.x * scaleX
     const translateY = base.y - next.y * scaleY
     cameraViewportRef.current?.setAttribute('transform', `matrix(${scaleX} 0 0 ${scaleY} ${translateX} ${translateY})`)
+    applyCanvasCamera(next)
   }
   const commitLiveView = () => setView(liveViewRef.current)
   const panLiveView = (fromClient: Point, toClient: Point) => {
@@ -148,17 +162,44 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     wheelCommitTimer.current = null
     svgRef.current?.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`)
     cameraViewportRef.current?.removeAttribute('transform')
+    applyCanvasCamera(view)
   }, [view])
   useLayoutEffect(() => {
     const element = svgRef.current
     if (!element) return
-    const update = () => setCanvasWidth(Math.max(1, element.getBoundingClientRect().width))
+    const update = () => {
+      const rect = element.getBoundingClientRect()
+      viewportSizeRef.current = { width: Math.max(1, rect.width), height: Math.max(1, rect.height) }
+      setCanvasWidth(Math.max(1, rect.width))
+      applyCanvasCamera(liveViewRef.current)
+    }
     update()
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null
     observer?.observe(element)
     return () => observer?.disconnect()
   }, [])
+  useEffect(() => {
+    const element = svgRef.current
+    const target = rasterCanvasRef.current
+    if (!element || !target) return
+    const rect = element.getBoundingClientRect()
+    if (rect.width < 2 || rect.height < 2) return
+    const generation = ++rasterGenerationRef.current
+    const baseView = { ...committedViewRef.current }
+    void rasterizeVisibleMap(element, baseView, rect.width, rect.height, CANVAS_SCENE_BLEED)
+      .then(scene => {
+        if (!scene || generation !== rasterGenerationRef.current) return
+        if (!commitRasterizedScene(target, scene)) return
+        rasterSnapshotViewRef.current = scene.baseView
+        stackRef.current?.classList.add('raster-ready')
+        applyCanvasCamera(liveViewRef.current)
+      })
+      .catch(() => {
+        // Keep the SVG fallback visible if the retained Canvas cannot be built.
+      })
+  }, [project, view, canvasWidth, dragAffectedLineIds, dragStationOverlay, dragLineLabelOverlay, dragMapElementOverlay, dragVectorBasemapOverlay])
   useEffect(() => () => {
+    rasterGenerationRef.current += 1
     if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
   }, [])

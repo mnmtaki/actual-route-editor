@@ -18,6 +18,16 @@ describe('persistent canvas camera', () => {
       .toBe('matrix(1, 0, 0, 1, -100, -50)')
   })
 
+  it('keeps aspect-fit mapping stable on a non-matching viewport', () => {
+    const transform = canvasCameraTransform(
+      { x: 0, y: 0, width: 100, height: 100 },
+      { x: 25, y: 25, width: 50, height: 50 },
+      200,
+      100,
+    )
+    expect(transform).toBe('matrix(2, 0, 0, 2, -100, -50)')
+  })
+
   it('uses the same twenty percent bleed as the AARC-inspired viewport cache', () => {
     expect(CANVAS_SCENE_BLEED).toBe(.2)
   })

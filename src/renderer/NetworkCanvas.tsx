@@ -220,7 +220,12 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (!element) return
     const timer = setTimeout(() => {
       const source = prepareRasterSource(element)
-      if (!source) return
+      if (!source) {
+        rasterSourceRef.current = null
+        rasterSnapshotViewRef.current = null
+        stackRef.current?.classList.remove('raster-ready')
+        return
+      }
       rasterSourceRef.current = source
       requestRaster(source, { ...committedViewRef.current })
     }, 0)

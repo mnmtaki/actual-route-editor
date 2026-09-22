@@ -36,13 +36,13 @@ function serviceCodePairs(project: ActualRouteProject, station: Station, lines: 
 }
 
 function shell({ x, y, width, height, style, className = 'transfer-shell' }: { x: number; y: number; width: number; height: number; style: TransferStyle; className?: string }) {
-  return <rect className={className} x={x - width / 2} y={y - height / 2} width={width} height={height} rx={height / 2} fill={style.shellFill} stroke={style.shellStroke} strokeWidth={style.shellStrokeWidth} vectorEffect="non-scaling-stroke" />
+  return <rect className={className} x={x - width / 2} y={y - height / 2} width={width} height={height} rx={height / 2} fill={style.shellFill} stroke={style.shellStroke} strokeWidth={style.shellStrokeWidth} />
 }
 
 function defaultTransfer({ x, y, lines, size, minorAxis, dotGap, endPadding, minMajorAxis, style, stationId }: Omit<TransferArtworkProps, 'project' | 'station'> & { x: number; y: number; stationId?: string }) {
   const metrics = getDefaultTransferMetrics(size, lines.length, dotGap, endPadding, minorAxis, minMajorAxis)
   return <g data-testid={stationId ? `transfer-${stationId}` : undefined} data-transfer-template="default" data-service-count={lines.length}>
-    <rect x={x - metrics.width / 2} y={y - metrics.height / 2} width={metrics.width} height={metrics.height} rx={metrics.height / 2} fill={style.shellFill} stroke={style.shellStroke} strokeWidth={style.shellStrokeWidth} vectorEffect="non-scaling-stroke" />
+    <rect x={x - metrics.width / 2} y={y - metrics.height / 2} width={metrics.width} height={metrics.height} rx={metrics.height / 2} fill={style.shellFill} stroke={style.shellStroke} strokeWidth={style.shellStrokeWidth} />
     {style.dotsVisible && lines.map((line, index) => <circle key={line.id} data-transfer-dot="true" cx={dotX(x, metrics, index)} cy={y} r={metrics.dotDiameter / 2} fill={line.color} stroke="none" />)}
   </g>
 }
@@ -69,7 +69,7 @@ function pillMetrics(pair: GuangzhouServicePair) {
 
 function renderGuangzhouPill(item: GuangzhouPillPosition) {
   return <g key={item.pair.line.id} data-transfer-cell="true" data-line-id={item.pair.line.id} data-guangzhou-pill-position-x={item.x} data-guangzhou-pill-position-y={item.y}>
-    <GuangzhouStationPill x={item.x} y={item.y} lineCode={item.pair.lineCode} stationCode={item.pair.stationCode} serviceColor={item.pair.line.color} lineId={item.pair.line.id} width={item.width} height={item.height} />
+    <GuangzhouStationPill x={item.x} y={item.y} lineCode={item.pair.lineCode} stationCode={item.pair.stationCode} serviceColor={item.pair.line.color} lineId={item.pair.line.id} width={item.width} height={item.height} scaleStrokeWithZoom />
   </g>
 }
 
@@ -155,7 +155,7 @@ function guangzhou2024({ project, station, x, y, pairs, style }: { project: Actu
   const minY = Math.min(...positions.map(item => item.y - item.height / 2)), maxY = Math.max(...positions.map(item => item.y + item.height / 2))
   const shellX = (minX + maxX) / 2, shellY = (minY + maxY) / 2, shellWidth = maxX - minX + GUANGZHOU_SHELL_PADDING * 2, shellHeight = maxY - minY + GUANGZHOU_SHELL_PADDING * 2
   return <g data-transfer-template="guangzhou2024" data-service-count={pairs.length} data-guangzhou-pill-count={pairs.length} data-guangzhou-layout="spatial">
-    <rect data-guangzhou-shell="true" x={shellX - shellWidth / 2} y={shellY - shellHeight / 2} width={shellWidth} height={shellHeight} rx={Math.min(12, shellHeight / 2)} fill={style.shellFill || 'white'} stroke="#8f9599" strokeWidth={Math.max(1.25, style.shellStrokeWidth)} vectorEffect="non-scaling-stroke" />
+    <rect data-guangzhou-shell="true" x={shellX - shellWidth / 2} y={shellY - shellHeight / 2} width={shellWidth} height={shellHeight} rx={Math.min(12, shellHeight / 2)} fill={style.shellFill || 'white'} stroke="#8f9599" strokeWidth={Math.max(1.25, style.shellStrokeWidth)} />
     {positions.map(renderGuangzhouPill)}
   </g>
 }
@@ -163,7 +163,7 @@ function guangzhou2024({ project, station, x, y, pairs, style }: { project: Actu
 function beijing({ x, y, pairs, style, size }: { x: number; y: number; pairs: ReturnType<typeof serviceCodePairs>; style: TransferStyle; size: number }) {
   const radius = Math.max(size * 1.15, 18), point = (angle: number, r = radius * .68) => ({ x: x + Math.cos(angle) * r, y: y + Math.sin(angle) * r })
   const arc = (start: number, end: number, color: string, index: number) => { const from = point(start), to = point(end); const large = Math.abs(end - start) > Math.PI ? 1 : 0; return <g key={index} data-transfer-arrow="true" data-arrow-index={index}><path d={`M ${from.x} ${from.y} A ${radius * .68} ${radius * .68} 0 ${large} 1 ${to.x} ${to.y}`} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" /><path d="M -4 -3 L 4 0 L -4 3 Z" transform={`translate(${to.x} ${to.y}) rotate(${end * 180 / Math.PI + 90})`} fill={color}/></g> }
-  return <g data-transfer-template="beijing" data-service-count={pairs.length}><circle cx={x} cy={y} r={radius} fill={style.shellFill} stroke={style.shellStroke} strokeWidth={style.shellStrokeWidth} vectorEffect="non-scaling-stroke" />{arc(-Math.PI * .78, Math.PI * .12, pairs[0]?.line.color ?? '#64748b', 0)}{arc(Math.PI * .22, Math.PI * 1.12, pairs[1]?.line.color ?? pairs[0]?.line.color ?? '#64748b', 1)}</g>
+  return <g data-transfer-template="beijing" data-service-count={pairs.length}><circle cx={x} cy={y} r={radius} fill={style.shellFill} stroke={style.shellStroke} strokeWidth={style.shellStrokeWidth} />{arc(-Math.PI * .78, Math.PI * .12, pairs[0]?.line.color ?? '#64748b', 0)}{arc(Math.PI * .22, Math.PI * 1.12, pairs[1]?.line.color ?? pairs[0]?.line.color ?? '#64748b', 1)}</g>
 }
 
 export interface KunmingTransferMetrics {
@@ -201,7 +201,7 @@ function KunmingTransferSymbol({ x, y, pairs, style, size, minorAxis, minMajorAx
     const leftPath = `M ${x - metrics.width * .28} ${y + metrics.height * .23} C ${x - metrics.width * .46} ${y + metrics.height * .23}, ${x - metrics.width * .46} ${y - metrics.height * .23}, ${x - metrics.width * .1} ${y - metrics.height * .23}`
     const rightPath = `M ${x + metrics.width * .28} ${y - metrics.height * .23} C ${x + metrics.width * .46} ${y - metrics.height * .23}, ${x + metrics.width * .46} ${y + metrics.height * .23}, ${x + metrics.width * .1} ${y + metrics.height * .23}`
     return <g data-transfer-template="kunming" data-service-count="2" data-kunming-shape="capsule" data-kunming-mode="two-line-capsule" data-kunming-width={metrics.width} data-kunming-height={metrics.height}>
-      <rect data-kunming-shell="true" className="kunming-shell" x={x - metrics.width / 2} y={y - metrics.height / 2} width={metrics.width} height={metrics.height} rx={metrics.height / 2} fill={style.shellFill || 'white'} stroke={style.shellStroke || '#3f454a'} strokeWidth={style.shellStrokeWidth} vectorEffect="non-scaling-stroke" />
+      <rect data-kunming-shell="true" className="kunming-shell" x={x - metrics.width / 2} y={y - metrics.height / 2} width={metrics.width} height={metrics.height} rx={metrics.height / 2} fill={style.shellFill || 'white'} stroke={style.shellStroke || '#3f454a'} strokeWidth={style.shellStrokeWidth} />
       {kunmingArrow({ path: leftPath, tip: { x: x - metrics.width * .1, y: y - metrics.height * .23 }, angle: 0, color: pairs[0].line.color, index: 0, mode: 'two-line-left', strokeWidth: metrics.strokeWidth, arrowHeadSize: metrics.arrowHeadSize })}
       {kunmingArrow({ path: rightPath, tip: { x: x + metrics.width * .1, y: y + metrics.height * .23 }, angle: Math.PI, color: pairs[1].line.color, index: 1, mode: 'two-line-right', strokeWidth: metrics.strokeWidth, arrowHeadSize: metrics.arrowHeadSize })}
     </g>
@@ -218,7 +218,7 @@ function KunmingTransferSymbol({ x, y, pairs, style, size, minorAxis, minMajorAx
     return kunmingArrow({ path: `M ${from.x} ${from.y} A ${metrics.arrowRadius} ${metrics.arrowRadius} 0 0 1 ${tip.x} ${tip.y}`, tip, angle: end + Math.PI / 2, color: pair.line.color, index, mode: 'circular', strokeWidth: metrics.strokeWidth, arrowHeadSize: metrics.arrowHeadSize })
   })
   return <g data-transfer-template="kunming" data-service-count={count} data-kunming-shape="circle" data-kunming-mode="circular-n-arrow" data-kunming-radius={metrics.radius}>
-    <circle data-kunming-shell="true" cx={x} cy={y} r={metrics.radius} fill={style.shellFill || 'white'} stroke={style.shellStroke || '#3f454a'} strokeWidth={style.shellStrokeWidth} vectorEffect="non-scaling-stroke" />
+    <circle data-kunming-shell="true" cx={x} cy={y} r={metrics.radius} fill={style.shellFill || 'white'} stroke={style.shellStroke || '#3f454a'} strokeWidth={style.shellStrokeWidth} />
     {arrows}
   </g>
 }

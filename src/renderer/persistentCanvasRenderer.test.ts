@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CANVAS_SCENE_BLEED, canvasCameraTransform } from './persistentCanvasRenderer'
+import { CANVAS_SCENE_BLEED, canvasCameraTransform, prepareRasterSource } from './persistentCanvasRenderer'
 
 describe('persistent canvas camera', () => {
   const base = { x: 0, y: 0, width: 920, height: 680 }
@@ -26,6 +26,18 @@ describe('persistent canvas camera', () => {
       100,
     )
     expect(transform).toBe('matrix(2, 0, 0, 2, -100, -50)')
+  })
+
+  it('strips editor-only and live SVG layers from the retained formal source', () => {
+    document.body.innerHTML = '<svg><g data-layer="camera-viewport" transform="matrix(2 0 0 2 1 1)"><g data-layer="canvas-background"><rect/></g><g data-layer="segments"><path class="segment-main"/><path class="segment-hit"/></g><g data-layer="line-legend"><rect/></g><g data-editor="true"><circle/></g></g></svg>'
+    const svg = document.querySelector('svg') as SVGSVGElement
+    const source = prepareRasterSource(svg)
+    expect(source?.markup).toContain('segment-main')
+    expect(source?.markup).not.toContain('segment-hit')
+    expect(source?.markup).not.toContain('canvas-background')
+    expect(source?.markup).not.toContain('line-legend')
+    expect(source?.markup).not.toContain('data-editor')
+    expect(source?.markup).not.toContain('matrix(2 0 0 2 1 1)')
   })
 
   it('uses the same twenty percent bleed as the AARC-inspired viewport cache', () => {

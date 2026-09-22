@@ -6,7 +6,7 @@ export interface OrdinaryStationRenderProps { station: Station; size: number; st
 export interface TransferStationRenderProps { station: Station; lines: Line[]; size: number; minorAxis: number; dotGap: number; endPadding: number; rotation: number; centerX?: number; centerY?: number; minMajorAxis?: number }
 export interface PresentationStationRenderProps extends TransferStationRenderProps { previousLines: Line[]; morphProgress: number; opacity: number; scale: number; ordinaryStyle?: StationStyle; lineColor?: string; backgroundColor?: string; lineCode?: string; stationCode?: string }
 export const TRANSFER_CONTAINER_STYLE = { fill: 'white', stroke: '#3f454a', strokeWidth: 1.75, vectorEffect: 'non-scaling-stroke' as const }
-export const TRANSFER_DOT_DIAMETER_RATIO = 0.4
+export const TRANSFER_DOT_DIAMETER_RATIO = 0.6
 export interface StationStyleDefinition { id:string; name:string; renderOrdinary:(props:OrdinaryStationRenderProps)=>React.ReactNode; renderTransfer:(props:TransferStationRenderProps)=>React.ReactNode; renderPresentation:(props:PresentationStationRenderProps)=>React.ReactNode }
 
 type ArtworkAttrs = { fill?: string; fillOpacity?: number; stroke?: string; strokeWidth?: number; strokeOpacity?: number; 'data-testid'?: string; 'data-station-shape'?: string }

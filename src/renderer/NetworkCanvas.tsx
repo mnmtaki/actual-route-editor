@@ -197,18 +197,22 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     const { width, height } = viewportSizeRef.current
     if (!target || width < 2 || height < 2) return
     const generation = ++rasterGenerationRef.current
+    const fallBackToSvg = () => {
+      if (generation !== rasterGenerationRef.current) return
+      rasterSnapshotViewRef.current = null
+      stackRef.current?.classList.remove('raster-ready')
+      if (rasterCameraRef.current) rasterCameraRef.current.style.transform = 'none'
+    }
     void rasterizePreparedMap(source, baseView, width, height, {
       bleed: CANVAS_SCENE_BLEED,
       gridVisible: project.settings.gridVisible,
     }).then(scene => {
-      if (!scene || generation !== rasterGenerationRef.current) return
-      if (!commitRasterizedScene(target, scene)) return
+      if (generation !== rasterGenerationRef.current) return
+      if (!scene || !commitRasterizedScene(target, scene)) { fallBackToSvg(); return }
       rasterSnapshotViewRef.current = scene.baseView
       stackRef.current?.classList.add('raster-ready')
       applyCanvasCamera(liveViewRef.current)
-    }).catch(() => {
-      // Keep the formal SVG fallback available if Canvas rasterization fails.
-    })
+    }).catch(fallBackToSvg)
   }, [project.settings.gridVisible])
 
   useEffect(() => {

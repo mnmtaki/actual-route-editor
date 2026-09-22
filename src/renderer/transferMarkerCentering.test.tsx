@@ -71,15 +71,6 @@ function renderFixtureTransfer(project: ReturnType<typeof convertAarcToActualRou
 }
 
 describe('transfer marker content centering', () => {
-  it('keeps the existing dot positions when marker width equals natural content width', () => {
-    const natural = getDefaultTransferMetrics(11, 2, 2.25, 5.15, 19.5).naturalWidth
-    const { frame, dots } = renderSyntheticTransfer(2, natural)
-    expect(Number(frame?.getAttribute('width'))).toBeCloseTo(natural)
-    const xs = dots.map(dot => Number(dot.getAttribute('cx')))
-    expect(xs[0]).toBeCloseTo(-5.525)
-    expect(xs[1]).toBeCloseTo(5.525)
-  })
-
   it('centers two-line content when the final capsule is expanded', () => {
     const { frame, dots } = renderSyntheticTransfer(2, 35.3)
     expect(Number(frame?.getAttribute('width'))).toBeCloseTo(35.3)

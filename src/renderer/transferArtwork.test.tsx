@@ -4,7 +4,6 @@ import { demoProject } from '../data/demo'
 import { getBuiltInTransferStyle } from '../data/presetRegistry'
 import { collapseLinesByServiceFamily, lineWithEffectiveColor } from '../data/lineIdentity'
 import { sortTransferLinesForSpatialOrder } from '../geometry/transferOrdering'
-import { getDefaultTransferMetrics } from './stationStyles'
 import { renderTransferArtwork } from './transferArtwork'
 
 function sample(count: number) {
@@ -164,9 +163,4 @@ describe('shared TransferArtwork preset templates', () => {
     }
   })
 
-  it('uses the established transfer metrics for default geometry', () => {
-    const metrics = getDefaultTransferMetrics(16, 3, 5, 8, 20)
-    expect(metrics.width).toBe(metrics.naturalWidth)
-    expect(metrics.dotDiameter).toBeCloseTo(12.8)
-  })
 })

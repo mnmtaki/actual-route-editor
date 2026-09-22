@@ -129,7 +129,7 @@ describe('direct manipulation gestures', () => {
     expect(onDragCommit).not.toHaveBeenCalled()
   })
 
-  it('zooms through a live SVG viewBox and commits React view only after wheel idle', () => {
+  it('eases wheel zoom across animation frames and commits React view only after settling', () => {
     vi.useFakeTimers()
     try {
       const setView = vi.fn()
@@ -139,13 +139,18 @@ describe('direct manipulation gestures', () => {
       vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
       const viewport = container.querySelector('[data-layer="camera-viewport"]')!
       fireEvent.wheel(svg, { clientX: 460, clientY: 340, deltaY: -100, bubbles: true })
-      vi.advanceTimersByTime(16)
+      vi.advanceTimersByTime(17)
       expect(svg.getAttribute('viewBox')).toBe('0 0 920 680')
-      expect(viewport.getAttribute('transform')).toMatch(/^matrix\(/)
+      const firstTransform = viewport.getAttribute('transform')
+      expect(firstTransform).toMatch(/^matrix\(/)
       expect(setView).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(83)
+      vi.advanceTimersByTime(17)
+      const secondTransform = viewport.getAttribute('transform')
+      expect(secondTransform).toMatch(/^matrix\(/)
+      expect(secondTransform).not.toBe(firstTransform)
+      vi.advanceTimersByTime(66)
       expect(setView).not.toHaveBeenCalled()
-      vi.advanceTimersByTime(1)
+      vi.advanceTimersByTime(300)
       expect(setView).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
@@ -162,7 +167,7 @@ describe('direct manipulation gestures', () => {
         Object.defineProperty(svg, 'clientWidth', { configurable: true, value: 920 })
         vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
         fireEvent.wheel(svg, { clientX: 460, clientY: 340, deltaY, bubbles: true })
-        vi.advanceTimersByTime(100)
+        vi.advanceTimersByTime(400)
         const width = setView.mock.calls.at(-1)?.[0].width as number
         unmount()
         return width

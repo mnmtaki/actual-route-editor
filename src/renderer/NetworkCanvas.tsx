@@ -203,6 +203,9 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   }, [])
   useEffect(() => {
     cancelZoomSnapshotBuild()
+    const staleSnapshot = zoomSnapshotRef.current
+    zoomSnapshotRef.current = null
+    if (staleSnapshot) URL.revokeObjectURL(staleSnapshot.url)
     zoomSnapshotBuildTimer.current = setTimeout(() => {
       zoomSnapshotBuildTimer.current = null
       const element = svgRef.current

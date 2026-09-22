@@ -56,6 +56,7 @@ export function RoadArtwork({
       ))}
       {!presentation && (
         <path
+          data-editor="true"
           d={d}
           fill="none"
           stroke="transparent"

@@ -110,7 +110,8 @@ describe('AARC pointLinks visual renderer', () => {
     const noop = () => {}
     const editor = render(<NetworkCanvas project={project} selection={null} drawing={null} onSelect={noop} onCreatePoint={noop} onConnectStation={noop} onExtend={noop} onSegmentPoint={noop} onPreview={noop} onDragCommit={noop} view={{ x: -50, y: -50, width: 200, height: 100 }} setView={noop} />)
     const editorSvg = editor.container.querySelector('svg')!
-    const editorLayers = [...editorSvg.children].map(node => node.getAttribute('data-layer'))
+    const cameraViewport = editorSvg.querySelector('[data-layer="camera-viewport"]')!
+    const editorLayers = [...cameraViewport.children].map(node => node.getAttribute('data-layer'))
     expect(editorLayers.indexOf('stations')).toBeLessThan(editorLayers.indexOf('aarc-point-links'))
     expect(editorLayers.indexOf('aarc-point-links')).toBeLessThan(editorLayers.indexOf('station-labels'))
 

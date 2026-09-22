@@ -52,7 +52,9 @@ export async function createRasterZoomSnapshot(svg: SVGSVGElement, baseView: Vie
 
   const clone = svg.cloneNode(true) as SVGSVGElement
   clone.querySelector('[data-layer="zoom-raster-snapshot"]')?.remove()
-  clone.querySelector('[data-layer="camera-viewport"]')?.removeAttribute('transform')
+  const cameraViewport = clone.querySelector('[data-layer="camera-viewport"]')
+  cameraViewport?.removeAttribute('transform')
+  cameraViewport?.removeAttribute('display')
   clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
   clone.setAttribute('viewBox', `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`)
 

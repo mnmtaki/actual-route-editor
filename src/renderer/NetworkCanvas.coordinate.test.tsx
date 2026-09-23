@@ -1,4 +1,4 @@
-import { fireEvent, render } from '@testing-library/react'
+import { act, fireEvent, render } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { demoProject } from '../data/demo'
 import { NetworkCanvas } from './NetworkCanvas'
@@ -24,4 +24,49 @@ describe('station creation pointer coordinates',()=>{
 
 describe('free creation does not snap to existing geometry',()=>{
   it('creates at the raw pointer world point even when the wide Segment hit path was clicked',()=>{ const onCreatePoint=vi.fn(),onSegmentPoint=vi.fn(); const view={x:0,y:0,width:920,height:680}; const {container}=render(<NetworkCanvas {...base} drawing={{lineId:'line-a',anchorStationId:'s4'}} onCreatePoint={onCreatePoint} onSegmentPoint={onSegmentPoint} view={view}/>); const svg=container.querySelector('svg')!; vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({ ...bounds,left:0,top:0,x:0,y:0,right:920,bottom:680 }); const path=container.querySelector('.segment-hit') as SVGPathElement; Object.defineProperty(path,'getTotalLength',{configurable:true,value:()=>100}); Object.defineProperty(path,'getPointAtLength',{configurable:true,value:(length:number)=>({x:length,y:0})}); fireEvent.pointerDown(path,{pointerId:6,clientX:37,clientY:12,bubbles:true}); expect(onCreatePoint).toHaveBeenCalledTimes(1); expect(onCreatePoint.mock.calls[0][0]).toEqual({x:37,y:12}); expect(onSegmentPoint).not.toHaveBeenCalled() })
+})
+
+
+describe('wheel camera behavior',()=>{
+  it('prevents the browser default wheel action',()=>{
+    const view={x:0,y:0,width:920,height:680}
+    const {container,unmount}=render(<NetworkCanvas {...base} drawing={null} onCreatePoint={noop} view={view}/>)
+    const svg=container.querySelector('svg')!
+    const event=new WheelEvent('wheel',{deltaY:100,clientX:460,clientY:340,bubbles:true,cancelable:true})
+    expect(svg.dispatchEvent(event)).toBe(false)
+    expect(event.defaultPrevented).toBe(true)
+    unmount()
+  })
+
+  it('keeps a newer live wheel view when an older committed view lands after its timer cleared',()=>{
+    vi.useFakeTimers()
+    try {
+      const setView=vi.fn()
+      const initial={x:0,y:0,width:920,height:680}
+      const {container,rerender,unmount}=render(<NetworkCanvas {...base} setView={setView} drawing={null} onCreatePoint={noop} view={initial}/>)
+      const svg=container.querySelector('svg')!
+      const wheel=()=>svg.dispatchEvent(new WheelEvent('wheel',{deltaY:100,clientX:460,clientY:340,bubbles:true,cancelable:true}))
+
+      wheel()
+      act(()=>vi.advanceTimersByTime(100))
+      expect(setView).toHaveBeenCalledTimes(1)
+      const firstCommit=setView.mock.calls[0][0] as typeof initial
+
+      wheel()
+      act(()=>vi.advanceTimersByTime(100))
+      expect(setView).toHaveBeenCalledTimes(2)
+      const secondCommit=setView.mock.calls[1][0] as typeof initial
+
+      // Simulate the older transition reaching React after the newer wheel
+      // transaction has already submitted and cleared its timer.
+      rerender(<NetworkCanvas {...base} setView={setView} drawing={null} onCreatePoint={noop} view={firstCommit}/>)
+      rerender(<NetworkCanvas {...base} setView={setView} drawing={null} onCreatePoint={noop} view={secondCommit}/>)
+
+      expect(secondCommit.width).toBeGreaterThan(firstCommit.width)
+      expect(secondCommit.width).toBeCloseTo(firstCommit.width*Math.exp(.04),6)
+      unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

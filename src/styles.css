@@ -68,7 +68,26 @@ body{background:#eeeae2;color:#262a28}
 .panel-help{margin:auto 12px 14px;border-top:1px solid #ebe7df;padding-top:10px;font-size:11px}.panel-help summary{cursor:pointer}.panel-help p{line-height:1.6}
 .network-summary{margin:6px 10px 12px;padding:10px;border:1px solid #e3ded4;border-radius:10px}.network-total{display:grid;grid-template-columns:1fr auto;gap:3px 8px;padding-bottom:8px;border-bottom:1px solid #e7e2d9}.network-total strong{grid-row:1 / 3;align-self:center;font-size:12px}.network-total span{font-size:10px;text-align:right}.network-line-stats{display:grid;gap:6px;padding-top:8px}.network-line-stats>div{display:grid;grid-template-columns:8px minmax(0,1fr) auto auto;align-items:center;gap:6px;font-size:9px}.network-line-stats i{width:7px;height:18px;border-radius:4px}.network-line-stats strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .canvas-wrap{isolation:isolate;overflow:hidden;background:#f0ede6;box-shadow:inset 0 0 0 1px #dad6cd}
-.network-canvas{position:absolute;inset:0;width:100%;height:100%}
+.network-canvas-stack{position:absolute;inset:0;overflow:hidden;background:#f3f0e9}
+.network-raster-camera{position:absolute;z-index:0;inset:0;pointer-events:none;transform-origin:0 0;will-change:transform}
+.network-raster-canvas{position:absolute;left:-20%;top:-20%;display:block;width:140%;height:140%;pointer-events:none}
+.network-canvas{position:absolute;z-index:1;inset:0;width:100%;height:100%}
+.network-canvas-stack.raster-ready .network-canvas{background:transparent}
+.network-canvas-stack.raster-ready .network-canvas [data-layer="canvas-background"],
+.network-canvas-stack.raster-ready .network-canvas [data-layer="vector-basemap"],
+.network-canvas-stack.raster-ready .network-canvas [data-layer="segments"],
+.network-canvas-stack.raster-ready .network-canvas [data-layer="structure-runs"],
+.network-canvas-stack.raster-ready .network-canvas [data-layer="stations"],
+.network-canvas-stack.raster-ready .network-canvas [data-layer="aarc-fake-lines"],
+.network-canvas-stack.raster-ready .network-canvas [data-layer="aarc-point-links"],
+.network-canvas-stack.raster-ready .network-canvas [data-layer="station-labels"],
+.network-canvas-stack.raster-ready .network-canvas [data-layer="line-badges"],
+.network-canvas-stack.raster-ready .network-canvas [data-layer="aarc-text-tags"],
+.network-canvas-stack.raster-ready .network-canvas [data-layer="map-elements"]{visibility:hidden}
+.network-canvas-stack.raster-ready .network-canvas [data-editor="true"],
+.network-canvas-stack.raster-ready .network-canvas .segment-hit,
+.network-canvas-stack.raster-ready .network-canvas .station-hit-target,
+.network-canvas-stack.raster-ready .network-canvas .station-selection-ring{visibility:visible}
 .canvas-status span{border-right:1px solid #e5e1d8}.canvas-status span:last-child{border-right:0}
 .inspector-body{min-width:0;overflow-x:hidden;padding:15px}.inspector-body .field,.inspector-body .field-grid>*{min-width:0}.empty-inspector{padding:48px 16px}.field input:focus,.field select:focus,.field textarea:focus{outline:2px solid #ebcc74;outline-offset:1px}
 .danger{color:#a5483e;border-color:#e7c8c3;background:#fff7f5}

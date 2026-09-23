@@ -13,6 +13,9 @@ export function StationLabel({ station, settings, showForeign, presentation=fals
   const resolvedName=name ?? station.name, resolvedNameS=nameS ?? station.nameS, foreignLines=showForeign&&resolvedNameS?resolvedNameS.split(/\r?\n/):[]
   const foreignStart=labelSize+foreignLabelGap
   const anchor=resolveLabelAnchor(station.labelOffsetX,station.labelOffsetY)
+  const hitWidth=Math.max(labelSize*2,[...resolvedName].length*labelSize*.95,...foreignLines.map(line=>[...line].length*foreignLabelSize*.72))
+  const hitHeight=Math.max(labelSize*1.4,labelSize+foreignLines.length*(foreignLabelSize*1.08+foreignLabelGap))
+  const hitLeft=(textAnchor:'start'|'middle'|'end')=>textAnchor==='start'?0:textAnchor==='end'?-hitWidth:-hitWidth/2
   if(isAarcBlock){
     const blockAnchor=resolveAarcLabelAnchor([station.labelOffsetX,station.labelOffsetY])
     const metrics=getAarcLabelBlockMetrics(labelSize,foreignLabelSize,foreignLabelGap,foreignLines.length,station.source?.sourceStationNameRowHeight,station.source?.sourceStationSubNameRowHeight)
@@ -24,6 +27,7 @@ export function StationLabel({ station, settings, showForeign, presentation=fals
         <text x="0" y={metrics.primaryBaseline} textAnchor={blockAnchor.horizontalAlign} dominantBaseline="middle" className={presentation?'presentation-station-label station-label-primary':'station-label station-label-primary'} style={{fontSize:labelSize,fontFamily:labelFontFamily,fontWeight:labelFontWeight,fill:labelColor,textRendering:'geometricPrecision'}}>{resolvedName}</text>
         {foreignLines.map((line,index)=><text key={`${index}-${line}`} x="0" y={metrics.foreignBaselines[index]} textAnchor={blockAnchor.horizontalAlign} dominantBaseline="middle" fill={foreignLabelColor} className={presentation?'presentation-station-label station-label-foreign':'station-label station-label-foreign'} style={{fontSize:foreignLabelSize,fontFamily:foreignLabelFontFamily,fontWeight:foreignLabelFontWeight,fill:foreignLabelColor,textRendering:'geometricPrecision'}}>{line}</text>)}
       </g>
+      {!presentation&&onPointerDown&&<rect data-editor="true" x={hitLeft(blockAnchor.horizontalAlign)} y={blockY} width={hitWidth} height={Math.max(hitHeight,metrics.height)} fill="transparent" pointerEvents="all"/>}
     </g>
   }
   return <g className="station-label-group" transform={`translate(${x} ${y}) rotate(${rotation})`} opacity={opacity} onPointerDown={onPointerDown} data-label-anchor-x={x} data-label-anchor-y={y} data-label-rotation={rotation} data-label-horizontal-anchor={anchor.textAnchor} data-label-vertical-anchor={anchor.verticalAnchor}>
@@ -31,5 +35,6 @@ export function StationLabel({ station, settings, showForeign, presentation=fals
       <tspan x="0" y="0" className="station-label-primary" style={{fontFamily:labelFontFamily,fontWeight:labelFontWeight,fill:labelColor}}>{resolvedName}</tspan>
       {foreignLines.map((line,index)=><tspan key={`${index}-${line}`} x="0" y={foreignStart+index*foreignLabelSize*1.02} className="station-label-foreign" style={{fontSize:foreignLabelSize,fontFamily:foreignLabelFontFamily,fontWeight:foreignLabelFontWeight,fill:foreignLabelColor}}>{line}</tspan>)}
     </text>
+    {!presentation&&onPointerDown&&<rect data-editor="true" x={hitLeft(anchor.textAnchor)} y={-labelSize} width={hitWidth} height={hitHeight} fill="transparent" pointerEvents="all"/>}
   </g>
 }

@@ -1,8 +1,7 @@
 import { memo, useMemo } from 'react'
 import type { ActualRouteProject, Selection, Station } from '../data/model'
-import { getEditorVisibleStationsAtTime } from '../timeline/active'
-import { getCompoundStationCanonical } from '../data/compoundStation'
 import { StationMarker } from './StationMarker'
+import { compileNetworkStationScene } from './scene/networkScene'
 
 export interface NetworkStationLayerProps {
   project: ActualRouteProject
@@ -20,9 +19,8 @@ export interface NetworkStationLayerProps {
 }
 
 /**
- * Heavy station/label subtree kept separate from drag preview state. During a
- * station or label drag the stable base layer stays memoized and a tiny active
- * overlay redraws only the moving station, like AARC's active canvas.
+ * SVG adapter for station scene membership. Station visibility and selection
+ * are compiled outside JSX so the same scene can later feed Canvas rendering.
  */
 export const NetworkStationLayer = memo(function NetworkStationLayer({
   project,
@@ -38,12 +36,17 @@ export const NetworkStationLayer = memo(function NetworkStationLayer({
   onStationPointerDown,
   onLabelPointerDown,
 }: NetworkStationLayerProps) {
-  const stations = useMemo(
-    () => getEditorVisibleStationsAtTime(project, project.timeline.currentDate),
-    [project],
+  const scene = useMemo(
+    () => compileNetworkStationScene(
+      project,
+      selection,
+      selectedStationIds,
+      includeStationIds,
+      excludeMarkerStationIds,
+      excludeLabelStationIds,
+    ),
+    [project, selection, selectedStationIds, includeStationIds, excludeMarkerStationIds, excludeLabelStationIds],
   )
-  const visible = includeStationIds ? stations.filter(station => includeStationIds.has(station.id)) : stations
-  const selectedIds = useMemo(() => new Set(selectedStationIds), [selectedStationIds])
 
   return <>
     {renderMarkers && <g
@@ -51,38 +54,34 @@ export const NetworkStationLayer = memo(function NetworkStationLayer({
       data-static-network-layer={overlay ? undefined : 'stations'}
       pointerEvents={overlay ? 'none' : undefined}
     >
-      {visible
-        .filter(station => !excludeMarkerStationIds?.has(station.id))
-        .map(station => <StationMarker
-          key={station.id}
-          part="marker"
-          project={project}
-          station={station}
-          time={project.timeline.currentDate}
-          selected={(selection?.type === 'station' && (selection.id === station.id || getCompoundStationCanonical(project, selection.id)?.id === station.id)) || selectedIds.has(station.id)}
-          hitRadius={hitRadius}
-          onPointerDown={event => onStationPointerDown?.(event, station)}
-          onLabelPointerDown={event => onLabelPointerDown?.(event, station)}
-        />)}
+      {scene.markers.map(({ station, selected }) => <StationMarker
+        key={station.id}
+        part="marker"
+        project={project}
+        station={station}
+        time={project.timeline.currentDate}
+        selected={selected}
+        hitRadius={hitRadius}
+        onPointerDown={event => onStationPointerDown?.(event, station)}
+        onLabelPointerDown={event => onLabelPointerDown?.(event, station)}
+      />)}
     </g>}
     {renderLabels && <g
       data-layer={overlay ? 'station-labels-active-overlay' : 'station-labels'}
       data-static-network-layer={overlay ? undefined : 'station-labels'}
       pointerEvents={overlay ? 'none' : undefined}
     >
-      {visible
-        .filter(station => !excludeLabelStationIds?.has(station.id))
-        .map(station => <StationMarker
-          key={station.id}
-          part="label"
-          project={project}
-          station={station}
-          time={project.timeline.currentDate}
-          selected={false}
-          hitRadius={hitRadius}
-          onPointerDown={() => {}}
-          onLabelPointerDown={event => onLabelPointerDown?.(event, station)}
-        />)}
+      {scene.labels.map(station => <StationMarker
+        key={station.id}
+        part="label"
+        project={project}
+        station={station}
+        time={project.timeline.currentDate}
+        selected={false}
+        hitRadius={hitRadius}
+        onPointerDown={() => {}}
+        onLabelPointerDown={event => onLabelPointerDown?.(event, station)}
+      />)}
     </g>}
   </>
 })

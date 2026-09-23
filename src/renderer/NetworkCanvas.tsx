@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ActualRouteProject, Road, Selection } from '../data/model'
 import { uid } from '../data/model'
 import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPlans, getSegmentSubpathSpans, pathSpansToSvgPath } from '../geometry/path'
-import { projectPointToSvgPath, screenPointToWorld } from '../geometry/screenPoint'
+import { projectPointToSvgPath, screenPointToWorldFallback } from '../geometry/screenPoint'
 import { getStationHandleStyle } from './stationHandle'
 import { getSegmentStyleIntervalAtProgress, getStructureNodePoint } from '../data/structure'
 import { MapElementsLayer } from './MapElements'
@@ -24,6 +24,7 @@ import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, 
 import { cloneProjectForDrag, getDragAffectedLineIds, getDragLineLabelOverlay, getDragMapElementOverlay, getDragStationOverlay, getDragVectorBasemapOverlay, type DragLineLabelOverlay, type DragMapElementOverlay, type DragStationOverlay, type DragVectorBasemapOverlay } from './dragPreview'
 import { NetworkLineLayer } from './NetworkLineLayer'
 import { NetworkStationLayer } from './NetworkStationLayer'
+import { CANVAS_SCENE_BLEED, canvasCameraTransform, commitRasterizedScene, prepareRasterSource, rasterizePreparedMap, type PreparedRasterSource } from './persistentCanvasRenderer'
 
 type View = { x: number; y: number; width: number; height: number }
 type Point = { x: number; y: number }
@@ -52,10 +53,21 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   // onPreview is retained for API compatibility; drag previews are intentionally local
   // so App/history does not rerender on every pointer movement.
   void onPreview
+  const stackRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const cameraViewportRef = useRef<SVGGElement>(null)
+  const rasterCameraRef = useRef<HTMLDivElement>(null)
+  const rasterCanvasRef = useRef<HTMLCanvasElement>(null)
+  const rasterSnapshotViewRef = useRef<View | null>(null)
+  const rasterSourceRef = useRef<PreparedRasterSource | null>(null)
+  const rasterGenerationRef = useRef(0)
+  const rasterSuppressedForDragRef = useRef(false)
+  const viewportSizeRef = useRef({ width: 920, height: 680 })
+  const viewportRectRef = useRef({ left: 0, top: 0, width: 920, height: 680 })
   const committedViewRef = useRef<View>(view)
   const liveViewRef = useRef<View>(view)
+  const liveViewRevisionRef = useRef(0)
+  const submittedViewRevisionRef = useRef(new WeakMap<View, number>())
   const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingPreview = useRef<ActualRouteProject | null>(null)
@@ -74,6 +86,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const [dragMapElementOverlay, setDragMapElementOverlay] = useState<DragMapElementOverlay>(() => ({ elementIds: new Set() }))
   const [dragVectorBasemapOverlay, setDragVectorBasemapOverlay] = useState<DragVectorBasemapOverlay>(() => ({ kind: null, objectIds: new Set() }))
   const [canvasWidth, setCanvasWidth] = useState(920)
+  const [canvasHeight, setCanvasHeight] = useState(680)
   const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
   const shown = preview ?? project
@@ -100,20 +113,44 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
   const structureHitRadius = Math.max(22, touchHitPixels * view.width / canvasWidth)
 
-  const applyLiveView = (next: View) => {
-    liveViewRef.current = next
+  const screenToWorld = useCallback((clientX: number, clientY: number, worldView: View) => {
+    const cached = viewportRectRef.current
+    const rect = cached.width > 1 && cached.height > 1
+      ? cached
+      : svgRef.current?.getBoundingClientRect() ?? cached
+    return screenPointToWorldFallback(rect, worldView, clientX, clientY)
+  }, [])
+
+  const applyCanvasCamera = (next: View) => {
+    const base = rasterSnapshotViewRef.current
+    const camera = rasterCameraRef.current
+    if (!base || !camera) return
+    const { width, height } = viewportSizeRef.current
+    camera.style.transform = canvasCameraTransform(base, next, width, height)
+  }
+  const applyLiveCamera = (next: View) => {
     const base = committedViewRef.current
     const scaleX = base.width / next.width
     const scaleY = base.height / next.height
     const translateX = base.x - next.x * scaleX
     const translateY = base.y - next.y * scaleY
     cameraViewportRef.current?.setAttribute('transform', `matrix(${scaleX} 0 0 ${scaleY} ${translateX} ${translateY})`)
+    applyCanvasCamera(next)
   }
-  const commitLiveView = () => setView(liveViewRef.current)
+  const applyLiveView = (next: View) => {
+    liveViewRevisionRef.current += 1
+    liveViewRef.current = next
+    applyLiveCamera(next)
+  }
+  const commitLiveView = () => {
+    const next = liveViewRef.current
+    submittedViewRevisionRef.current.set(next, liveViewRevisionRef.current)
+    startTransition(() => setView(next))
+  }
   const panLiveView = (fromClient: Point, toClient: Point) => {
     const currentView = liveViewRef.current
-    const before = screenPointToWorld(svgRef.current!, fromClient.x, fromClient.y, currentView)
-    const after = screenPointToWorld(svgRef.current!, toClient.x, toClient.y, currentView)
+    const before = screenToWorld(fromClient.x, fromClient.y, currentView)
+    const after = screenToWorld(toClient.x, toClient.y, currentView)
     applyLiveView({ ...currentView, x: currentView.x - (after.x - before.x), y: currentView.y - (after.y - before.y) })
   }
   const flushPreview = () => {
@@ -140,25 +177,125 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
     previewTimer.current = null
   }, [])
+  const suppressRasterForObjectDrag = () => {
+    rasterSuppressedForDragRef.current = true
+    rasterGenerationRef.current += 1
+    stackRef.current?.classList.remove('raster-ready')
+  }
+  const releaseRasterAfterObjectDrag = () => {
+    rasterSuppressedForDragRef.current = false
+  }
 
   useLayoutEffect(() => {
+    const submittedRevision = submittedViewRevisionRef.current.get(view)
+    const staleLiveCommit = submittedRevision !== undefined && submittedRevision < liveViewRevisionRef.current
+
     committedViewRef.current = view
-    liveViewRef.current = view
-    if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
-    wheelCommitTimer.current = null
     svgRef.current?.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`)
     cameraViewportRef.current?.removeAttribute('transform')
+
+    if (staleLiveCommit) {
+      // A lower-priority transition can finish after later wheel/pan input.
+      // Keep the newer live camera instead of snapping back to that older view.
+      applyLiveCamera(liveViewRef.current)
+      return
+    }
+
+    // External view changes become the new live baseline and invalidate any
+    // older submitted interaction views that have not committed yet.
+    if (submittedRevision === undefined) liveViewRevisionRef.current += 1
+    liveViewRef.current = view
+    applyCanvasCamera(view)
   }, [view])
   useLayoutEffect(() => {
     const element = svgRef.current
     if (!element) return
-    const update = () => setCanvasWidth(Math.max(1, element.getBoundingClientRect().width))
+    const update = () => {
+      const rect = element.getBoundingClientRect()
+      viewportRectRef.current = { left: rect.left, top: rect.top, width: Math.max(1, rect.width), height: Math.max(1, rect.height) }
+      viewportSizeRef.current = { width: Math.max(1, rect.width), height: Math.max(1, rect.height) }
+      setCanvasWidth(Math.max(1, rect.width))
+      setCanvasHeight(Math.max(1, rect.height))
+      applyCanvasCamera(liveViewRef.current)
+    }
     update()
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null
     observer?.observe(element)
     return () => observer?.disconnect()
   }, [])
+  useEffect(() => {
+    const element = svgRef.current
+    if (!element) return
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, element.clientHeight || 680) : 1
+      const delta = Math.max(-120, Math.min(120, event.deltaY * modeScale))
+      if (Math.abs(delta) < .01) return
+      const baseView = liveViewRef.current
+      const point = screenToWorld(event.clientX, event.clientY, baseView)
+      const factor = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY)
+      applyLiveView({
+        x: point.x - (point.x - baseView.x) * factor,
+        y: point.y - (point.y - baseView.y) * factor,
+        width: baseView.width * factor,
+        height: baseView.height * factor,
+      })
+      if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
+      wheelCommitTimer.current = setTimeout(() => {
+        wheelCommitTimer.current = null
+        commitLiveView()
+      }, WHEEL_ZOOM_IDLE_MS)
+    }
+    element.addEventListener('wheel', handleWheel, { passive: false })
+    return () => element.removeEventListener('wheel', handleWheel)
+  }, [screenToWorld])
+  const requestRaster = useCallback((source: PreparedRasterSource, baseView: View) => {
+    const target = rasterCanvasRef.current
+    const { width, height } = viewportSizeRef.current
+    if (!target || width < 2 || height < 2) return
+    const generation = ++rasterGenerationRef.current
+    const fallBackToSvg = () => {
+      if (generation !== rasterGenerationRef.current) return
+      rasterSnapshotViewRef.current = null
+      stackRef.current?.classList.remove('raster-ready')
+      if (rasterCameraRef.current) rasterCameraRef.current.style.transform = 'none'
+    }
+    void rasterizePreparedMap(source, baseView, width, height, {
+      bleed: CANVAS_SCENE_BLEED,
+      gridVisible: project.settings.gridVisible,
+    }).then(scene => {
+      if (generation !== rasterGenerationRef.current || rasterSuppressedForDragRef.current) return
+      if (!scene || !commitRasterizedScene(target, scene)) { fallBackToSvg(); return }
+      rasterSnapshotViewRef.current = scene.baseView
+      stackRef.current?.classList.add('raster-ready')
+      applyCanvasCamera(liveViewRef.current)
+    }).catch(fallBackToSvg)
+  }, [project.settings.gridVisible])
+
+  useEffect(() => {
+    const element = svgRef.current
+    if (!element || rasterSuppressedForDragRef.current) return
+    const timer = setTimeout(() => {
+      const source = prepareRasterSource(element)
+      if (!source) {
+        rasterSourceRef.current = null
+        rasterSnapshotViewRef.current = null
+        stackRef.current?.classList.remove('raster-ready')
+        return
+      }
+      rasterSourceRef.current = source
+      requestRaster(source, { ...committedViewRef.current })
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [project, roadDraft, dragAffectedLineIds, dragStationOverlay, dragLineLabelOverlay, dragMapElementOverlay, dragVectorBasemapOverlay, requestRaster])
+
+  useEffect(() => {
+    const source = rasterSourceRef.current
+    if (!source) return
+    requestRaster(source, { ...committedViewRef.current })
+  }, [view, canvasWidth, canvasHeight, requestRaster])
   useEffect(() => () => {
+    rasterGenerationRef.current += 1
     if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
   }, [])
@@ -170,7 +307,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     setDrawingPointSelection(null)
   }, [drawing?.kind, drawing?.kind === 'line' ? drawing.lineId : undefined, drawing?.kind === 'line' ? drawing.phaseId : undefined, drawing?.kind === 'line' ? drawing.anchorStationId : undefined])
 
-  const pointerToWorld = useCallback((clientX: number, clientY: number): Point => screenPointToWorld(svgRef.current!, clientX, clientY, liveViewRef.current), [])
+  const pointerToWorld = useCallback((clientX: number, clientY: number): Point => screenToWorld(clientX, clientY, liveViewRef.current), [screenToWorld])
   const capture = useCallback((event: React.PointerEvent) => event.currentTarget.setPointerCapture?.(event.pointerId), [])
   const beginPinch = useCallback(() => {
     const points = [...pointers.current.entries()].slice(0, 2)
@@ -183,16 +320,20 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (initialDistance < 1) return
     const previous = gesture.current
     if (previous.kind !== 'idle') {
-      if (previous.kind !== 'panningCanvas' && previous.kind !== 'pinchingCanvas' && 'before' in previous) cancelScheduledPreview()
+      if (previous.kind !== 'panningCanvas' && previous.kind !== 'pinchingCanvas' && 'before' in previous) {
+        cancelScheduledPreview()
+        releaseRasterAfterObjectDrag()
+      }
       setPreview(null)
     }
     const startView = liveViewRef.current
-    gesture.current = { kind: 'pinchingCanvas', pointerIds: [firstId, secondId], initialDistance, startView, startWorld: screenPointToWorld(svgRef.current!, center.x, center.y, startView) }
-  }, [cancelScheduledPreview])
+    gesture.current = { kind: 'pinchingCanvas', pointerIds: [firstId, secondId], initialDistance, startView, startWorld: screenToWorld(center.x, center.y, startView) }
+  }, [cancelScheduledPreview, screenToWorld])
   const startObjectDrag = useCallback((kind: Extract<Gesture, { before: ActualRouteProject }>['kind'], event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string, ownerPathId?: string, ownerRoadId?: string) => {
     event.stopPropagation(); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); capture(event)
     if (pointers.current.size >= 2) { beginPinch(); return false }
     const target = { kind, id, segmentId, ownerLineId, ownerPathId, ownerRoadId }
+    suppressRasterForObjectDrag()
     gesture.current = { ...target, pointerId: event.pointerId, startWorld: pointerToWorld(event.clientX, event.clientY), origin, before: project, latest: project, moved: false }
     setDragAffectedLineIds(getDragAffectedLineIds(project, target))
     setDragStationOverlay(getDragStationOverlay(project, target))
@@ -349,7 +490,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const scale = Math.max(.2, Math.min(5, current.initialDistance / distance))
       const width = current.startView.width * scale, height = current.startView.height * scale
       const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 }
-      const underStart = screenPointToWorld(svgRef.current!, center.x, center.y, current.startView)
+      const underStart = screenToWorld(center.x, center.y, current.startView)
       applyLiveView({ x: current.startWorld.x - (underStart.x - current.startView.x) * scale, y: current.startWorld.y - (underStart.y - current.startView.y) * scale, width, height })
       return
     }
@@ -445,11 +586,16 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }
     if (current.kind === 'panningCanvas') {
       if (current.pointerId === event.pointerId) commitLiveView()
-      gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragMapElementOverlay({ elementIds: new Set() }); setDragVectorBasemapOverlay({ kind: null, objectIds: new Set() }); setPreview(null); return
+      gesture.current = { kind: 'idle' }
+      setPreview(null)
+      return
     }
-    if ('before' in current && current.pointerId === event.pointerId && current.moved) {
-      cancelScheduledPreview()
-      onDragCommit(current.before, current.latest)
+    if ('before' in current && current.pointerId === event.pointerId) {
+      releaseRasterAfterObjectDrag()
+      if (current.moved) {
+        cancelScheduledPreview()
+        onDragCommit(current.before, current.latest)
+      }
     }
     gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragMapElementOverlay({ elementIds: new Set() }); setDragVectorBasemapOverlay({ kind: null, objectIds: new Set() }); setPreview(null)
   }
@@ -554,7 +700,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     event.stopPropagation()
     const projected = projectPointToSvgPath(
       event.currentTarget,
-      screenPointToWorld(svgRef.current!, event.clientX, event.clientY, liveViewRef.current),
+      screenToWorld(event.clientX, event.clientY, liveViewRef.current),
     )
     const progress = findSegmentProgressForPoint(project, segment, projected)
     onSelect({ type: 'segment', id: segment.id, progress })
@@ -614,64 +760,37 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     </g>
   })()
 
-  return <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''}`} tabIndex={0} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
+  return <div ref={stackRef} className="network-canvas-stack">
+    <div ref={rasterCameraRef} className="network-raster-camera" aria-hidden="true">
+      <canvas ref={rasterCanvasRef} className="network-raster-canvas" />
+    </div>
+    <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''}`} tabIndex={0} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
     onPointerDown={handleCanvasPointerDown} onPointerMove={handlePointerMove} onPointerUp={endGesture} onPointerCancel={endGesture} onContextMenu={event=>event.preventDefault()}
     onDoubleClick={event => { if (drawing && drawing.kind !== 'line') { event.preventDefault(); drawingClick.current = null; if (pointerDoubleFinish.current) { pointerDoubleFinish.current = false; return } onFinishDrawing?.() } }}
-    onWheel={event => {
-      event.preventDefault()
-      const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, svgRef.current?.clientHeight ?? 680) : 1
-      const delta = Math.max(-120, Math.min(120, event.deltaY * modeScale))
-      if (Math.abs(delta) < .01) return
-      const baseView = liveViewRef.current
-      const point = screenPointToWorld(svgRef.current!, event.clientX, event.clientY, baseView)
-      const factor = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY)
-      applyLiveView({
-        x: point.x - (point.x - baseView.x) * factor,
-        y: point.y - (point.y - baseView.y) * factor,
-        width: baseView.width * factor,
-        height: baseView.height * factor,
-      })
-      if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
-      wheelCommitTimer.current = setTimeout(() => {
-        wheelCommitTimer.current = null
-        commitLiveView()
-      }, WHEEL_ZOOM_IDLE_MS)
-    }}>
+    >
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>
     <g ref={cameraViewportRef} data-layer="camera-viewport" style={{ willChange: 'transform' }}>
-    <g data-layer="canvas-background"><rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>
+    <g data-layer="canvas-background" pointerEvents="none"><rect className="canvas-bg-artwork" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-grid-artwork" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>
+    <rect data-editor="true" className="canvas-bg" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="transparent" pointerEvents="all" />
     {backgroundProject.background?.visible && <image data-layer="background-image" href={backgroundProject.background.dataUrl} x={backgroundProject.background.x} y={backgroundProject.background.y} width={backgroundProject.background.width} height={backgroundProject.background.height} opacity={backgroundProject.background.opacity} onPointerDown={handleBackgroundPointerDown} />}
-    {preview && dragVectorBasemapOverlay.kind === 'basemap'
-      ? <VectorBasemapLayer
-          project={shown}
-          draft={roadDraft}
-          selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
-          hitRadius={stationHitRadius}
-          onRoadPointerDown={handleRoadPointerDown}
-          onRoadPointPointerDown={handleRoadPointPointerDown}
-          onPathPointerDown={handleBasemapPathPointerDown}
-          onPointPointerDown={handleBasemapPointPointerDown}
-        />
-      : <>
-          <VectorBasemapLayer
-            project={project}
-            draft={roadDraft}
-            selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
-            hitRadius={stationHitRadius}
-            excludeObjectIds={preview && dragVectorBasemapOverlay.kind === 'road' ? dragVectorBasemapOverlay.objectIds : undefined}
-            onRoadPointerDown={handleRoadPointerDown}
-            onRoadPointPointerDown={handleRoadPointPointerDown}
-            onPathPointerDown={handleBasemapPathPointerDown}
-            onPointPointerDown={handleBasemapPointPointerDown}
-          />
-          {preview && dragVectorBasemapOverlay.kind === 'road' && dragVectorBasemapOverlay.objectIds.size > 0 && <VectorBasemapLayer
-            project={shown}
-            selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : undefined}
-            hitRadius={stationHitRadius}
-            includeObjectIds={dragVectorBasemapOverlay.objectIds}
-            overlay
-          />}
-        </>}
+    <VectorBasemapLayer
+      project={project}
+      draft={roadDraft}
+      selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
+      hitRadius={stationHitRadius}
+      excludeObjectIds={preview && dragVectorBasemapOverlay.kind ? dragVectorBasemapOverlay.objectIds : undefined}
+      onRoadPointerDown={handleRoadPointerDown}
+      onRoadPointPointerDown={handleRoadPointPointerDown}
+      onPathPointerDown={handleBasemapPathPointerDown}
+      onPointPointerDown={handleBasemapPointPointerDown}
+    />
+    {preview && dragVectorBasemapOverlay.kind && dragVectorBasemapOverlay.objectIds.size > 0 && <VectorBasemapLayer
+      project={shown}
+      selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
+      hitRadius={stationHitRadius}
+      includeObjectIds={dragVectorBasemapOverlay.objectIds}
+      overlay
+    />}
     {basemapDrawingOverlay}
     <NetworkLineLayer
       project={project}
@@ -778,5 +897,6 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     {drawing?.kind === 'basemap' && !(shown.basemapPaths?.find(path => path.id === drawing.pathId)?.points.length) && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置第一个地形节点</text></g>}
     {calibration && <g data-editor="true" data-layer="calibration-overlay"><rect x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="transparent" pointerEvents="all" onPointerDown={event => handleCanvasPointerDown(event as unknown as React.PointerEvent<SVGSVGElement>)} /><line x1={calibration.points[0]?.x ?? 0} y1={calibration.points[0]?.y ?? 0} x2={calibration.points[1]?.x ?? calibration.points[0]?.x ?? 0} y2={calibration.points[1]?.y ?? calibration.points[0]?.y ?? 0} stroke="#c89521" strokeWidth="2" strokeDasharray="8 5" pointerEvents="none" />{calibration.points.map((point,index)=><circle key={index} cx={point.x} cy={point.y} r="8" fill="#fff9e8" stroke="#c89521" strokeWidth="2" pointerEvents="none" />)}<text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#765c1a" fontSize="16" pointerEvents="none">{calibration.points.length ? '再点一下选择第二个点' : '点击地图上的第一个点'}</text></g>}
     </g>
-  </svg>
+    </svg>
+  </div>
 }

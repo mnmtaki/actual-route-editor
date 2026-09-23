@@ -3,7 +3,7 @@ import type { ActualRouteProject, Road, Selection } from '../data/model'
 import { uid } from '../data/model'
 import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPlans, getSegmentSubpathSpans, pathSpansToSvgPath } from '../geometry/path'
 import { projectPointToSvgPath, screenPointToWorld } from '../geometry/screenPoint'
-import { snapPointToAlignment, type AlignmentCandidate, type AlignmentGuide } from '../geometry/alignmentSnap'
+import { snapEditorPoint, type SnapGuide, type SnapNode, type SnapRaySource } from '../geometry/alignmentSnap'
 import { getStationHandleStyle } from './stationHandle'
 import { getSegmentStyleIntervalAtProgress, getStructureNodePoint } from '../data/structure'
 import { MapElementsLayer } from './MapElements'
@@ -42,13 +42,13 @@ type DrawingCanvasPointer = { pointerId: number; startClient: Point; lastClient:
 const WHEEL_ZOOM_IDLE_MS = 100
 const WHEEL_ZOOM_SENSITIVITY = .0004
 
-export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, alignmentSnapEnabled = false, view, setView }: {
+export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, snapOptions = { node: false, neighbor: false, grid: false }, view, setView }: {
   project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; roadDraft?: Road | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
   calibration?: { points: Point[] } | null; onCalibrationPoint?: (point: Point) => void
   selectedStationIds?: string[]; onToggleStationSelection?: (stationId: string) => void
   onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void; onFinishDrawing?: () => void
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void; onEditBlocked?: (message: string) => void
-  alignmentSnapEnabled?: boolean
+  snapOptions?: { node: boolean; neighbor: boolean; grid: boolean }
   view: View; setView: React.Dispatch<React.SetStateAction<View>>
 }) {
   // onPreview is retained for API compatibility; drag previews are intentionally local
@@ -78,7 +78,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const [canvasWidth, setCanvasWidth] = useState(920)
   const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
-  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([])
+  const [alignmentGuides, setAlignmentGuides] = useState<SnapGuide[]>([])
   const shown = preview ?? project
   const staticHistoricalIdentityProject = useMemo(() => projectWithLineColorsAt(projectWithLineParentsAt(project, project.timeline.currentDate), project.timeline.currentDate), [project])
   const activeLineLabelProject = useMemo(() => {
@@ -103,25 +103,74 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
   const structureHitRadius = Math.max(22, touchHitPixels * view.width / canvasWidth)
 
-  const alignmentThreshold = () => {
+  const worldPerPixel = () => {
     const currentView = liveViewRef.current
     const bounds = svgRef.current?.getBoundingClientRect()
-    return {
-      x: 8 * currentView.width / Math.max(1, bounds?.width ?? canvasWidth),
-      y: 8 * currentView.height / Math.max(1, bounds?.height ?? 680),
-    }
+    return Math.max(
+      currentView.width / Math.max(1, bounds?.width ?? canvasWidth),
+      currentView.height / Math.max(1, bounds?.height ?? 680),
+    )
   }
-  const alignmentCandidates = (source: ActualRouteProject, excludedIds = new Set<string>(), extra: AlignmentCandidate[] = []): AlignmentCandidate[] => [
+  const allSnapNodes = (source: ActualRouteProject, excludedIds = new Set<string>(), extra: SnapNode[] = []): SnapNode[] => [
     ...source.stations.filter(item => !excludedIds.has(item.id)).map(item => ({ id: item.id, x: item.x, y: item.y, kind: 'station' as const })),
     ...source.geometry.segments.flatMap(segment => segment.waypoints.filter(item => !excludedIds.has(item.id)).map(item => ({ id: item.id, x: item.x, y: item.y, kind: 'waypoint' as const }))),
     ...extra.filter(item => !excludedIds.has(item.id)),
   ]
-  const resolveAlignment = (raw: Point, source: ActualRouteProject, excludedIds = new Set<string>(), extra: AlignmentCandidate[] = [], bypass = false) => {
-    if (!alignmentSnapEnabled || bypass) {
+  const stationNeighborSources = (source: ActualRouteProject, stationId: string): SnapRaySource[] => {
+    const result: SnapRaySource[] = []
+    for (const segment of source.geometry.segments) {
+      if (segment.fromStationId !== stationId && segment.toStationId !== stationId) continue
+      const fromStart = segment.fromStationId === stationId
+      const waypoint = fromStart ? segment.waypoints[0] : segment.waypoints.at(-1)
+      if (waypoint) result.push({ id: waypoint.id, x: waypoint.x, y: waypoint.y })
+      else {
+        const otherId = fromStart ? segment.toStationId : segment.fromStationId
+        const other = source.stations.find(item => item.id === otherId)
+        if (other) result.push({ id: other.id, x: other.x, y: other.y })
+      }
+    }
+    return dedupeSnapSources(result)
+  }
+  const waypointNeighborSources = (source: ActualRouteProject, segmentId: string, waypointId: string): SnapRaySource[] => {
+    const segment = source.geometry.segments.find(item => item.id === segmentId)
+    if (!segment) return []
+    const from = source.stations.find(item => item.id === segment.fromStationId)
+    const to = source.stations.find(item => item.id === segment.toStationId)
+    const chain: SnapRaySource[] = [
+      ...(from ? [{ id: from.id, x: from.x, y: from.y }] : []),
+      ...segment.waypoints.map(item => ({ id: item.id, x: item.x, y: item.y })),
+      ...(to ? [{ id: to.id, x: to.x, y: to.y }] : []),
+    ]
+    const index = chain.findIndex(item => item.id === waypointId)
+    if (index < 0) return []
+    return [chain[index - 1], chain[index + 1]].filter((item): item is SnapRaySource => Boolean(item))
+  }
+  const draftNeighborSources = (current: LineDraftState, id?: string): SnapRaySource[] => {
+    const anchor = current.anchorStationId ? project.stations.find(item => item.id === current.anchorStationId) : undefined
+    const chain: SnapRaySource[] = [
+      ...(anchor ? [{ id: anchor.id, x: anchor.x, y: anchor.y }] : []),
+      ...current.points.map(item => ({ id: item.id, x: item.x, y: item.y })),
+    ]
+    if (!id) return chain.length ? [chain.at(-1)!] : []
+    const index = chain.findIndex(item => item.id === id)
+    return [chain[index - 1], chain[index + 1]].filter((item): item is SnapRaySource => Boolean(item))
+  }
+  const resolveSnap = (raw: Point, config: { nodes?: SnapNode[]; neighbors?: SnapRaySource[] }, bypass = false) => {
+    if (bypass || (!snapOptions.node && !snapOptions.neighbor && !snapOptions.grid)) {
       setAlignmentGuides([])
       return raw
     }
-    const result = snapPointToAlignment(raw, alignmentCandidates(source, excludedIds, extra), alignmentThreshold())
+    const scale = worldPerPixel()
+    const result = snapEditorPoint(raw, snapOptions, {
+      node: 10 * scale,
+      ray: 16 * scale,
+      grid: 6 * scale,
+    }, {
+      nodes: config.nodes,
+      neighbors: config.neighbors,
+      gridInterval: 40,
+      angles: [0, 45, 90, 135],
+    })
     setAlignmentGuides(result.guides)
     return result.point
   }
@@ -231,8 +280,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
 
   const addDraftPointAt = (position: Point, bypassAlignment = false) => {
     if (!lineDraft?.anchorStationId) return
-    const extras: AlignmentCandidate[] = lineDraft.points.map(item => ({ id: item.id, x: item.x, y: item.y, kind: 'draft' as const }))
-    const resolved = resolveAlignment(position, project, new Set(), extras, bypassAlignment)
+    const extras: SnapNode[] = lineDraft.points.map(item => ({ id: item.id, x: item.x, y: item.y, kind: 'draft' as const }))
+    const resolved = resolveSnap(position, {
+      nodes: allSnapNodes(project, new Set(), extras),
+      neighbors: draftNeighborSources(lineDraft),
+    }, bypassAlignment)
     const point = { id: uid('draft-waypoint'), x: resolved.x, y: resolved.y }
     setLineDraft(current => current ? { ...current, points: [...current.points, point] } : current)
     setDrawingPointSelection({ kind: 'draft', id: point.id })
@@ -308,7 +360,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       if (!isCanvasBlank) return
       if (!lineDraft?.anchorStationId) {
         const raw = pointerToWorld(event.clientX, event.clientY)
-        const point = resolveAlignment(raw, project, new Set(), [], event.altKey)
+        const point = resolveSnap(raw, { nodes: allSnapNodes(project), neighbors: [] }, event.altKey)
         const result = appendStationToLineWithWaypoints(project, drawing.lineId, point, [], null, drawing.phaseId)
         onDragCommit(project, result.project)
         setLineDraft({ lineId: drawing.lineId, phaseId: drawing.phaseId, anchorStationId: result.stationId, points: [], lastCreatedStationId: result.stationId })
@@ -348,8 +400,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const id = draftDrag.current.id
       setLineDraft(current => {
         if (!current) return current
-        const extras: AlignmentCandidate[] = current.points.map(item => ({ id: item.id, x: item.x, y: item.y, kind: 'draft' as const }))
-        const point = resolveAlignment(raw, project, new Set([id]), extras, event.altKey)
+        const extras: SnapNode[] = current.points.map(item => ({ id: item.id, x: item.x, y: item.y, kind: 'draft' as const }))
+        const point = resolveSnap(raw, {
+          nodes: allSnapNodes(project, new Set([id]), extras),
+          neighbors: draftNeighborSources(current, id),
+        }, event.altKey)
         return { ...current, points: current.points.map(item => item.id === id ? { ...item, x: point.x, y: point.y } : item) }
       })
       return
@@ -410,13 +465,19 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (current.kind === 'draggingStation') {
       const station = next.stations.find(item => item.id === current.id)
       if (station) {
-        const target = resolveAlignment({ x: current.origin.x + rawDx, y: current.origin.y + rawDy }, current.before, new Set(current.id ? [current.id] : []), [], event.altKey)
+        const target = resolveSnap({ x: current.origin.x + rawDx, y: current.origin.y + rawDy }, {
+          nodes: allSnapNodes(current.before, new Set(current.id ? [current.id] : [])),
+          neighbors: current.id ? stationNeighborSources(current.before, current.id) : [],
+        }, event.altKey)
         translateStationWithAnchors(next, station.id, target.x - current.origin.x, target.y - current.origin.y)
       }
     } else if (current.kind === 'draggingWaypoint') {
       const waypoint = next.geometry.segments.find(item => item.id === current.segmentId)?.waypoints.find(item => item.id === current.id)
       if (waypoint) {
-        const target = resolveAlignment({ x: current.origin.x + rawDx, y: current.origin.y + rawDy }, current.before, new Set(current.id ? [current.id] : []), [], event.altKey)
+        const target = resolveSnap({ x: current.origin.x + rawDx, y: current.origin.y + rawDy }, {
+          nodes: allSnapNodes(current.before, new Set(current.id ? [current.id] : [])),
+          neighbors: current.id && current.segmentId ? waypointNeighborSources(current.before, current.segmentId, current.id) : [],
+        }, event.altKey)
         waypoint.x = target.x; waypoint.y = target.y
       }
     } else if (current.kind === 'draggingStructureNode') {
@@ -767,9 +828,16 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       renderMarkers={false}
       overlay
     />}
-    {alignmentGuides.length > 0 && <g data-layer="alignment-guides" data-editor="true" pointerEvents="none">{alignmentGuides.map((guide,index)=>guide.axis==='x'
-      ? <line key={`x-${guide.targetId}-${index}`} x1={guide.value} y1={view.y-view.height} x2={guide.value} y2={view.y+view.height*2} className="alignment-guide" />
-      : <line key={`y-${guide.targetId}-${index}`} x1={view.x-view.width} y1={guide.value} x2={view.x+view.width*2} y2={guide.value} className="alignment-guide" />)}</g>}
+    {alignmentGuides.length > 0 && <g data-layer="alignment-guides" data-editor="true" pointerEvents="none">{alignmentGuides.map((guide,index)=>{
+      if (guide.kind === 'ray' && guide.source && guide.way) {
+        const extent = Math.max(view.width, view.height) * 3
+        return <line key={`ray-${index}`} x1={guide.source.x-guide.way.x*extent} y1={guide.source.y-guide.way.y*extent} x2={guide.source.x+guide.way.x*extent} y2={guide.source.y+guide.way.y*extent} className="alignment-guide" />
+      }
+      if (guide.kind === 'grid-x' && guide.point) return <line key={`grid-x-${index}`} x1={guide.point.x} y1={view.y-view.height} x2={guide.point.x} y2={view.y+view.height*2} className="alignment-guide grid-guide" />
+      if (guide.kind === 'grid-y' && guide.point) return <line key={`grid-y-${index}`} x1={view.x-view.width} y1={guide.point.y} x2={view.x+view.width*2} y2={guide.point.y} className="alignment-guide grid-guide" />
+      if (guide.kind === 'node' && guide.point) return <circle key={`node-${index}`} cx={guide.point.x} cy={guide.point.y} r="10" className="alignment-node-guide" />
+      return null
+    })}</g>}
     {lineDrawingOverlay}
     <LineBadgesLayer
       project={staticHistoricalIdentityProject}

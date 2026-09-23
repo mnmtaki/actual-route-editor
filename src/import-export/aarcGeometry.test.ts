@@ -142,7 +142,7 @@ describe('AARC octilinear chain reconstruction', () => {
     expect(skeleton.map(value=>[value.x,value.y])).toEqual([[5050,5050],[5200,5050],[5250,5000]])
     expect(skeleton.slice(1).map((value,index)=>classifyLeg(skeleton[index],value))).toEqual(['horizontal','diagonal'])
     const spans=getSegmentPathSpans(project,segment),samples=getSegmentCurveSamples(project,segment,48)
-    expect(spans.filter(span=>!span.linear)).toHaveLength(1)
+    expect(spans.filter(span=>!span.linear)).toHaveLength(0)
     expect(samples.every((sample,index)=>index===0||sample.x>=samples[index-1].x-1e-7)).toBe(true)
     expect(Math.max(...samples.map(sample=>sample.x))).toBeLessThanOrEqual(5250)
     expect(Math.min(...samples.map(sample=>sample.y))).toBeGreaterThanOrEqual(5000)
@@ -164,14 +164,43 @@ describe('AARC octilinear chain reconstruction', () => {
     expect(spans.every(span=>[span.start,span.control1,span.control2,span.end].every(point=>point.x>=0&&point.x<=40&&point.y>=0&&point.y<=20))).toBe(true)
   })
 
-  it('renders 禹庄 → 宗盛 with the AARC 45° corner radius, then diagonal', () => {
-    const project=imported(),segment=segmentBetween(project,39,40),spans=getSegmentPathSpans(project,segment),line=project.lines.find(item=>item.id===segment.lineId)!
+  it('keeps a 45° AARC control-point bend sharp', () => {
+    const project=imported(),segment=segmentBetween(project,39,40),spans=getSegmentPathSpans(project,segment)
     expect(coordinates(segment)).toEqual([[6350,4500]])
-    expect(spans.map(span=>span.linear)).toEqual([true,false,true])
-    const config=project.aarc?.config??{},widthRatio=Number(line.source?.sourceWidthRatio??1),base=(Number(config.lineTurnAreaRadius??30)+Number(config.lineWidth??14)/2)*widthRatio,trim=base/(2.4142135*.618)
-    expect(spans[0].end.x).toBeCloseTo(6350-trim,6);expect(spans[0].end.y).toBe(4500)
-    expect(spans[1].end.x-6350).toBeCloseTo(trim/Math.SQRT2,6)
+    expect(spans.every(span=>span.linear)).toBe(true)
     expect(spans.at(-1)?.end).toMatchObject({x:6450,y:4600})
+  })
+
+  it('rounds exact 90° and 135° control-point bends, but drops the round when an edit makes the angle arbitrary', () => {
+    const raw = {
+      cvsSize: [300, 200],
+      config: { lineTurnAreaRadius: 30, lineWidth: 14 },
+      points: [
+        { id: 1, pos: [0, 0], sta: 1, dir: 0, name: 'A' },
+        { id: 2, pos: [100, 0], sta: 0, dir: 0 },
+        { id: 3, pos: [100, 100], sta: 1, dir: 0, name: 'B' },
+      ],
+      lines: [{ id: 10, name: 'L', type: 0, pts: [1, 2, 3], color: '#123456', width: 1 }],
+    }
+    const rightAngle = convertAarcToActualRouteProject(raw).project
+    const rightSegment = rightAngle.geometry.segments[0]
+    expect(getSegmentPathSpans(rightAngle, rightSegment).filter(span => !span.linear)).toHaveLength(1)
+
+    const movedEnd = rightAngle.stations.find(station => station.id === rightSegment.toStationId)!
+    movedEnd.x += 30
+    expect(getSegmentPathSpans(rightAngle, rightSegment).every(span => span.linear)).toBe(true)
+
+    const obtuseRaw = {
+      ...raw,
+      points: [
+        { id: 1, pos: [0, 0], sta: 1, dir: 0, name: 'A' },
+        { id: 2, pos: [100, 0], sta: 0, dir: 0 },
+        { id: 3, pos: [50, 50], sta: 1, dir: 0, name: 'B' },
+      ],
+    }
+    const obtuse = convertAarcToActualRouteProject(obtuseRaw).project
+    const obtuseSegment = obtuse.geometry.segments[0]
+    expect(getSegmentPathSpans(obtuse, obtuseSegment).filter(span => !span.linear)).toHaveLength(1)
   })
   it('produces only horizontal, vertical, or diagonal skeleton legs for the full real sample', () => {
     const project = imported()

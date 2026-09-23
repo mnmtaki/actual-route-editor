@@ -169,12 +169,17 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
 
   useLayoutEffect(() => {
     committedViewRef.current = view
-    liveViewRef.current = view
-    if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
-    wheelCommitTimer.current = null
     svgRef.current?.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`)
     cameraViewportRef.current?.removeAttribute('transform')
-    applyCanvasCamera(view)
+
+    // A delayed committed view may land after a newer wheel event has already
+    // advanced liveViewRef. Keep the newer live camera instead of snapping it
+    // back to the older committed frame.
+    if (wheelCommitTimer.current !== null) applyLiveView(liveViewRef.current)
+    else {
+      liveViewRef.current = view
+      applyCanvasCamera(view)
+    }
   }, [view])
   useLayoutEffect(() => {
     const element = svgRef.current
@@ -192,6 +197,32 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     observer?.observe(element)
     return () => observer?.disconnect()
   }, [])
+  useEffect(() => {
+    const element = svgRef.current
+    if (!element) return
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault()
+      const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, element.clientHeight || 680) : 1
+      const delta = Math.max(-120, Math.min(120, event.deltaY * modeScale))
+      if (Math.abs(delta) < .01) return
+      const baseView = liveViewRef.current
+      const point = screenToWorld(event.clientX, event.clientY, baseView)
+      const factor = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY)
+      applyLiveView({
+        x: point.x - (point.x - baseView.x) * factor,
+        y: point.y - (point.y - baseView.y) * factor,
+        width: baseView.width * factor,
+        height: baseView.height * factor,
+      })
+      if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
+      wheelCommitTimer.current = setTimeout(() => {
+        wheelCommitTimer.current = null
+        commitLiveView()
+      }, WHEEL_ZOOM_IDLE_MS)
+    }
+    element.addEventListener('wheel', handleWheel, { passive: false })
+    return () => element.removeEventListener('wheel', handleWheel)
+  }, [screenToWorld])
   const requestRaster = useCallback((source: PreparedRasterSource, baseView: View) => {
     const target = rasterCanvasRef.current
     const { width, height } = viewportSizeRef.current
@@ -703,26 +734,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''}`} tabIndex={0} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
     onPointerDown={handleCanvasPointerDown} onPointerMove={handlePointerMove} onPointerUp={endGesture} onPointerCancel={endGesture} onContextMenu={event=>event.preventDefault()}
     onDoubleClick={event => { if (drawing && drawing.kind !== 'line') { event.preventDefault(); drawingClick.current = null; if (pointerDoubleFinish.current) { pointerDoubleFinish.current = false; return } onFinishDrawing?.() } }}
-    onWheel={event => {
-      event.preventDefault()
-      const modeScale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? Math.max(1, svgRef.current?.clientHeight ?? 680) : 1
-      const delta = Math.max(-120, Math.min(120, event.deltaY * modeScale))
-      if (Math.abs(delta) < .01) return
-      const baseView = liveViewRef.current
-      const point = screenToWorld(event.clientX, event.clientY, baseView)
-      const factor = Math.exp(delta * WHEEL_ZOOM_SENSITIVITY)
-      applyLiveView({
-        x: point.x - (point.x - baseView.x) * factor,
-        y: point.y - (point.y - baseView.y) * factor,
-        width: baseView.width * factor,
-        height: baseView.height * factor,
-      })
-      if (wheelCommitTimer.current !== null) clearTimeout(wheelCommitTimer.current)
-      wheelCommitTimer.current = setTimeout(() => {
-        wheelCommitTimer.current = null
-        commitLiveView()
-      }, WHEEL_ZOOM_IDLE_MS)
-    }}>
+    >
     <defs><pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0L0 0 0 40" fill="none" stroke="#c9c2b3" strokeWidth="1" opacity=".35" /></pattern></defs>
     <g ref={cameraViewportRef} data-layer="camera-viewport" style={{ willChange: 'transform' }}>
     <g data-layer="canvas-background" pointerEvents="none"><rect className="canvas-bg-artwork" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="#f3f0e9" />{shown.settings.gridVisible && <rect className="canvas-grid-artwork" x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="url(#grid)" />}</g>

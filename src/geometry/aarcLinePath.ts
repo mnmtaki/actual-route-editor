@@ -4,7 +4,7 @@ import { getStationAnchorForLine } from '../data/stationAnchor'
 export interface AarcLinePathPoint { x: number; y: number; free?: boolean }
 export interface AarcLinePathSpan { start: AarcLinePathPoint; control1: AarcLinePathPoint; control2: AarcLinePathPoint; end: AarcLinePathPoint; linear: boolean }
 
-type WayRel = 'parallel' | '90' | '45' | '135'
+type RoundedWayRel = '90' | '135'
 type CornerPlan = { full: AarcLinePathSpan }
 
 const EPS = 1e-4
@@ -75,11 +75,13 @@ function buildCornerPlan(project: ActualRouteProject, line: Line, previous: Aarc
   const incomingLength = magnitude(incomingRaw), outgoingLength = magnitude(outgoingRaw)
   if (incomingLength < EPS || outgoingLength < EPS) return null
 
+  const relation = roundedCornerRelation(incomingRaw, outgoingRaw)
+  if (!relation) return null
+
   const free = previous.free === true || current.free === true || next.free === true
   const incoming = free ? unit(incomingRaw) : unit8(incomingRaw)
   const outgoing = free ? unit(outgoingRaw) : unit8(outgoingRaw)
   const cross = cross2(incoming, outgoing)
-  if (Math.abs(cross) < EPS) return null
   const dot = clamp(incoming.x * outgoing.x + incoming.y * outgoing.y, -1, 1)
   const deflection = Math.acos(dot)
   if (deflection < EPS || Math.PI - deflection < EPS) return null
@@ -91,8 +93,6 @@ function buildCornerPlan(project: ActualRouteProject, line: Line, previous: Aarc
     const tanHalf = Math.tan(theta / 2)
     trim = Math.min(tanHalf > EPS ? radius / tanHalf : 0, incomingLength / 2, outgoingLength / 2)
   } else {
-    const relation = wayRel(incomingRaw, outgoingRaw)
-    if (relation === 'parallel') return null
     trim = Math.min(getTurnRadius(project, line, relation), incomingLength / 2, outgoingLength / 2)
   }
   if (!Number.isFinite(trim) || trim < EPS) return null
@@ -113,7 +113,7 @@ function buildCornerPlan(project: ActualRouteProject, line: Line, previous: Aarc
   return { full }
 }
 
-function getTurnRadius(project: ActualRouteProject, line: Line, relation: WayRel | number) {
+function getTurnRadius(project: ActualRouteProject, line: Line, relation: RoundedWayRel | number) {
   const config = project.aarc?.config ?? {}
   const sourceRatio = finiteNumber(line.source?.sourceWidthRatio)
   const widthRatio = sourceRatio !== undefined && sourceRatio !== 0 ? sourceRatio : 1
@@ -122,19 +122,24 @@ function getTurnRadius(project: ActualRouteProject, line: Line, relation: WayRel
   // AARC common lines: base *= line.width, then default inner justification adds half body width.
   let radius = Math.max(0, lineTurnAreaRadius * widthRatio + lineWidth * widthRatio / 2)
   if (typeof relation === 'number') {
-    if (isZero(relation - Math.PI / 4)) radius /= TURN_45_RATIO
-    else if (isZero(relation - 3 * Math.PI / 4)) radius *= TURN_45_RATIO
-  } else if (relation === '45') radius /= TURN_45_RATIO
-  else if (relation === '135') radius *= TURN_45_RATIO
+    if (isZero(relation - 3 * Math.PI / 4)) radius *= TURN_45_RATIO
+  } else if (relation === '135') radius *= TURN_45_RATIO
   return radius
 }
 
-function wayRel(a: AarcLinePathPoint, b: AarcLinePathPoint): WayRel {
-  const aw = signWay(a), bw = signWay(b)
-  if (isZero(cross2(aw, bw))) return 'parallel'
+function roundedCornerRelation(a: AarcLinePathPoint, b: AarcLinePathPoint): RoundedWayRel | null {
+  const aw = octilinearWay(a), bw = octilinearWay(b)
+  if (!aw || !bw || isZero(cross2(aw, bw))) return null
   const dot = aw.x * bw.x + aw.y * bw.y
   if (isZero(dot)) return '90'
-  return dot > 0 ? '45' : '135'
+  return dot < 0 ? '135' : null
+}
+
+function octilinearWay(value: AarcLinePathPoint): AarcLinePathPoint | null {
+  const x = Math.abs(value.x), y = Math.abs(value.y)
+  if (x < EPS && y < EPS) return null
+  const legal = x < EPS || y < EPS || Math.abs(x - y) < EPS
+  return legal ? signWay(value) : null
 }
 
 function pushLinear(spans: AarcLinePathSpan[], start: AarcLinePathPoint, end: AarcLinePathPoint) {

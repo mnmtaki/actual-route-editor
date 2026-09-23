@@ -3,7 +3,7 @@ import { BUILD_VERSION } from '../build'
 import { normalizeProjectName } from '../data/projectMetadata'
 import type { BasemapPath, LineLegend } from '../data/model'
 
-type TopMenu = 'map-elements' | 'import' | 'export' | 'more'
+type TopMenu = 'map-elements' | 'snap' | 'import' | 'export' | 'more'
 
 /** Shared solid down-triangle used by every toolbar dropdown trigger. */
 export function DropdownArrow() {
@@ -18,9 +18,9 @@ function TopDropdown({ id, label, openMenu, setOpenMenu, children, className = '
   </div>
 }
 
-export function Toolbar({ canUndo, canRedo, undo, redo, fitAll, zoomSelection, importProject, importTopology, exportProject, exportSvg, exportImage = () => undefined, shareProject: _shareProject = () => undefined, shareSvg: _shareSvg = () => undefined, importBackground, onNewLine, onAddText = () => undefined, onAddRoad = () => undefined, onAddBasemapPath = () => undefined, onAddLineLegend = () => undefined, onSelectLineLegend = () => undefined, lineLegend, basemapPaths, onSelectBasemapPath = () => undefined, onStyle, onSettings = () => undefined, drawing, onFinish, onPresentation, nativeFiles = false, projectName = '未命名工程', onProjectNameChange = () => undefined }: {
+export function Toolbar({ canUndo, canRedo, undo, redo, fitAll, zoomSelection, importProject, importTopology, exportProject, exportSvg, exportImage = () => undefined, shareProject: _shareProject = () => undefined, shareSvg: _shareSvg = () => undefined, importBackground, onNewLine, onAddText = () => undefined, onAddRoad = () => undefined, onAddBasemapPath = () => undefined, onAddLineLegend = () => undefined, onSelectLineLegend = () => undefined, lineLegend, basemapPaths, onSelectBasemapPath = () => undefined, onStyle, onSettings = () => undefined, drawing, onFinish, onPresentation, snapOptions = { node: false, neighbor: false, grid: false }, onToggleSnapOption = () => undefined, nativeFiles = false, projectName = '未命名工程', onProjectNameChange = () => undefined }: {
   canUndo: boolean; canRedo: boolean; undo: () => void; redo: () => void; fitAll: () => void; zoomSelection: () => void
-  importProject: () => void; importTopology: () => void; exportProject: () => void; exportSvg: () => void; exportImage?: () => void; shareProject?: () => void; shareSvg?: () => void; importBackground: () => void; onNewLine: () => void; onAddText?: () => void; onAddRoad?: () => void; onAddBasemapPath?: (category: 'water' | 'terrain' | 'other') => void; onAddLineLegend?: () => void; onSelectLineLegend?: () => void; lineLegend?: LineLegend; basemapPaths?: BasemapPath[]; onSelectBasemapPath?: (id: string) => void; onStyle: () => void; onSettings?: () => void; drawing: boolean; onFinish: () => void; onPresentation: () => void; nativeFiles?: boolean; projectName?: string; onProjectNameChange?: (name: string) => void
+  importProject: () => void; importTopology: () => void; exportProject: () => void; exportSvg: () => void; exportImage?: () => void; shareProject?: () => void; shareSvg?: () => void; importBackground: () => void; onNewLine: () => void; onAddText?: () => void; onAddRoad?: () => void; onAddBasemapPath?: (category: 'water' | 'terrain' | 'other') => void; onAddLineLegend?: () => void; onSelectLineLegend?: () => void; lineLegend?: LineLegend; basemapPaths?: BasemapPath[]; onSelectBasemapPath?: (id: string) => void; onStyle: () => void; onSettings?: () => void; drawing: boolean; onFinish: () => void; onPresentation: () => void; snapOptions?: { node: boolean; neighbor: boolean; grid: boolean }; onToggleSnapOption?: (key: 'node' | 'neighbor' | 'grid') => void; nativeFiles?: boolean; projectName?: string; onProjectNameChange?: (name: string) => void
 }) {
   const [openMenu, setOpenMenu] = useState<TopMenu | null>(null)
   const [aboutOpen, setAboutOpen] = useState(false)
@@ -66,7 +66,7 @@ export function Toolbar({ canUndo, canRedo, undo, redo, fitAll, zoomSelection, i
       <button onClick={onStyle}>样式</button><button className="presentation-entry" onClick={onPresentation}>发展史</button>
     </div>
     <div className="tool-group mobile-core"><button onClick={undo} disabled={!canUndo}>撤销</button><button onClick={redo} disabled={!canRedo}>重做</button></div>
-    <div className="tool-group desktop-tools"><button onClick={fitAll}>适应全部</button><button onClick={zoomSelection}>缩放到选择</button></div>
+    <div className="tool-group desktop-tools"><button onClick={fitAll}>适应全部</button><button onClick={zoomSelection}>缩放到选择</button><TopDropdown id="snap" label="吸附" openMenu={openMenu} setOpenMenu={setOpenMenu}><button role="menuitemcheckbox" aria-checked={snapOptions.neighbor} className={snapOptions.neighbor ? 'active' : ''} onClick={() => onToggleSnapOption('neighbor')}>邻点延长线</button><button role="menuitemcheckbox" aria-checked={snapOptions.node} className={snapOptions.node ? 'active' : ''} onClick={() => onToggleSnapOption('node')}>节点吸附</button><button role="menuitemcheckbox" aria-checked={snapOptions.grid} className={snapOptions.grid ? 'active' : ''} onClick={() => onToggleSnapOption('grid')}>网格吸附</button></TopDropdown></div>
     <div className="tool-group push-right desktop-tools">
       <TopDropdown id="import" label="导入" openMenu={openMenu} setOpenMenu={setOpenMenu}><button role="menuitem" onClick={action(importTopology)}>导入拓扑</button><button role="menuitem" onClick={action(importProject)}>导入工程 / AARC</button><button role="menuitem" onClick={action(importBackground)}>导入底图</button></TopDropdown>
       <TopDropdown id="export" label="导出" openMenu={openMenu} setOpenMenu={setOpenMenu}><button role="menuitem" onClick={action(exportProject)}>{nativeFiles ? '保存工程到手机' : '导出工程'}</button><button role="menuitem" onClick={action(exportSvg)}>{nativeFiles ? '保存矢量图到手机' : '导出矢量图'}</button><button role="menuitem" onClick={action(exportImage)}>导出图片…</button></TopDropdown>

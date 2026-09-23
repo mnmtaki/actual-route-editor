@@ -3,6 +3,7 @@ import type { ActualRouteProject, Road, Selection } from '../data/model'
 import { uid } from '../data/model'
 import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPlans, getSegmentSubpathSpans, pathSpansToSvgPath } from '../geometry/path'
 import { projectPointToSvgPath, screenPointToWorld } from '../geometry/screenPoint'
+import { snapEditorPoint, type SnapGuide, type SnapNode, type SnapRaySource } from '../geometry/alignmentSnap'
 import { getStationHandleStyle } from './stationHandle'
 import { getSegmentStyleIntervalAtProgress, getStructureNodePoint } from '../data/structure'
 import { MapElementsLayer } from './MapElements'
@@ -41,12 +42,23 @@ type DrawingCanvasPointer = { pointerId: number; startClient: Point; lastClient:
 const WHEEL_ZOOM_IDLE_MS = 100
 const WHEEL_ZOOM_SENSITIVITY = .0004
 
-export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, view, setView }: {
+function dedupeSnapSources(items: SnapRaySource[]) {
+  const seen = new Set<string>()
+  return items.filter(item => {
+    const key = `${item.id}:${item.x}:${item.y}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, snapOptions = { node: false, neighbor: false, grid: false }, view, setView }: {
   project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; roadDraft?: Road | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
   calibration?: { points: Point[] } | null; onCalibrationPoint?: (point: Point) => void
   selectedStationIds?: string[]; onToggleStationSelection?: (stationId: string) => void
   onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void; onFinishDrawing?: () => void
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void; onEditBlocked?: (message: string) => void
+  snapOptions?: { node: boolean; neighbor: boolean; grid: boolean }
   view: View; setView: React.Dispatch<React.SetStateAction<View>>
 }) {
   // onPreview is retained for API compatibility; drag previews are intentionally local
@@ -76,6 +88,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const [canvasWidth, setCanvasWidth] = useState(920)
   const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
+  const [alignmentGuides, setAlignmentGuides] = useState<SnapGuide[]>([])
   const shown = preview ?? project
   const staticHistoricalIdentityProject = useMemo(() => projectWithLineColorsAt(projectWithLineParentsAt(project, project.timeline.currentDate), project.timeline.currentDate), [project])
   const activeLineLabelProject = useMemo(() => {
@@ -99,6 +112,78 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const touchHitPixels = typeof window !== 'undefined' && window.matchMedia?.('(max-width: 699px)').matches ? 44 : 28
   const stationHitRadius = Math.max(20, touchHitPixels * view.width / canvasWidth)
   const structureHitRadius = Math.max(22, touchHitPixels * view.width / canvasWidth)
+
+  const worldPerPixel = () => {
+    const currentView = liveViewRef.current
+    const bounds = svgRef.current?.getBoundingClientRect()
+    return Math.max(
+      currentView.width / Math.max(1, bounds?.width ?? canvasWidth),
+      currentView.height / Math.max(1, bounds?.height ?? 680),
+    )
+  }
+  const allSnapNodes = (source: ActualRouteProject, excludedIds = new Set<string>(), extra: SnapNode[] = []): SnapNode[] => [
+    ...source.stations.filter(item => !excludedIds.has(item.id)).map(item => ({ id: item.id, x: item.x, y: item.y, kind: 'station' as const })),
+    ...source.geometry.segments.flatMap(segment => segment.waypoints.filter(item => !excludedIds.has(item.id)).map(item => ({ id: item.id, x: item.x, y: item.y, kind: 'waypoint' as const }))),
+    ...extra.filter(item => !excludedIds.has(item.id)),
+  ]
+  const stationNeighborSources = (source: ActualRouteProject, stationId: string): SnapRaySource[] => {
+    const result: SnapRaySource[] = []
+    for (const segment of source.geometry.segments) {
+      if (segment.fromStationId !== stationId && segment.toStationId !== stationId) continue
+      const fromStart = segment.fromStationId === stationId
+      const waypoint = fromStart ? segment.waypoints[0] : segment.waypoints.at(-1)
+      if (waypoint) result.push({ id: waypoint.id, x: waypoint.x, y: waypoint.y })
+      else {
+        const otherId = fromStart ? segment.toStationId : segment.fromStationId
+        const other = source.stations.find(item => item.id === otherId)
+        if (other) result.push({ id: other.id, x: other.x, y: other.y })
+      }
+    }
+    return dedupeSnapSources(result)
+  }
+  const waypointNeighborSources = (source: ActualRouteProject, segmentId: string, waypointId: string): SnapRaySource[] => {
+    const segment = source.geometry.segments.find(item => item.id === segmentId)
+    if (!segment) return []
+    const from = source.stations.find(item => item.id === segment.fromStationId)
+    const to = source.stations.find(item => item.id === segment.toStationId)
+    const chain: SnapRaySource[] = [
+      ...(from ? [{ id: from.id, x: from.x, y: from.y }] : []),
+      ...segment.waypoints.map(item => ({ id: item.id, x: item.x, y: item.y })),
+      ...(to ? [{ id: to.id, x: to.x, y: to.y }] : []),
+    ]
+    const index = chain.findIndex(item => item.id === waypointId)
+    if (index < 0) return []
+    return [chain[index - 1], chain[index + 1]].filter((item): item is SnapRaySource => Boolean(item))
+  }
+  const draftNeighborSources = (current: LineDraftState, id?: string): SnapRaySource[] => {
+    const anchor = current.anchorStationId ? project.stations.find(item => item.id === current.anchorStationId) : undefined
+    const chain: SnapRaySource[] = [
+      ...(anchor ? [{ id: anchor.id, x: anchor.x, y: anchor.y }] : []),
+      ...current.points.map(item => ({ id: item.id, x: item.x, y: item.y })),
+    ]
+    if (!id) return chain.length ? [chain.at(-1)!] : []
+    const index = chain.findIndex(item => item.id === id)
+    return [chain[index - 1], chain[index + 1]].filter((item): item is SnapRaySource => Boolean(item))
+  }
+  const resolveSnap = (raw: Point, config: { nodes?: SnapNode[]; neighbors?: SnapRaySource[] }, bypass = false) => {
+    if (bypass || (!snapOptions.node && !snapOptions.neighbor && !snapOptions.grid)) {
+      setAlignmentGuides([])
+      return raw
+    }
+    const scale = worldPerPixel()
+    const result = snapEditorPoint(raw, snapOptions, {
+      node: 10 * scale,
+      ray: 16 * scale,
+      grid: 6 * scale,
+    }, {
+      nodes: config.nodes,
+      neighbors: config.neighbors,
+      gridInterval: 40,
+      angles: [0, 45, 90, 135],
+    })
+    setAlignmentGuides(result.guides)
+    return result.point
+  }
 
   const applyLiveView = (next: View) => {
     liveViewRef.current = next
@@ -203,9 +288,14 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     return true
   }, [beginPinch, capture, pointerToWorld, project])
 
-  const addDraftPointAt = (position: Point) => {
+  const addDraftPointAt = (position: Point, bypassAlignment = false) => {
     if (!lineDraft?.anchorStationId) return
-    const point = { id: uid('draft-waypoint'), x: position.x, y: position.y }
+    const extras: SnapNode[] = lineDraft.points.map(item => ({ id: item.id, x: item.x, y: item.y, kind: 'draft' as const }))
+    const resolved = resolveSnap(position, {
+      nodes: allSnapNodes(project, new Set(), extras),
+      neighbors: draftNeighborSources(lineDraft),
+    }, bypassAlignment)
+    const point = { id: uid('draft-waypoint'), x: resolved.x, y: resolved.y }
     setLineDraft(current => current ? { ...current, points: [...current.points, point] } : current)
     setDrawingPointSelection({ kind: 'draft', id: point.id })
   }
@@ -279,7 +369,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const isCanvasBlank = target === event.currentTarget || target.classList.contains('canvas-bg')
       if (!isCanvasBlank) return
       if (!lineDraft?.anchorStationId) {
-        const point = pointerToWorld(event.clientX, event.clientY)
+        const raw = pointerToWorld(event.clientX, event.clientY)
+        const point = resolveSnap(raw, { nodes: allSnapNodes(project), neighbors: [] }, event.altKey)
         const result = appendStationToLineWithWaypoints(project, drawing.lineId, point, [], null, drawing.phaseId)
         onDragCommit(project, result.project)
         setLineDraft({ lineId: drawing.lineId, phaseId: drawing.phaseId, anchorStationId: result.stationId, points: [], lastCreatedStationId: result.stationId })
@@ -315,9 +406,17 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const handlePointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
     if (draftDrag.current?.pointerId === event.pointerId) {
-      const point = pointerToWorld(event.clientX, event.clientY)
+      const raw = pointerToWorld(event.clientX, event.clientY)
       const id = draftDrag.current.id
-      setLineDraft(current => current ? { ...current, points: current.points.map(item => item.id === id ? { ...item, x: point.x, y: point.y } : item) } : current)
+      setLineDraft(current => {
+        if (!current) return current
+        const extras: SnapNode[] = current.points.map(item => ({ id: item.id, x: item.x, y: item.y, kind: 'draft' as const }))
+        const point = resolveSnap(raw, {
+          nodes: allSnapNodes(project, new Set([id]), extras),
+          neighbors: draftNeighborSources(current, id),
+        }, event.altKey)
+        return { ...current, points: current.points.map(item => item.id === id ? { ...item, x: point.x, y: point.y } : item) }
+      })
       return
     }
     if (lineCanvasPointer.current?.pointerId === event.pointerId) {
@@ -370,15 +469,27 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       return
     }
     const point = pointerToWorld(event.clientX, event.clientY)
-    const dx = point.x - current.startWorld.x, dy = point.y - current.startWorld.y
-    current.moved ||= Math.hypot(dx, dy) > 1
+    const rawDx = point.x - current.startWorld.x, rawDy = point.y - current.startWorld.y
+    current.moved ||= Math.hypot(rawDx, rawDy) > 1
     const next = cloneProjectForDrag(current.before, current)
     if (current.kind === 'draggingStation') {
       const station = next.stations.find(item => item.id === current.id)
-      if (station) translateStationWithAnchors(next, station.id, dx, dy)
+      if (station) {
+        const target = resolveSnap({ x: current.origin.x + rawDx, y: current.origin.y + rawDy }, {
+          nodes: allSnapNodes(current.before, new Set(current.id ? [current.id] : [])),
+          neighbors: current.id ? stationNeighborSources(current.before, current.id) : [],
+        }, event.altKey)
+        translateStationWithAnchors(next, station.id, target.x - current.origin.x, target.y - current.origin.y)
+      }
     } else if (current.kind === 'draggingWaypoint') {
       const waypoint = next.geometry.segments.find(item => item.id === current.segmentId)?.waypoints.find(item => item.id === current.id)
-      if (waypoint) { waypoint.x = current.origin.x + dx; waypoint.y = current.origin.y + dy }
+      if (waypoint) {
+        const target = resolveSnap({ x: current.origin.x + rawDx, y: current.origin.y + rawDy }, {
+          nodes: allSnapNodes(current.before, new Set(current.id ? [current.id] : [])),
+          neighbors: current.id && current.segmentId ? waypointNeighborSources(current.before, current.segmentId, current.id) : [],
+        }, event.altKey)
+        waypoint.x = target.x; waypoint.y = target.y
+      }
     } else if (current.kind === 'draggingStructureNode') {
       const segment = next.geometry.segments.find(item => item.id === current.segmentId), node = segment?.structureNodes?.find(item => item.id === current.id)
       if (segment && node && !node.waypointId) {
@@ -389,41 +500,41 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       }
     } else if (current.kind === 'draggingLabel') {
       const station = next.stations.find(item => item.id === current.id)
-      if (station) { const offset=snapLabelOffset(current.origin.x + dx, current.origin.y + dy); station.labelOffsetX = offset.x; station.labelOffsetY = offset.y }
+      if (station) { const offset=snapLabelOffset(current.origin.x + rawDx, current.origin.y + rawDy); station.labelOffsetX = offset.x; station.labelOffsetY = offset.y }
     } else if (current.kind === 'draggingLineLabel') {
       const badge = next.lines.find(line => line.id === current.ownerLineId)?.lineBadges?.find(item => item.id === current.id)
-      if (badge) { badge.x = current.origin.x + dx; badge.y = current.origin.y + dy }
+      if (badge) { badge.x = current.origin.x + rawDx; badge.y = current.origin.y + rawDy }
       const tag = next.textTags?.find(item => item.id === current.id)
-      if (tag) { tag.x = current.origin.x + dx; tag.y = current.origin.y + dy }
+      if (tag) { tag.x = current.origin.x + rawDx; tag.y = current.origin.y + rawDy }
     } else if (current.kind === 'draggingMapElement') {
       const element = next.mapElements?.find(item => item.id === current.id)
-      if (element) { element.x = current.origin.x + dx; element.y = current.origin.y + dy }
+      if (element) { element.x = current.origin.x + rawDx; element.y = current.origin.y + rawDy }
     } else if (current.kind === 'draggingLineLegend') {
       const legend = next.lineLegend
-      if (legend && legend.id === current.id) { legend.x = current.origin.x + dx; legend.y = current.origin.y + dy }
+      if (legend && legend.id === current.id) { legend.x = current.origin.x + rawDx; legend.y = current.origin.y + rawDy }
     } else if (current.kind === 'draggingBasemapPoint') {
       const point = next.basemapPaths?.find(path => path.id === current.ownerPathId)?.points.find(item => item.id === current.id)
-      if (point) { point.x = current.origin.x + dx; point.y = current.origin.y + dy }
+      if (point) { point.x = current.origin.x + rawDx; point.y = current.origin.y + rawDy }
     } else if (current.kind === 'draggingBasemapPath') {
       const path = next.basemapPaths?.find(item => item.id === current.ownerPathId)
-      if (path) path.points.forEach(item => { item.x += dx; item.y += dy })
+      if (path) path.points.forEach(item => { item.x += rawDx; item.y += rawDy })
     } else if (current.kind === 'draggingRoadPoint') {
       const point = next.roads?.find(road => road.id === current.ownerRoadId)?.points.find(item => item.id === current.id)
-      if (point) { point.x = current.origin.x + dx; point.y = current.origin.y + dy }
+      if (point) { point.x = current.origin.x + rawDx; point.y = current.origin.y + rawDy }
     } else if (next.background) {
-      next.background.x = current.origin.x + dx; next.background.y = current.origin.y + dy
+      next.background.x = current.origin.x + rawDx; next.background.y = current.origin.y + rawDy
     }
     current.latest = next
     schedulePreview(next)
   }
   const endGesture = (event: React.PointerEvent) => {
     pointers.current.delete(event.pointerId)
-    if (draftDrag.current?.pointerId === event.pointerId) { draftDrag.current = null; return }
+    if (draftDrag.current?.pointerId === event.pointerId) { draftDrag.current = null; setAlignmentGuides([]); return }
     if (lineCanvasPointer.current?.pointerId === event.pointerId) {
       const current = lineCanvasPointer.current
       lineCanvasPointer.current = null
       if (current.moved) commitLiveView()
-      else if (event.type === 'pointerup') addDraftPointAt(pointerToWorld(event.clientX, event.clientY))
+      else if (event.type === 'pointerup') addDraftPointAt(pointerToWorld(event.clientX, event.clientY), event.altKey)
       return
     }
     if (basemapCanvasPointer.current?.pointerId === event.pointerId) {
@@ -451,7 +562,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       cancelScheduledPreview()
       onDragCommit(current.before, current.latest)
     }
-    gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragMapElementOverlay({ elementIds: new Set() }); setDragVectorBasemapOverlay({ kind: null, objectIds: new Set() }); setPreview(null)
+    gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragMapElementOverlay({ elementIds: new Set() }); setDragVectorBasemapOverlay({ kind: null, objectIds: new Set() }); setAlignmentGuides([]); setPreview(null)
   }
 
   const handleRoadPointerDown = useCallback((event: React.PointerEvent, road: NonNullable<ActualRouteProject['roads']>[number]) => {
@@ -727,6 +838,16 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       renderMarkers={false}
       overlay
     />}
+    {alignmentGuides.length > 0 && <g data-layer="alignment-guides" data-editor="true" pointerEvents="none">{alignmentGuides.map((guide,index)=>{
+      if (guide.kind === 'ray' && guide.source && guide.way) {
+        const extent = Math.max(view.width, view.height) * 3
+        return <line key={`ray-${index}`} x1={guide.source.x-guide.way.x*extent} y1={guide.source.y-guide.way.y*extent} x2={guide.source.x+guide.way.x*extent} y2={guide.source.y+guide.way.y*extent} className="alignment-guide" />
+      }
+      if (guide.kind === 'grid-x' && guide.point) return <line key={`grid-x-${index}`} x1={guide.point.x} y1={view.y-view.height} x2={guide.point.x} y2={view.y+view.height*2} className="alignment-guide grid-guide" />
+      if (guide.kind === 'grid-y' && guide.point) return <line key={`grid-y-${index}`} x1={view.x-view.width} y1={guide.point.y} x2={view.x+view.width*2} y2={guide.point.y} className="alignment-guide grid-guide" />
+      if (guide.kind === 'node' && guide.point) return <circle key={`node-${index}`} cx={guide.point.x} cy={guide.point.y} r="10" className="alignment-node-guide" />
+      return null
+    })}</g>}
     {lineDrawingOverlay}
     <LineBadgesLayer
       project={staticHistoricalIdentityProject}

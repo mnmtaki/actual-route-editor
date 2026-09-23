@@ -111,6 +111,50 @@ describe('direct manipulation gestures', () => {
     expect(getSegmentPath(moved, moved.geometry.segments.find((segment: { id: string }) => segment.id === 'a-1')!)).toContain(`${original.x + 80} ${original.y + 35}`)
   })
 
+
+  it('optionally snaps a dragged Station to AARC-style neighbor rays and shows guides', () => {
+    const onDragCommit = vi.fn()
+    const { container } = render(<NetworkCanvas {...baseProps} project={demoProject} snapOptions={{ node: false, neighbor: true, grid: false }} onDragCommit={onDragCommit} />)
+    const svg = container.querySelector('svg')!
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+    const station = screen.getByTestId('transfer-s2').closest('.station-hit')!
+    fireEvent.pointerDown(station, { pointerId: 51, clientX: 390, clientY: 350, bubbles: true })
+    fireEvent.pointerMove(svg, { pointerId: 51, clientX: 392, clientY: 132, bubbles: true })
+    expect(container.querySelectorAll('[data-layer="alignment-guides"] line').length).toBeGreaterThanOrEqual(1)
+    fireEvent.pointerUp(svg, { pointerId: 51, clientX: 392, clientY: 132, bubbles: true })
+    const moved = onDragCommit.mock.calls[0][1].stations.find((item: { id: string }) => item.id === 's2')
+    expect(moved.x).toBeCloseTo(390)
+    expect(container.querySelector('[data-layer="alignment-guides"]')).toBeNull()
+  })
+
+  it('snaps directly to a nearby node when node snapping is enabled', () => {
+    const onDragCommit = vi.fn()
+    const { container } = render(<NetworkCanvas {...baseProps} project={demoProject} snapOptions={{ node: true, neighbor: false, grid: false }} onDragCommit={onDragCommit} />)
+    const svg = container.querySelector('svg')!
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+    const station = screen.getByTestId('transfer-s2').closest('.station-hit')!
+    fireEvent.pointerDown(station, { pointerId: 53, clientX: 390, clientY: 350, bubbles: true })
+    fireEvent.pointerMove(svg, { pointerId: 53, clientX: 392, clientY: 132, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 53, clientX: 392, clientY: 132, bubbles: true })
+    const moved = onDragCommit.mock.calls[0][1].stations.find((item: { id: string }) => item.id === 's2')
+    expect(moved.x).toBe(390)
+    expect(moved.y).toBe(130)
+  })
+
+  it('bypasses all editor snapping while Alt is held', () => {
+    const onDragCommit = vi.fn()
+    const { container } = render(<NetworkCanvas {...baseProps} project={demoProject} snapOptions={{ node: true, neighbor: true, grid: true }} onDragCommit={onDragCommit} />)
+    const svg = container.querySelector('svg')!
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+    const station = screen.getByTestId('transfer-s2').closest('.station-hit')!
+    fireEvent.pointerDown(station, { pointerId: 52, clientX: 390, clientY: 350, bubbles: true })
+    fireEvent.pointerMove(svg, { pointerId: 52, clientX: 392, clientY: 132, altKey: true, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 52, clientX: 392, clientY: 132, altKey: true, bubbles: true })
+    const moved = onDragCommit.mock.calls[0][1].stations.find((item: { id: string }) => item.id === 's2')
+    expect(moved.x).toBeCloseTo(392)
+    expect(moved.y).toBeCloseTo(132)
+  })
+
   it('pans from canvas background without starting an object drag', () => {
     const setView = vi.fn(), onDragCommit = vi.fn()
     const { container } = render(<NetworkCanvas {...baseProps} project={demoProject} setView={setView} onDragCommit={onDragCommit} />)

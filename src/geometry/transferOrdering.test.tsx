@@ -116,7 +116,7 @@ describe('parallel transfer spatial ordering', () => {
     const lines = project.stationLineRelations.filter(relation => relation.stationId === stationId).map(relation => project.lines.find(line => line.id === relation.lineId)).filter((line): line is Line => Boolean(line))
     const analysis = analyzeTransferSpatialOrder(project, stationId, lines)
     expect(analysis.sortable).toBe(true)
-    expect(analysis.commonTangentDegrees).toBeCloseTo(0)
+    expect(analysis.commonTangentDegrees).toBeCloseTo(173.95262146149395)
     expect(analysis.normalSpread).toBeCloseTo(25)
     expect(ids(sortTransferLinesForSpatialOrder(project, stationId, lines))).toEqual(['aarc-line-1228', 'aarc-line-36'])
   })

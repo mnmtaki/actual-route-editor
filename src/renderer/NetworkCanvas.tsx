@@ -229,9 +229,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     return true
   }, [beginPinch, capture, pointerToWorld, project])
 
-  const addDraftPointAt = (position: Point) => {
+  const addDraftPointAt = (position: Point, bypassAlignment = false) => {
     if (!lineDraft?.anchorStationId) return
-    const point = { id: uid('draft-waypoint'), x: position.x, y: position.y }
+    const extras: AlignmentCandidate[] = lineDraft.points.map(item => ({ id: item.id, x: item.x, y: item.y, kind: 'draft' as const }))
+    const resolved = resolveAlignment(position, project, new Set(), extras, bypassAlignment)
+    const point = { id: uid('draft-waypoint'), x: resolved.x, y: resolved.y }
     setLineDraft(current => current ? { ...current, points: [...current.points, point] } : current)
     setDrawingPointSelection({ kind: 'draft', id: point.id })
   }
@@ -305,7 +307,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const isCanvasBlank = target === event.currentTarget || target.classList.contains('canvas-bg')
       if (!isCanvasBlank) return
       if (!lineDraft?.anchorStationId) {
-        const point = pointerToWorld(event.clientX, event.clientY)
+        const raw = pointerToWorld(event.clientX, event.clientY)
+        const point = resolveAlignment(raw, project, new Set(), [], event.altKey)
         const result = appendStationToLineWithWaypoints(project, drawing.lineId, point, [], null, drawing.phaseId)
         onDragCommit(project, result.project)
         setLineDraft({ lineId: drawing.lineId, phaseId: drawing.phaseId, anchorStationId: result.stationId, points: [], lastCreatedStationId: result.stationId })
@@ -460,7 +463,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       const current = lineCanvasPointer.current
       lineCanvasPointer.current = null
       if (current.moved) commitLiveView()
-      else if (event.type === 'pointerup') addDraftPointAt(pointerToWorld(event.clientX, event.clientY))
+      else if (event.type === 'pointerup') addDraftPointAt(pointerToWorld(event.clientX, event.clientY), event.altKey)
       return
     }
     if (basemapCanvasPointer.current?.pointerId === event.pointerId) {

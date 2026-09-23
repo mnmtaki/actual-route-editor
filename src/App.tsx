@@ -81,7 +81,7 @@ export default function App() {
   const [initial] = useState(loadInitialProject),
     history = useProjectHistory(initial);
   const [presentationOpen, setPresentationOpen] = useState(false);
-  const [alignmentSnapEnabled, setAlignmentSnapEnabled] = useState(false);
+  const [snapOptions, setSnapOptions] = useState({ node: false, neighbor: false, grid: false });
   const [rasterSvg, setRasterSvg] = useState<string | null>(null);
   const [styleOpen, setStyleOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -1120,8 +1120,8 @@ export default function App() {
           onStyle={() => setStyleOpen(true)}
           onSettings={() => setSettingsOpen(true)}
           onPresentation={() => setPresentationOpen(true)}
-          alignmentSnapEnabled={alignmentSnapEnabled}
-          onToggleAlignmentSnap={() => setAlignmentSnapEnabled(value => !value)}
+          snapOptions={snapOptions}
+          onToggleSnapOption={(key) => setSnapOptions(current => ({ ...current, [key]: !current[key] }))}
           projectName={getProjectName(history.project)}
           onProjectNameChange={(name) => history.commit((current) => {
             const next = structuredClone(current)
@@ -1218,7 +1218,7 @@ export default function App() {
               onDragCommit={history.commitFrom}
               onEditBlocked={setNotice}
               onFinishDrawing={finishDrawing}
-              alignmentSnapEnabled={alignmentSnapEnabled}
+              snapOptions={snapOptions}
               view={view}
               setView={setView}
             />

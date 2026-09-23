@@ -1,0 +1,23 @@
+name: AARC Station Boundary Validation
+
+on:
+  push:
+    branches:
+      - fix/aarc-station-boundary-sharp
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build:web

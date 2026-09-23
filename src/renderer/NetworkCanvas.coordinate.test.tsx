@@ -38,7 +38,7 @@ describe('wheel camera behavior',()=>{
     unmount()
   })
 
-  it('keeps a newer live wheel view when an older committed view lands',()=>{
+  it('keeps a newer live wheel view when an older committed view lands after its timer cleared',()=>{
     vi.useFakeTimers()
     try {
       const setView=vi.fn()
@@ -53,10 +53,15 @@ describe('wheel camera behavior',()=>{
       const firstCommit=setView.mock.calls[0][0] as typeof initial
 
       wheel()
-      rerender(<NetworkCanvas {...base} setView={setView} drawing={null} onCreatePoint={noop} view={firstCommit}/>)
       act(()=>vi.advanceTimersByTime(100))
+      expect(setView).toHaveBeenCalledTimes(2)
+      const secondCommit=setView.mock.calls[1][0] as typeof initial
 
-      const secondCommit=setView.mock.calls.at(-1)?.[0] as typeof initial
+      // Simulate the older transition reaching React after the newer wheel
+      // transaction has already submitted and cleared its timer.
+      rerender(<NetworkCanvas {...base} setView={setView} drawing={null} onCreatePoint={noop} view={firstCommit}/>)
+      rerender(<NetworkCanvas {...base} setView={setView} drawing={null} onCreatePoint={noop} view={secondCommit}/>)
+
       expect(secondCommit.width).toBeGreaterThan(firstCommit.width)
       expect(secondCommit.width).toBeCloseTo(firstCommit.width*Math.exp(.04),6)
       unmount()

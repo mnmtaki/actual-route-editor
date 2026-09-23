@@ -65,6 +65,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const viewportRectRef = useRef({ left: 0, top: 0, width: 920, height: 680 })
   const committedViewRef = useRef<View>(view)
   const liveViewRef = useRef<View>(view)
+  const liveViewRevisionRef = useRef(0)
+  const submittedViewRevisionRef = useRef(new WeakMap<View, number>())
   const wheelCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingPreview = useRef<ActualRouteProject | null>(null)
@@ -125,8 +127,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     const { width, height } = viewportSizeRef.current
     camera.style.transform = canvasCameraTransform(base, next, width, height)
   }
-  const applyLiveView = (next: View) => {
-    liveViewRef.current = next
+  const applyLiveCamera = (next: View) => {
     const base = committedViewRef.current
     const scaleX = base.width / next.width
     const scaleY = base.height / next.height
@@ -135,7 +136,16 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     cameraViewportRef.current?.setAttribute('transform', `matrix(${scaleX} 0 0 ${scaleY} ${translateX} ${translateY})`)
     applyCanvasCamera(next)
   }
-  const commitLiveView = () => { const next = liveViewRef.current; startTransition(() => setView(next)) }
+  const applyLiveView = (next: View) => {
+    liveViewRevisionRef.current += 1
+    liveViewRef.current = next
+    applyLiveCamera(next)
+  }
+  const commitLiveView = () => {
+    const next = liveViewRef.current
+    submittedViewRevisionRef.current.set(next, liveViewRevisionRef.current)
+    startTransition(() => setView(next))
+  }
   const panLiveView = (fromClient: Point, toClient: Point) => {
     const currentView = liveViewRef.current
     const before = screenToWorld(fromClient.x, fromClient.y, currentView)
@@ -168,18 +178,25 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   }, [])
 
   useLayoutEffect(() => {
+    const submittedRevision = submittedViewRevisionRef.current.get(view)
+    const staleLiveCommit = submittedRevision !== undefined && submittedRevision < liveViewRevisionRef.current
+
     committedViewRef.current = view
     svgRef.current?.setAttribute('viewBox', `${view.x} ${view.y} ${view.width} ${view.height}`)
     cameraViewportRef.current?.removeAttribute('transform')
 
-    // A delayed committed view may land after a newer wheel event has already
-    // advanced liveViewRef. Keep the newer live camera instead of snapping it
-    // back to the older committed frame.
-    if (wheelCommitTimer.current !== null) applyLiveView(liveViewRef.current)
-    else {
-      liveViewRef.current = view
-      applyCanvasCamera(view)
+    if (staleLiveCommit) {
+      // A lower-priority transition can finish after later wheel/pan input.
+      // Keep the newer live camera instead of snapping back to that older view.
+      applyLiveCamera(liveViewRef.current)
+      return
     }
+
+    // External view changes become the new live baseline and invalidate any
+    // older submitted interaction views that have not committed yet.
+    if (submittedRevision === undefined) liveViewRevisionRef.current += 1
+    liveViewRef.current = view
+    applyCanvasCamera(view)
   }, [view])
   useLayoutEffect(() => {
     const element = svgRef.current

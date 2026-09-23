@@ -4,7 +4,7 @@ import { getStationAnchorForLine } from '../data/stationAnchor'
 export interface AarcLinePathPoint { x: number; y: number; free?: boolean }
 export interface AarcLinePathSpan { start: AarcLinePathPoint; control1: AarcLinePathPoint; control2: AarcLinePathPoint; end: AarcLinePathPoint; linear: boolean }
 
-type RoundedWayRel = '90' | '135'
+type RoundedWayRel = '45' | '90'
 type CornerPlan = { full: AarcLinePathSpan }
 
 const EPS = 1e-4
@@ -122,8 +122,9 @@ function getTurnRadius(project: ActualRouteProject, line: Line, relation: Rounde
   // AARC common lines: base *= line.width, then default inner justification adds half body width.
   let radius = Math.max(0, lineTurnAreaRadius * widthRatio + lineWidth * widthRatio / 2)
   if (typeof relation === 'number') {
-    if (isZero(relation - 3 * Math.PI / 4)) radius *= TURN_45_RATIO
-  } else if (relation === '135') radius *= TURN_45_RATIO
+    if (isZero(relation - Math.PI / 4)) radius /= TURN_45_RATIO
+    else if (isZero(relation - 3 * Math.PI / 4)) radius *= TURN_45_RATIO
+  } else if (relation === '45') radius /= TURN_45_RATIO
   return radius
 }
 
@@ -132,7 +133,7 @@ function roundedCornerRelation(a: AarcLinePathPoint, b: AarcLinePathPoint): Roun
   if (!aw || !bw || isZero(cross2(aw, bw))) return null
   const dot = aw.x * bw.x + aw.y * bw.y
   if (isZero(dot)) return '90'
-  return dot < 0 ? '135' : null
+  return dot > 0 ? '45' : null
 }
 
 function octilinearWay(value: AarcLinePathPoint): AarcLinePathPoint | null {

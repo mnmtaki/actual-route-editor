@@ -54,8 +54,9 @@ export function getAarcImportedSegmentPathSpans(project: ActualRouteProject, seg
 }
 
 function buildBoundaryCorner(project: ActualRouteProject, segment: Segment, line: Line, points: AarcLinePathPoint[], side: 'start' | 'end', resolvedLineId: string): CornerPlan | null {
+  if (boundaryStationOccurrenceMoved(project, segment, side, resolvedLineId)) return null
   const adjacent = findAdjacentSourceSegment(project, segment, side)
-  if (!adjacent) return null
+  if (!adjacent || boundaryStationOccurrenceMoved(project, adjacent, side === 'start' ? 'end' : 'start', resolvedLineId)) return null
   const adjacentPoints = getAarcSegmentPoints(project, adjacent, resolvedLineId)
   if (adjacentPoints.length < 2) return null
   if (side === 'start') {
@@ -75,6 +76,25 @@ function getAarcSegmentPoints(project: ActualRouteProject, segment: Segment, res
     ...segment.waypoints.map(point => ({ x: point.x, y: point.y, ...(point.free === true ? { free: true } : {}) })),
     { x: to.x, y: to.y, ...(getEndpointFree(project, segment, 'to') ? { free: true } : {}) },
   ]
+}
+
+function boundaryStationOccurrenceMoved(project: ActualRouteProject, segment: Segment, side: 'start' | 'end', resolvedLineId: string) {
+  const stationId = side === 'start' ? segment.fromStationId : segment.toStationId
+  const pointIds = segment.source?.pointIds
+  const pointId = pointIds?.length ? (side === 'start' ? pointIds[0] : pointIds.at(-1)) : undefined
+  if (pointId === undefined) return false
+
+  const rawPoints = (project.aarc?.raw as { points?: unknown } | undefined)?.points
+  if (!Array.isArray(rawPoints)) return false
+  const raw = rawPoints.find(value => value && typeof value === 'object' && finiteId((value as { id?: unknown }).id) === pointId) as { pos?: unknown } | undefined
+  const pos = raw?.pos
+  if (!Array.isArray(pos) || pos.length < 2) return false
+  const sourceX = Number(pos[0]), sourceY = Number(pos[1])
+  if (!Number.isFinite(sourceX) || !Number.isFinite(sourceY)) return false
+
+  const anchor = getStationAnchorForLine(project, stationId, resolvedLineId)
+  if (!anchor) return false
+  return Math.abs(anchor.x - sourceX) > EPS || Math.abs(anchor.y - sourceY) > EPS
 }
 
 function getEndpointFree(project: ActualRouteProject, segment: Segment, side: 'from' | 'to') {

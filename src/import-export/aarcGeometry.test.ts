@@ -142,7 +142,7 @@ describe('AARC octilinear chain reconstruction', () => {
     expect(skeleton.map(value=>[value.x,value.y])).toEqual([[5050,5050],[5200,5050],[5250,5000]])
     expect(skeleton.slice(1).map((value,index)=>classifyLeg(skeleton[index],value))).toEqual(['horizontal','diagonal'])
     const spans=getSegmentPathSpans(project,segment),samples=getSegmentCurveSamples(project,segment,48)
-    expect(spans.filter(span=>!span.linear)).toHaveLength(0)
+    expect(spans.filter(span=>!span.linear)).toHaveLength(1)
     expect(samples.every((sample,index)=>index===0||sample.x>=samples[index-1].x-1e-7)).toBe(true)
     expect(Math.max(...samples.map(sample=>sample.x))).toBeLessThanOrEqual(5250)
     expect(Math.min(...samples.map(sample=>sample.y))).toBeGreaterThanOrEqual(5000)
@@ -164,14 +164,14 @@ describe('AARC octilinear chain reconstruction', () => {
     expect(spans.every(span=>[span.start,span.control1,span.control2,span.end].every(point=>point.x>=0&&point.x<=40&&point.y>=0&&point.y<=20))).toBe(true)
   })
 
-  it('keeps a 45° AARC control-point bend sharp', () => {
+  it('rounds a 135° interior AARC control-point bend', () => {
     const project=imported(),segment=segmentBetween(project,39,40),spans=getSegmentPathSpans(project,segment)
     expect(coordinates(segment)).toEqual([[6350,4500]])
-    expect(spans.every(span=>span.linear)).toBe(true)
+    expect(spans.map(span=>span.linear)).toEqual([true,false,true])
     expect(spans.at(-1)?.end).toMatchObject({x:6450,y:4600})
   })
 
-  it('rounds exact 90° and 135° control-point bends, but drops the round when an edit makes the angle arbitrary', () => {
+  it('rounds exact 90° and 135° interior control-point bends, but drops the round when an edit makes the angle arbitrary', () => {
     const raw = {
       cvsSize: [300, 200],
       config: { lineTurnAreaRadius: 30, lineWidth: 14 },
@@ -195,7 +195,7 @@ describe('AARC octilinear chain reconstruction', () => {
       points: [
         { id: 1, pos: [0, 0], sta: 1, dir: 0, name: 'A' },
         { id: 2, pos: [100, 0], sta: 0, dir: 0 },
-        { id: 3, pos: [50, 50], sta: 1, dir: 0, name: 'B' },
+        { id: 3, pos: [150, 50], sta: 1, dir: 0, name: 'B' },
       ],
     }
     const obtuse = convertAarcToActualRouteProject(obtuseRaw).project

@@ -42,6 +42,16 @@ type DrawingCanvasPointer = { pointerId: number; startClient: Point; lastClient:
 const WHEEL_ZOOM_IDLE_MS = 100
 const WHEEL_ZOOM_SENSITIVITY = .0004
 
+function dedupeSnapSources(items: SnapRaySource[]) {
+  const seen = new Set<string>()
+  return items.filter(item => {
+    const key = `${item.id}:${item.x}:${item.y}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, snapOptions = { node: false, neighbor: false, grid: false }, view, setView }: {
   project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; roadDraft?: Road | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
   calibration?: { points: Point[] } | null; onCalibrationPoint?: (point: Point) => void

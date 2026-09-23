@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import rawSample from './__fixtures__/常陵.aarc-9.json'
 import { convertAarcToActualRouteProject } from './aarc'
-import { getStationAnchorForLine } from '../data/stationAnchor'
+import { getStationAnchorForLine, translateStationWithAnchors } from '../data/stationAnchor'
+import { getSegmentPathSpans } from '../geometry/path'
 import { buildAarcStationComponents, type AarcStationPointInput } from './aarcStationClustering'
 
 describe('AARC per-line station occurrence anchors', () => {
@@ -26,6 +27,29 @@ describe('AARC per-line station occurrence anchors', () => {
     expect(occurrences).toBe(589)
     expect(project.stationLineRelations.filter(relation => relation.anchor).length).toBe(30)
     expect(project.stations).toHaveLength(437)
+  })
+
+  it('keeps a moved AARC station as a sharp segment boundary instead of rounding around it', () => {
+    const { project } = convertAarcToActualRouteProject(rawSample, '常陵.aarc-9.json')
+    const station = project.stations.find(item => item.source?.pointId === 407)
+    expect(station).toBeDefined()
+
+    const lineId = 'aarc-line-322'
+    const incident = project.geometry.segments.filter(segment =>
+      segment.lineId === lineId && (segment.fromStationId === station!.id || segment.toStationId === station!.id),
+    )
+    expect(incident).toHaveLength(2)
+
+    translateStationWithAnchors(project, station!.id, 80, 0)
+    const moved = getStationAnchorForLine(project, station!.id, lineId)!
+    expect(moved).toEqual({ x: 4280, y: 4325 })
+
+    for (const segment of incident) {
+      const spans = getSegmentPathSpans(project, segment, lineId)
+      expect(spans.length).toBeGreaterThan(0)
+      const boundary = segment.fromStationId === station!.id ? spans[0].start : spans.at(-1)!.end
+      expect(boundary).toEqual(moved)
+    }
   })
 
   it('keeps a helper sta point inside a transitive automatic proximity cluster', () => {

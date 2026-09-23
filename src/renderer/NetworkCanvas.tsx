@@ -61,6 +61,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const rasterSnapshotViewRef = useRef<View | null>(null)
   const rasterSourceRef = useRef<PreparedRasterSource | null>(null)
   const rasterGenerationRef = useRef(0)
+  const rasterSuppressedForDragRef = useRef(false)
   const viewportSizeRef = useRef({ width: 920, height: 680 })
   const viewportRectRef = useRef({ left: 0, top: 0, width: 920, height: 680 })
   const committedViewRef = useRef<View>(view)
@@ -176,6 +177,14 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (previewTimer.current !== null) clearTimeout(previewTimer.current)
     previewTimer.current = null
   }, [])
+  const suppressRasterForObjectDrag = () => {
+    rasterSuppressedForDragRef.current = true
+    rasterGenerationRef.current += 1
+    stackRef.current?.classList.remove('raster-ready')
+  }
+  const releaseRasterAfterObjectDrag = () => {
+    rasterSuppressedForDragRef.current = false
+  }
 
   useLayoutEffect(() => {
     const submittedRevision = submittedViewRevisionRef.current.get(view)
@@ -255,7 +264,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       bleed: CANVAS_SCENE_BLEED,
       gridVisible: project.settings.gridVisible,
     }).then(scene => {
-      if (generation !== rasterGenerationRef.current) return
+      if (generation !== rasterGenerationRef.current || rasterSuppressedForDragRef.current) return
       if (!scene || !commitRasterizedScene(target, scene)) { fallBackToSvg(); return }
       rasterSnapshotViewRef.current = scene.baseView
       stackRef.current?.classList.add('raster-ready')
@@ -265,7 +274,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
 
   useEffect(() => {
     const element = svgRef.current
-    if (!element) return
+    if (!element || rasterSuppressedForDragRef.current) return
     const timer = setTimeout(() => {
       const source = prepareRasterSource(element)
       if (!source) {
@@ -311,7 +320,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (initialDistance < 1) return
     const previous = gesture.current
     if (previous.kind !== 'idle') {
-      if (previous.kind !== 'panningCanvas' && previous.kind !== 'pinchingCanvas' && 'before' in previous) cancelScheduledPreview()
+      if (previous.kind !== 'panningCanvas' && previous.kind !== 'pinchingCanvas' && 'before' in previous) {
+        cancelScheduledPreview()
+        releaseRasterAfterObjectDrag()
+      }
       setPreview(null)
     }
     const startView = liveViewRef.current
@@ -321,6 +333,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     event.stopPropagation(); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); capture(event)
     if (pointers.current.size >= 2) { beginPinch(); return false }
     const target = { kind, id, segmentId, ownerLineId, ownerPathId, ownerRoadId }
+    suppressRasterForObjectDrag()
     gesture.current = { ...target, pointerId: event.pointerId, startWorld: pointerToWorld(event.clientX, event.clientY), origin, before: project, latest: project, moved: false }
     setDragAffectedLineIds(getDragAffectedLineIds(project, target))
     setDragStationOverlay(getDragStationOverlay(project, target))
@@ -577,9 +590,12 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       setPreview(null)
       return
     }
-    if ('before' in current && current.pointerId === event.pointerId && current.moved) {
-      cancelScheduledPreview()
-      onDragCommit(current.before, current.latest)
+    if ('before' in current && current.pointerId === event.pointerId) {
+      releaseRasterAfterObjectDrag()
+      if (current.moved) {
+        cancelScheduledPreview()
+        onDragCommit(current.before, current.latest)
+      }
     }
     gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragMapElementOverlay({ elementIds: new Set() }); setDragVectorBasemapOverlay({ kind: null, objectIds: new Set() }); setPreview(null)
   }

@@ -83,7 +83,7 @@ describe('AARC free-point semantics', () => {
     expect(clustered?.free).toBe(true)
   })
 
-  it('rounds a free station continuously across the two AR Segment boundaries', () => {
+  it('keeps a free AARC station as an exact sharp Segment boundary', () => {
     const raw = {
       cvsSize: [300, 200],
       config: { lineTurnAreaRadius: 30, lineWidth: 14 },
@@ -100,16 +100,15 @@ describe('AARC free-point semantics', () => {
     expect(outgoing.source?.pointIds).toEqual([2, 3])
     const incomingSpans = getSegmentPathSpans(project, incoming)
     const outgoingSpans = getSegmentPathSpans(project, outgoing)
-    const leftHalf = incomingSpans.at(-1)!, rightHalf = outgoingSpans[0]
-    expect(leftHalf.linear).toBe(false)
-    expect(rightHalf.linear).toBe(false)
-    expect(leftHalf.end.x).toBeCloseTo(rightHalf.start.x, 8)
-    expect(leftHalf.end.y).toBeCloseTo(rightHalf.start.y, 8)
+    const incomingBoundary = incomingSpans.at(-1)!, outgoingBoundary = outgoingSpans[0]
     const station = project.stations.find(item => item.source?.pointId === 2)!
-    expect(Math.hypot(leftHalf.end.x - station.x, leftHalf.end.y - station.y)).toBeGreaterThan(0.1)
+    expect(incomingBoundary.linear).toBe(true)
+    expect(outgoingBoundary.linear).toBe(true)
+    expect(incomingBoundary.end).toEqual({ x: station.x, y: station.y, free: true })
+    expect(outgoingBoundary.start).toEqual({ x: station.x, y: station.y, free: true })
   })
 
-  it('also rounds an ordinary non-free AARC station turn instead of leaving a sharp Segment join', () => {
+  it('keeps an ordinary non-free AARC station turn as a sharp Segment join', () => {
     const raw = {
       cvsSize: [300, 200],
       config: { lineTurnAreaRadius: 30, lineWidth: 14 },
@@ -122,12 +121,13 @@ describe('AARC free-point semantics', () => {
     }
     const project = convertAarcToActualRouteProject(raw).project
     const [incoming, outgoing] = project.geometry.segments
-    const leftHalf = getSegmentPathSpans(project, incoming).at(-1)!
-    const rightHalf = getSegmentPathSpans(project, outgoing)[0]
-    expect(leftHalf.linear).toBe(false)
-    expect(rightHalf.linear).toBe(false)
-    expect(leftHalf.end.x).toBeCloseTo(rightHalf.start.x, 8)
-    expect(leftHalf.end.y).toBeCloseTo(rightHalf.start.y, 8)
+    const incomingBoundary = getSegmentPathSpans(project, incoming).at(-1)!
+    const outgoingBoundary = getSegmentPathSpans(project, outgoing)[0]
+    const station = project.stations.find(item => item.source?.pointId === 2)!
+    expect(incomingBoundary.linear).toBe(true)
+    expect(outgoingBoundary.linear).toBe(true)
+    expect(incomingBoundary.end).toEqual({ x: station.x, y: station.y })
+    expect(outgoingBoundary.start).toEqual({ x: station.x, y: station.y })
   })
 
   it('uses per-source-point free semantics when clustered Stations combine different line occurrences', () => {

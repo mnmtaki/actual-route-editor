@@ -5,17 +5,16 @@ export interface AarcLinePathPoint { x: number; y: number; free?: boolean }
 export interface AarcLinePathSpan { start: AarcLinePathPoint; control1: AarcLinePathPoint; control2: AarcLinePathPoint; end: AarcLinePathPoint; linear: boolean }
 
 type WayRel = 'parallel' | '90' | '45' | '135'
-type CornerPlan = { full: AarcLinePathSpan; left: AarcLinePathSpan; right: AarcLinePathSpan }
+type CornerPlan = { full: AarcLinePathSpan }
 
 const EPS = 1e-4
 const TURN_45_RATIO = 2.4142135 * .618
 
 /**
  * Rebuild an imported AARC transit segment with AARC's own corner semantics.
- * The source line is split into AR Segments at stations, so a station corner is
- * split at the cubic midpoint: the incoming Segment owns the first half and the
- * outgoing Segment owns the second half. The two halves join exactly and keep
- * the AARC corner geometry continuous across the AR Segment boundary.
+ * Rounded corners apply only to interior control points. Stations are explicit
+ * Segment boundaries and are always reached exactly, so a station placed on a
+ * bend stays a sharp boundary instead of borrowing a cross-Segment curve.
  *
  * Returns undefined for native AR segments so their existing modes stay intact.
  */
@@ -26,15 +25,8 @@ export function getAarcImportedSegmentPathSpans(project: ActualRouteProject, seg
   const points = getAarcSegmentPoints(project, segment, resolvedLineId)
   if (points.length < 2) return []
 
-  const startPlan = buildBoundaryCorner(project, segment, line, points, 'start', resolvedLineId)
-  const endPlan = buildBoundaryCorner(project, segment, line, points, 'end', resolvedLineId)
   const spans: AarcLinePathSpan[] = []
-  let cursor = startPlan?.right.start ?? points[0]
-
-  if (startPlan) {
-    spans.push(startPlan.right)
-    cursor = startPlan.right.end
-  }
+  let cursor = points[0]
 
   for (let index = 1; index < points.length - 1; index += 1) {
     const plan = buildCornerPlan(project, line, points[index - 1], points[index], points[index + 1])
@@ -44,27 +36,8 @@ export function getAarcImportedSegmentPathSpans(project: ActualRouteProject, seg
     cursor = plan.full.end
   }
 
-  if (endPlan) {
-    pushLinear(spans, cursor, endPlan.left.start)
-    spans.push(endPlan.left)
-  } else {
-    pushLinear(spans, cursor, points.at(-1)!)
-  }
+  pushLinear(spans, cursor, points.at(-1)!)
   return spans
-}
-
-function buildBoundaryCorner(project: ActualRouteProject, segment: Segment, line: Line, points: AarcLinePathPoint[], side: 'start' | 'end', resolvedLineId: string): CornerPlan | null {
-  if (boundaryStationOccurrenceMoved(project, segment, side, resolvedLineId)) return null
-  const adjacent = findAdjacentSourceSegment(project, segment, side)
-  if (!adjacent || boundaryStationOccurrenceMoved(project, adjacent, side === 'start' ? 'end' : 'start', resolvedLineId)) return null
-  const adjacentPoints = getAarcSegmentPoints(project, adjacent, resolvedLineId)
-  if (adjacentPoints.length < 2) return null
-  if (side === 'start') {
-    if (adjacent.toStationId !== segment.fromStationId) return null
-    return buildCornerPlan(project, line, adjacentPoints.at(-2)!, points[0], points[1])
-  }
-  if (adjacent.fromStationId !== segment.toStationId) return null
-  return buildCornerPlan(project, line, points.at(-2)!, points.at(-1)!, adjacentPoints[1])
 }
 
 function getAarcSegmentPoints(project: ActualRouteProject, segment: Segment, resolvedLineId: string): AarcLinePathPoint[] {
@@ -76,25 +49,6 @@ function getAarcSegmentPoints(project: ActualRouteProject, segment: Segment, res
     ...segment.waypoints.map(point => ({ x: point.x, y: point.y, ...(point.free === true ? { free: true } : {}) })),
     { x: to.x, y: to.y, ...(getEndpointFree(project, segment, 'to') ? { free: true } : {}) },
   ]
-}
-
-function boundaryStationOccurrenceMoved(project: ActualRouteProject, segment: Segment, side: 'start' | 'end', resolvedLineId: string) {
-  const stationId = side === 'start' ? segment.fromStationId : segment.toStationId
-  const pointIds = segment.source?.pointIds
-  const pointId = pointIds?.length ? (side === 'start' ? pointIds[0] : pointIds.at(-1)) : undefined
-  if (pointId === undefined) return false
-
-  const rawPoints = (project.aarc?.raw as { points?: unknown } | undefined)?.points
-  if (!Array.isArray(rawPoints)) return false
-  const raw = rawPoints.find(value => value && typeof value === 'object' && finiteId((value as { id?: unknown }).id) === pointId) as { pos?: unknown } | undefined
-  const pos = raw?.pos
-  if (!Array.isArray(pos) || pos.length < 2) return false
-  const sourceX = Number(pos[0]), sourceY = Number(pos[1])
-  if (!Number.isFinite(sourceX) || !Number.isFinite(sourceY)) return false
-
-  const anchor = getStationAnchorForLine(project, stationId, resolvedLineId)
-  if (!anchor) return false
-  return Math.abs(anchor.x - sourceX) > EPS || Math.abs(anchor.y - sourceY) > EPS
 }
 
 function getEndpointFree(project: ActualRouteProject, segment: Segment, side: 'from' | 'to') {
@@ -113,45 +67,6 @@ function getRawAarcPointFree(project: ActualRouteProject, pointId: number): bool
   if (!Array.isArray(rawPoints)) return undefined
   const raw = rawPoints.find(value => value && typeof value === 'object' && finiteId((value as { id?: unknown }).id) === pointId) as { free?: unknown } | undefined
   return raw ? raw.free === true : undefined
-}
-
-function findAdjacentSourceSegment(project: ActualRouteProject, segment: Segment, side: 'start' | 'end'): Segment | null {
-  const sourceLineId = segment.source?.sourceLineId ?? segment.source?.lineId
-  if (sourceLineId === undefined) return null
-  const stationId = side === 'start' ? segment.fromStationId : segment.toStationId
-  const currentIndex = sourceSegmentIndex(segment)
-  const candidates = project.geometry.segments.filter(candidate => {
-    if (candidate.id === segment.id || candidate.source?.format !== 'aarc') return false
-    const candidateLineId = candidate.source?.sourceLineId ?? candidate.source?.lineId
-    if (String(candidateLineId) !== String(sourceLineId)) return false
-    return side === 'start' ? candidate.toStationId === stationId : candidate.fromStationId === stationId
-  })
-  if (!candidates.length) return null
-
-  if (currentIndex !== null) {
-    const expected = side === 'start' ? currentIndex - 1 : currentIndex + 1
-    const exact = candidates.find(candidate => sourceSegmentIndex(candidate) === expected)
-    if (exact) return exact
-    if (isSourceLineRing(project, sourceLineId)) {
-      const indexed = candidates.map(candidate => ({ candidate, index: sourceSegmentIndex(candidate) })).filter((value): value is { candidate: Segment; index: number } => value.index !== null)
-      if (indexed.length) return indexed.sort((a, b) => side === 'start' ? b.index - a.index : a.index - b.index)[0].candidate
-    }
-  }
-  return candidates.length === 1 ? candidates[0] : null
-}
-
-function sourceSegmentIndex(segment: Segment): number | null {
-  const value = segment.source?.raw?.sourceSegmentIndex
-  const number = typeof value === 'number' ? value : Number(value)
-  return Number.isFinite(number) ? number : null
-}
-
-function isSourceLineRing(project: ActualRouteProject, sourceLineId: number | string) {
-  const rawLines = (project.aarc?.raw as { lines?: unknown } | undefined)?.lines
-  if (!Array.isArray(rawLines)) return false
-  const line = rawLines.find(value => value && typeof value === 'object' && String((value as { id?: unknown }).id) === String(sourceLineId)) as { pts?: unknown } | undefined
-  if (!line || !Array.isArray(line.pts) || line.pts.length < 3) return false
-  return String(line.pts[0]) === String(line.pts.at(-1))
 }
 
 function buildCornerPlan(project: ActualRouteProject, line: Line, previous: AarcLinePathPoint, current: AarcLinePathPoint, next: AarcLinePathPoint): CornerPlan | null {
@@ -195,8 +110,7 @@ function buildCornerPlan(project: ActualRouteProject, line: Line, previous: Aarc
     end: exit,
     linear: false,
   }
-  const [left, right] = splitCubic(full, .5)
-  return { full, left, right }
+  return { full }
 }
 
 function getTurnRadius(project: ActualRouteProject, line: Line, relation: WayRel | number) {
@@ -223,15 +137,6 @@ function wayRel(a: AarcLinePathPoint, b: AarcLinePathPoint): WayRel {
   return dot > 0 ? '45' : '135'
 }
 
-function splitCubic(span: AarcLinePathSpan, t: number): [AarcLinePathSpan, AarcLinePathSpan] {
-  const ab = lerp(span.start, span.control1, t), bc = lerp(span.control1, span.control2, t), cd = lerp(span.control2, span.end, t)
-  const abc = lerp(ab, bc, t), bcd = lerp(bc, cd, t), middle = lerp(abc, bcd, t)
-  return [
-    { start: span.start, control1: ab, control2: abc, end: middle, linear: false },
-    { start: middle, control1: bcd, control2: cd, end: span.end, linear: false },
-  ]
-}
-
 function pushLinear(spans: AarcLinePathSpan[], start: AarcLinePathPoint, end: AarcLinePathPoint) {
   if (distance(start, end) <= EPS) return
   spans.push({ start, end, control1: start, control2: end, linear: true })
@@ -248,4 +153,3 @@ function signWay(value: AarcLinePathPoint): AarcLinePathPoint { return { x: isZe
 function unit8(value: AarcLinePathPoint): AarcLinePathPoint { return unit(signWay(value)) }
 function cross2(a: AarcLinePathPoint, b: AarcLinePathPoint) { return a.x * b.y - a.y * b.x }
 function distance(a: AarcLinePathPoint, b: AarcLinePathPoint) { return Math.hypot(b.x - a.x, b.y - a.y) }
-function lerp(a: AarcLinePathPoint, b: AarcLinePathPoint, t: number): AarcLinePathPoint { return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t } }

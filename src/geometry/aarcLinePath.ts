@@ -29,8 +29,13 @@ export function getAarcImportedSegmentPathSpans(project: ActualRouteProject, seg
   let cursor = points[0]
 
   for (let index = 1; index < points.length - 1; index += 1) {
-    const plan = buildCornerPlan(project, line, points[index - 1], points[index], points[index + 1])
-    if (!plan) continue
+    const current = points[index]
+    const plan = buildCornerPlan(project, line, points[index - 1], current, points[index + 1])
+    if (!plan) {
+      pushLinear(spans, cursor, current)
+      cursor = current
+      continue
+    }
     pushLinear(spans, cursor, plan.full.start)
     spans.push(plan.full)
     cursor = plan.full.end

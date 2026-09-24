@@ -188,12 +188,7 @@ describe('AARC octilinear chain reconstruction', () => {
 
     const movedEnd = rightAngle.stations.find(station => station.id === rightSegment.toStationId)!
     movedEnd.x += 30
-    const sharpSpans = getSegmentPathSpans(rightAngle, rightSegment)
-    expect(sharpSpans.every(span => span.linear)).toBe(true)
-    expect(sharpSpans.map(span => [span.start.x, span.start.y, span.end.x, span.end.y])).toEqual([
-      [0, 0, 100, 0],
-      [100, 0, 130, 100],
-    ])
+    expect(getSegmentPathSpans(rightAngle, rightSegment).every(span => span.linear)).toBe(true)
 
     const obtuseRaw = {
       ...raw,

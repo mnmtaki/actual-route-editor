@@ -80,10 +80,10 @@ function buildCornerPlan(project: ActualRouteProject, line: Line, previous: Aarc
   const incomingLength = magnitude(incomingRaw), outgoingLength = magnitude(outgoingRaw)
   if (incomingLength < EPS || outgoingLength < EPS) return null
 
-  const relation = roundedCornerRelation(incomingRaw, outgoingRaw)
-  if (!relation) return null
-
   const free = previous.free === true || current.free === true || next.free === true
+  const relation = free ? null : roundedCornerRelation(incomingRaw, outgoingRaw)
+  if (!free && !relation) return null
+
   const incoming = free ? unit(incomingRaw) : unit8(incomingRaw)
   const outgoing = free ? unit(outgoingRaw) : unit8(outgoingRaw)
   const cross = cross2(incoming, outgoing)
@@ -93,12 +93,14 @@ function buildCornerPlan(project: ActualRouteProject, line: Line, previous: Aarc
 
   let trim: number
   if (free) {
+    // AARC free points bypass formalize but still receive a real-angle fillet.
+    // theta is the interior angle, matching AARC lineCvsWorker.linkPts().
     const theta = Math.atan2(Math.abs(cross), -dot)
     const radius = getTurnRadius(project, line, theta)
     const tanHalf = Math.tan(theta / 2)
     trim = Math.min(tanHalf > EPS ? radius / tanHalf : 0, incomingLength / 2, outgoingLength / 2)
   } else {
-    trim = Math.min(getTurnRadius(project, line, relation), incomingLength / 2, outgoingLength / 2)
+    trim = Math.min(getTurnRadius(project, line, relation!), incomingLength / 2, outgoingLength / 2)
   }
   if (!Number.isFinite(trim) || trim < EPS) return null
 

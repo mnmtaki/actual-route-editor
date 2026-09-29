@@ -17,6 +17,7 @@ import type { DrawingMode, LineDraftPoint } from '../data/basemapPaths'
 import { effectiveLineWidth, effectiveStationStyle, snapLabelOffset } from '../data/style'
 import { isSegmentGeometryLocked, isStationGeometryLocked, lockedStationMessage } from '../data/lineLock'
 import { translateStationWithAnchors } from '../data/stationAnchor'
+import { isAarcDerivedWaypoint, moveAarcExplicitControlPoint, reformalizeAarcAfterStationMove } from '../geometry/aarcEditableGeometry'
 import { lineWithEffectiveColor } from '../data/lineIdentity'
 import { projectWithLineParentsAt } from '../data/lineParentHistory'
 import { projectWithLineColorsAt } from '../data/lineColorHistory'
@@ -480,6 +481,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
           neighbors: current.id ? stationNeighborSources(current.before, current.id) : [],
         }, event.altKey)
         translateStationWithAnchors(next, station.id, target.x - current.origin.x, target.y - current.origin.y)
+        const reformalized = reformalizeAarcAfterStationMove(next, station.id)
+        if (reformalized !== next) {
+          next.geometry = reformalized.geometry
+        }
       }
     } else if (current.kind === 'draggingWaypoint') {
       const waypoint = next.geometry.segments.find(item => item.id === current.segmentId)?.waypoints.find(item => item.id === current.id)
@@ -488,7 +493,12 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
           nodes: allSnapNodes(current.before, new Set(current.id ? [current.id] : [])),
           neighbors: current.id && current.segmentId ? waypointNeighborSources(current.before, current.segmentId, current.id) : [],
         }, event.altKey)
-        waypoint.x = target.x; waypoint.y = target.y
+        if (waypoint.source?.format === 'aarc' && waypoint.source.kind === 'explicit-control-point' && waypoint.source.pointId !== undefined) {
+          const reformalized = moveAarcExplicitControlPoint(next, waypoint.source.pointId, target)
+          next.geometry = reformalized.geometry
+        } else {
+          waypoint.x = target.x; waypoint.y = target.y
+        }
       }
     } else if (current.kind === 'draggingStructureNode') {
       const segment = next.geometry.segments.find(item => item.id === current.segmentId), node = segment?.structureNodes?.find(item => item.id === current.id)
@@ -892,7 +902,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       overlay
     />}
     <LineLegendLayer project={legendProject} selectedId={selection?.type === 'lineLegend' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={handleLegendPointerDown} />
-    <g data-layer="waypoints" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (()=>{const segmentId=selection.type==='segment'?selection.id:selection.segmentId,segment=shown.geometry.segments.find(item=>item.id===segmentId);if(!segment)return null;const cornerIds=new Set(getSegmentRoundedCornerPlans(shown,segment).map(plan=>plan.waypointId));return segment.waypoints.map(waypoint=>{const isCorner=cornerIds.has(waypoint.id),selected=selection.type==='waypoint'&&selection.id===waypoint.id,selectWaypoint=(event:React.PointerEvent)=>{if(isSegmentGeometryLocked(shown,segmentId)){onSelect({type:'waypoint',id:waypoint.id,segmentId});onEditBlocked?.('线路已锁定');return}if(startObjectDrag('draggingWaypoint',event,{x:waypoint.x,y:waypoint.y},waypoint.id,segmentId))onSelect({type:'waypoint',id:waypoint.id,segmentId})};return <g key={waypoint.id} data-corner-handle={isCorner?'true':undefined} data-waypoint-id={waypoint.id} onPointerDown={selectWaypoint}><circle className="waypoint-hit" cx={waypoint.x} cy={waypoint.y} r={stationHitRadius} fill="transparent" pointerEvents="all"/><circle cx={waypoint.x} cy={waypoint.y} r={isCorner?7:8} className={`waypoint ${isCorner?'corner-waypoint':''} ${selected?'selected':''}`} pointerEvents="none"/></g>})})()}</g>
+    <g data-layer="waypoints" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (()=>{const segmentId=selection.type==='segment'?selection.id:selection.segmentId,segment=shown.geometry.segments.find(item=>item.id===segmentId);if(!segment)return null;const cornerIds=new Set(getSegmentRoundedCornerPlans(shown,segment).map(plan=>plan.waypointId));return segment.waypoints.filter(waypoint=>!isAarcDerivedWaypoint(waypoint)).map(waypoint=>{const isCorner=cornerIds.has(waypoint.id),selected=selection.type==='waypoint'&&selection.id===waypoint.id,selectWaypoint=(event:React.PointerEvent)=>{if(isSegmentGeometryLocked(shown,segmentId)){onSelect({type:'waypoint',id:waypoint.id,segmentId});onEditBlocked?.('线路已锁定');return}if(startObjectDrag('draggingWaypoint',event,{x:waypoint.x,y:waypoint.y},waypoint.id,segmentId))onSelect({type:'waypoint',id:waypoint.id,segmentId})};return <g key={waypoint.id} data-corner-handle={isCorner?'true':undefined} data-waypoint-id={waypoint.id} onPointerDown={selectWaypoint}><circle className="waypoint-hit" cx={waypoint.x} cy={waypoint.y} r={stationHitRadius} fill="transparent" pointerEvents="all"/><circle cx={waypoint.x} cy={waypoint.y} r={isCorner?7:8} className={`waypoint ${isCorner?'corner-waypoint':''} ${selected?'selected':''}`} pointerEvents="none"/></g>})})()}</g>
     <g data-layer="style-points" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (() => { const segmentId = selection.type === 'segment' ? selection.id : selection.segmentId; const segment = shown.geometry.segments.find(item=>item.id===segmentId); if (!segment) return null; return (segment.structureNodes ?? []).map(node => { const point = getStructureNodePoint(shown, segment, node); if (!point) return null; const selected = selection.type === 'structureNode' && selection.id === node.id, attached=Boolean(node.waypointId); return <g key={node.id} transform={`translate(${point.x} ${point.y})`} data-style-point-id={node.id} data-structure-node-id={node.id} data-attached-waypoint-id={node.waypointId ?? ''} onPointerDown={event => { event.stopPropagation(); if (attached) { onSelect({ type: 'structureNode', id: node.id, segmentId }); return }; if (isSegmentGeometryLocked(shown, segmentId)) { onSelect({ type: 'structureNode', id: node.id, segmentId }); onEditBlocked?.('线路已锁定'); return }; if (startObjectDrag('draggingStructureNode', event, point, node.id, segmentId)) onSelect({ type: 'structureNode', id: node.id, segmentId }) }}><circle r={attached?6:structureHitRadius} fill="transparent" pointerEvents="all" /><path d="M 0 -5 L 5 0 L 0 5 L -5 0 Z" fill={selected?'#fff4c9':'#fffdf9'} stroke={selected?'#b98700':'#353b38'} strokeWidth={selected?2:1.5} vectorEffect="non-scaling-stroke" pointerEvents="none" /></g> }) })()}</g>
     <g data-layer="station-actions" data-editor="true">{selection?.type === 'station' && !drawing && (() => { const station = shown.stations.find(item => item.id === selection.id); if (!station) return null; const handle = getStationHandleStyle(shown, station.id, shown.timeline.currentDate); return <g className="station-extend" transform={`translate(${handle.x} ${handle.y})`} onPointerDown={event => { event.stopPropagation(); onExtend(station.id) }}><circle className="station-extend-hit" r={Math.max(stationHitRadius, 18)} fill="transparent" pointerEvents="all" /><circle className="station-extend-button" r="8.5" fill="white" stroke={handle.color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" pointerEvents="none" /><path className="station-extend-plus" d="M -3.2 0 H 3.2 M 0 -3.2 V 3.2" stroke={handle.color} strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" pointerEvents="none" /></g> })()}</g>
     {drawing?.kind === 'line' && !lineDraft?.anchorStationId && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置起点站</text></g>}

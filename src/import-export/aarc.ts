@@ -1,6 +1,7 @@
 import type { ActualRouteProject, AarcTextTag, AarcSourceMetadata, BasemapPath, Line, Segment, Station, StationLineRelation, Waypoint } from '../data/model'
 import { DEFAULT_PRESENTATION_SETTINGS, DEFAULT_SETTINGS } from '../data/model'
 import { reconstructAarcLineGeometry, type AarcGeometryPoint } from './aarcGeometry'
+import { getAarcNativeCornerRadius } from './aarcNativeGeometry'
 import { convertAarcVisualStyle } from './aarcVisualStyle'
 import { convertAarcLineStyles, resolveAarcSegmentStyleId } from './aarcStyle'
 import { parseAarcTerrainWidth, resolveAarcTerrainAppearance, resolveAarcTerrainSourceMetrics } from './aarcTerrain'
@@ -303,7 +304,7 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
           const timeSlice = sourceFromPointId === undefined ? undefined : resolveAarcTimeSliceForInterval(sourceLineForSlices, timeSlices, sourceFromPointId, sourcePoint.id)
           const segmentStyleId = resolveAarcSegmentStyleId(styleSlice?.styleId)
           const segmentSource = { format: 'aarc' as const, lineId: sourceLineId, sourceLineId, ...(sourceFromPointId !== undefined ? { pointIds: [sourceFromPointId, sourcePoint.id] } : {}), ...(timeSlice?.id !== null && timeSlice?.id !== undefined ? { sourceTimeSliceId: timeSlice.id } : {}), ...(styleSlice?.id !== null && styleSlice?.id !== undefined ? { sourceStyleSliceId: styleSlice.id } : {}), ...(styleSlice?.styleId !== null && styleSlice?.styleId !== undefined ? { sourceStyleId: styleSlice.styleId } : {}), raw: { sourceSegmentIndex: segmentIndex } }
-          segments.push({ id: `aarc-segment-${sourceLineId}-${segmentIndex}`, lineId, ...(segmentStyleId !== undefined ? { lineStyleId: segmentStyleId } : {}), fromStationId: previousStation.id, toStationId: station.id, mode: pendingWaypoints.length ? 'rounded' : 'straight', ...(pendingWaypoints.length ? { cornerRadius: 42 } : {}), structureType: 'underground', structureNodes: [], waypoints: pendingWaypoints, openedAt: interval.openedAt, closedAt: interval.closedAt, source: segmentSource })
+          segments.push({ id: `aarc-segment-${sourceLineId}-${segmentIndex}`, lineId, ...(segmentStyleId !== undefined ? { lineStyleId: segmentStyleId } : {}), fromStationId: previousStation.id, toStationId: station.id, mode: pendingWaypoints.length ? 'rounded' : 'straight', structureType: 'underground', structureNodes: [], waypoints: pendingWaypoints, openedAt: interval.openedAt, closedAt: interval.closedAt, source: segmentSource })
           segmentIndex += 1
         } else if (pendingWaypoints.length) warnings.push(`AARC 线路 ${sourceLineId} 在首站前的 ${pendingWaypoints.length} 个几何点无法归属区间，已忽略`)
         previousStation = station; previousStationSourceIndex = sourcePointIndex; pendingWaypoints = []
@@ -315,8 +316,10 @@ export function convertAarcToActualRouteProject(raw: unknown, fileName = 'AARC �
         id: explicit
           ? `aarc-waypoint-${sourceLineId}-${sourcePoint!.id}-${explicitWaypointCount}`
           : `aarc-corner-${sourceLineId}-${nodeIndex}-${implicitCornerCount}`,
-        x: node.x, y: node.y, type: 'corner',
-        free: explicit && sourcePoint!.free === true,
+        x: node.x,
+        y: node.y,
+        type: 'corner',
+        cornerRadius: getAarcNativeCornerRadius(reconstructed.nodes, nodeIndex, sourceConfig, metrics.widthRatio),
         source: { format: 'aarc', ...(explicit ? { pointId: sourcePoint!.id } : {}), lineId: sourceLineId, sourceLineId, kind: explicit ? 'explicit-control-point' : 'implicit-corner', raw: explicit ? cloneRecord(sourcePoint!) : undefined },
       })
       if (explicit) explicitWaypointCount += 1

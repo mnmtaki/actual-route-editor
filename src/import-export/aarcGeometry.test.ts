@@ -171,7 +171,7 @@ describe('AARC octilinear chain reconstruction', () => {
     expect(spans.at(-1)?.end).toMatchObject({x:6450,y:4600})
   })
 
-  it('rounds exact 90° and 135° interior control-point bends, but drops the round when an edit makes the angle arbitrary', () => {
+  it('bakes AARC corner radius into native geometry so later edits keep the rounded mode', () => {
     const raw = {
       cvsSize: [300, 200],
       config: { lineTurnAreaRadius: 30, lineWidth: 14 },
@@ -188,7 +188,7 @@ describe('AARC octilinear chain reconstruction', () => {
 
     const movedEnd = rightAngle.stations.find(station => station.id === rightSegment.toStationId)!
     movedEnd.x += 30
-    expect(getSegmentPathSpans(rightAngle, rightSegment).every(span => span.linear)).toBe(true)
+    expect(getSegmentPathSpans(rightAngle, rightSegment).filter(span => !span.linear)).toHaveLength(1)
 
     const obtuseRaw = {
       ...raw,

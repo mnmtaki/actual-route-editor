@@ -77,11 +77,11 @@ describe('per-corner rounded geometry', () => {
     expect(scene.container.querySelector(`[data-segment-id="${segment.id}"] .segment-main`)).toHaveAttribute('d', path)
   })
 
-  it('keeps untouched AARC geometry identical through native save and reload', () => {
+  it('keeps baked AARC native geometry identical through native save and reload', () => {
     const project = convertAarcToActualRouteProject(rawAarc, '木阳.aarc.json').project
     const before = project.geometry.segments.map(segment => [segment.id, getSegmentPath(project, segment)])
     const restored = parseProjectJson(serializeProject(project))
     expect(restored.geometry.segments.map(segment => [segment.id, getSegmentPath(restored, segment)])).toEqual(before)
-    expect(project.geometry.segments.flatMap(segment => segment.waypoints).every(waypoint => waypoint.cornerRadius === undefined)).toBe(true)
+    expect(project.geometry.segments.flatMap(segment => segment.waypoints).every(waypoint => Number.isFinite(waypoint.cornerRadius))).toBe(true)
   })
 })

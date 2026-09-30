@@ -1,5 +1,6 @@
 import type { ActualRouteProject, Segment, Station, Waypoint } from './model'
 import { reconstructAarcLineGeometry, type AarcGeometryPoint } from '../import-export/aarcGeometry'
+import { getAarcNativeCornerRadius } from '../import-export/aarcNativeGeometry'
 import { buildAarcStationComponents, createAarcFreeSnapCandidateResolver, resolveAarcStationName, type AarcStationPointInput } from '../import-export/aarcStationClustering'
 import { detectAarcCompoundGroups } from '../import-export/aarcCompoundStations'
 import { aggregateAarcPointMetrics } from '../import-export/aarcNormalize'
@@ -288,7 +289,6 @@ export function materializeAarcFakeLineService(project: ActualRouteProject, line
           fromStationId: previousStation.id,
           toStationId: station.id,
           mode: pendingWaypoints.length ? 'rounded' : 'straight',
-          ...(pendingWaypoints.length ? { cornerRadius: 42 } : {}),
           structureType: 'underground',
           structureNodes: [],
           waypoints: pendingWaypoints,
@@ -311,7 +311,7 @@ export function materializeAarcFakeLineService(project: ActualRouteProject, line
       x: node.x,
       y: node.y,
       type: 'corner',
-      ...(sourcePoint?.free ? { free: true } : {}),
+      cornerRadius: getAarcNativeCornerRadius(reconstructed.nodes, nodeIndex, config, targetLine.source?.sourceWidthRatio),
       source: {
         format: 'aarc',
         ...(sourcePoint ? { pointId: sourcePoint.id } : {}),

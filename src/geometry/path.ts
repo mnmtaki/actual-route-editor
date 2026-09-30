@@ -1,6 +1,5 @@
 import type { ActualRouteProject, Segment, Waypoint } from '../data/model'
 import { getStationAnchorForLine } from '../data/stationAnchor'
-import { getAarcImportedSegmentPathSpans } from './aarcLinePath'
 
 export interface Point { x: number; y: number }
 export interface PathSpan { start: Point; control1: Point; control2: Point; end: Point; linear: boolean }
@@ -33,8 +32,6 @@ export function getSegmentPath(project: ActualRouteProject, segment: Segment, re
 }
 
 export function getSegmentPathSpans(project: ActualRouteProject, segment: Segment, resolvedLineId = segment.lineId): PathSpan[] {
-  const aarcSpans = getAarcImportedSegmentPathSpans(project, segment, resolvedLineId)
-  if (aarcSpans !== undefined) return aarcSpans
   const points = getSegmentPoints(project, segment, resolvedLineId)
   if (points.length < 2) return []
   if (segment.mode === 'rounded') return buildRoundedPolylineSpans(points, segment.cornerRadius ?? DEFAULT_CORNER_RADIUS)

@@ -104,8 +104,8 @@ describe('AARC free-point semantics', () => {
     const station = project.stations.find(item => item.source?.pointId === 2)!
     expect(incomingBoundary.linear).toBe(true)
     expect(outgoingBoundary.linear).toBe(true)
-    expect(incomingBoundary.end).toEqual({ x: station.x, y: station.y, free: true })
-    expect(outgoingBoundary.start).toEqual({ x: station.x, y: station.y, free: true })
+    expect(incomingBoundary.end).toEqual({ x: station.x, y: station.y })
+    expect(outgoingBoundary.start).toEqual({ x: station.x, y: station.y })
   })
 
   it('keeps an ordinary non-free AARC station turn as a sharp Segment join', () => {

@@ -18,7 +18,7 @@ export function ContextActions({ project, selection, onExtend, onInsertStation, 
   return <section className="context-sheet" aria-label="对象操作"><div className="sheet-handle"/><strong>{title}</strong><div className="context-buttons">
     {selection.type==='station'&&<button className="primary" onClick={()=>onExtend(selection.id)}>＋ 从本站延伸</button>}
     {selection.type==='waypoint'&&<span className="context-hint">拖动控制点改变线路形状；删除请在属性栏操作</span>}
-    {selection.type==='structureNode'&&<span className="context-hint">拖动样式点移动样式分界；删除请在属性栏操作</span>}
+    {selection.type==='structureNode'&&<span className="context-hint">拖动样式点可移动样式分界；修改样式或结构请选择对应线路段；删除请在属性栏操作</span>}
     {!pointSelection&&<button className="danger" onClick={onDelete}>删除</button>}
   </div></section>
 }

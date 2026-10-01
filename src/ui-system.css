@@ -201,6 +201,29 @@ input[type="color"] {
   padding: 3px !important;
 }
 
+.line-list-color {
+  width: 10px;
+  min-width: 10px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  cursor: pointer;
+}
+
+.line-list-color::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.line-list-color::-webkit-color-swatch,
+.line-list-color::-moz-color-swatch {
+  border: 0;
+  border-radius: 0;
+}
+
 input[type="checkbox"],
 input[type="radio"] {
   min-height: auto;

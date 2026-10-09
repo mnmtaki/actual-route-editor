@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { demoProject } from './demo'
+import { createEmptyProject } from './storage'
+import { materializeAarcFakeLineEntries } from './aarcFakeLineEntries'
+import { getAarcFakeSourceLines } from '../renderer/AarcFakeLines'
 import { addLineBadge, addWaypointToSegment, appendStationToLine, batchDeleteLines, connectExistingStation, createBranchLine, createLine, deleteLineAndOrphans, deleteLineBadge, insertStationIntoSegment } from './operations'
 
 describe('line-driven editing operations', () => {
@@ -53,6 +56,57 @@ describe('line-driven editing operations', () => {
     expect(next.stations.some(station => station.id === 's1')).toBe(false)
   })
 
+  it('permanently deletes imported AARC fake lines without keeping source artwork or resurrecting entries', () => {
+    const source = createEmptyProject()
+    source.aarc = {
+      format: 'aarc',
+      raw: {
+        lines: [
+          { id: 7, name: '删除的伪线', isFake: true, type: 0, pts: [1, 2] },
+          { id: 8, name: '保留的伪线', isFake: true, type: 0, pts: [2, 3] },
+        ],
+        points: [
+          { id: 1, pos: [0, 0] },
+          { id: 2, pos: [10, 0] },
+          { id: 3, pos: [20, 0] },
+        ],
+      },
+      fakeLines: [
+        { id: 7, name: '删除的伪线', isFake: true, type: 0, pts: [1, 2] },
+        { id: 8, name: '保留的伪线', isFake: true, type: 0, pts: [2, 3] },
+      ],
+    }
+    const imported = materializeAarcFakeLineEntries(source)
+    expect(imported.lines).toHaveLength(2)
+    const next = deleteLineAndOrphans(imported, 'aarc-line-7')
+    expect(next.lines.map(line => line.id)).toEqual(['aarc-line-8'])
+    expect((next.aarc?.raw?.lines as Array<{id:number}>).map(line => line.id)).toEqual([8])
+    expect(next.aarc?.fakeLines?.map(line => line.id)).toEqual([8])
+    expect(getAarcFakeSourceLines(next).map(line => line.id)).toEqual([8])
+    expect(materializeAarcFakeLineEntries(next)).toBe(next)
+    expect((imported.aarc?.raw?.lines as Array<{id:number}>).map(line => line.id)).toEqual([7, 8])
+  })
+  it('removes AARC fake children with their parent without touching unrelated source lines', () => {
+    const source = createEmptyProject()
+    source.aarc = { format: 'aarc', raw: { lines: [
+      { id: 1, isFake: true, type: 0, pts: [1, 2] },
+      { id: 2, isFake: true, type: 0, parent: 1, pts: [2, 3] },
+      { id: 3, isFake: true, type: 0, pts: [3, 4] },
+    ] } }
+    const imported = materializeAarcFakeLineEntries(source)
+    const next = deleteLineAndOrphans(imported, 'aarc-line-1')
+    expect(next.lines.map(line => line.id)).toEqual(['aarc-line-3'])
+    expect((next.aarc?.raw?.lines as Array<{id:number}>).map(line => line.id)).toEqual([3])
+    expect(materializeAarcFakeLineEntries(next)).toBe(next)
+  })
+  it('does not modify locked AARC fake lines or their source artwork', () => {
+    const source = createEmptyProject()
+    source.aarc = { format: 'aarc', raw: { lines: [{ id: 7, isFake: true, type: 0, pts: [1, 2] }] } }
+    const imported = materializeAarcFakeLineEntries(source)
+    imported.lines[0].locked = true
+    expect(deleteLineAndOrphans(imported, imported.lines[0].id)).toBe(imported)
+    expect(getAarcFakeSourceLines(imported).map(line => line.id)).toEqual([7])
+  })
   it('blocks locked line geometry operations without changing the project', () => {
     const project = structuredClone(demoProject)
     project.lines.find(line => line.id === 'line-a')!.locked = true

@@ -222,6 +222,23 @@ export function deleteLineAndOrphans(project: ActualRouteProject, lineId: string
     changed = false
     for (const line of next.lines) if (line.parentLineId && deletedIds.has(line.parentLineId) && !deletedIds.has(line.id)) { deletedIds.add(line.id); changed = true }
   }
+  // AARC fake-line artwork still reads its source record. Removing only the
+  // native Line would leave it visible and allow it to be materialized again.
+  // Remove source records for every deleted fake line, including descendants,
+  // but leave shared source points and unrelated source lines untouched.
+  const deletedAarcFakeSourceIds = new Set(project.lines.flatMap(line => {
+    if (!deletedIds.has(line.id) || !line.isFake || line.source?.format !== 'aarc') return []
+    const sourceId = Number(line.source.sourceLineId ?? line.source.lineId)
+    return Number.isFinite(sourceId) ? [sourceId] : []
+  }))
+  if (deletedAarcFakeSourceIds.size && next.aarc) {
+    const sourceLineSurvives = (value: Record<string, unknown>) => !deletedAarcFakeSourceIds.has(Number(value.id))
+    if (Array.isArray(next.aarc.raw?.lines)) {
+      next.aarc.raw.lines = next.aarc.raw.lines.filter(value =>
+        !value || typeof value !== 'object' || sourceLineSurvives(value as Record<string, unknown>))
+    }
+    if (next.aarc.fakeLines) next.aarc.fakeLines = next.aarc.fakeLines.filter(sourceLineSurvives)
+  }
   next.lines = next.lines.filter(line => !deletedIds.has(line.id))
   clearDeletedLineParentReferences(next, deletedIds)
   next.stationLineRelations = next.stationLineRelations.filter(relation => !deletedIds.has(relation.lineId))

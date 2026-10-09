@@ -1177,7 +1177,9 @@ export default function App() {
             onAddLineBadge={addLineBadge}
             onDeleteLine={(lineId) => {
               if (isLineLocked(history.project, lineId)) { setNotice("线路已锁定"); return }
-              history.commit(deleteLineAndOrphans(history.project, lineId))
+              const next = deleteLineAndOrphans(history.project, lineId)
+              if (next === history.project) return
+              history.commit(next)
               if (selection?.type === "line" && selection.id === lineId) clearLineSelection()
             }}
             onPhasePreview={setPhasePreview}

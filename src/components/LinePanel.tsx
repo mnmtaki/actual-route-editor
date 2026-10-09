@@ -228,7 +228,10 @@ export function LinePanel({
         const displayName = fake && !line.name.trim() ? '伪线' : (getLineDisplayName(project, line) || '未命名线路')
         const color = getEffectiveLineColor(project, line)
         return <div key={line.id} ref={node => { if (node) rowRefs.current.set(line.id, node); else rowRefs.current.delete(line.id) }} data-line-id={line.id} data-fake-line={fake ? 'true' : undefined} className={`line-row ${isSelected ? 'selected' : ''} ${isActive ? 'active' : ''} ${isSelected && !isActive ? 'secondary-selected' : ''}`}>
-          <input className="line-list-color" aria-label={`${displayName}线路颜色`} title={line.parentLineId?'支线颜色继承主线':'线路颜色'} type="color" value={color} disabled={Boolean(line.parentLineId)} onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()} onChange={event=>{const next=structuredClone(project);setCurrentLineOwnColor(next.lines.find(item=>item.id===line.id)!,event.target.value);onChange(next)}}/>
+          <label className={`line-list-color${line.parentLineId ? ' is-disabled' : ''}`} title={line.parentLineId?'支线颜色继承主线':'线路颜色'} onPointerDown={event=>event.stopPropagation()} onClick={event=>event.stopPropagation()}>
+            <span className="line-list-color-strip" style={{ backgroundColor: color }} aria-hidden="true" />
+            <input className="line-list-color-input" aria-label={`${displayName}线路颜色`} type="color" value={color} disabled={Boolean(line.parentLineId)} onChange={event=>{const next=structuredClone(project);setCurrentLineOwnColor(next.lines.find(item=>item.id===line.id)!,event.target.value);onChange(next)}}/>
+          </label>
           <button type="button" className="line-row-main" onClick={event => onClickMain(event, line.id)}><span className="line-name">{displayName}</span></button>
           {!fake && <button type="button" className="line-row-action" aria-label={`${displayName}支线设置`} onPointerDown={event=>event.stopPropagation()} onClick={()=>{onSelect(line.id);setDetailMode('branches');setDetailLineId(line.id)}}>支线</button>}
           <button type="button" className="line-row-action" aria-label={`${displayName}线路设置`} onPointerDown={event=>event.stopPropagation()} onClick={()=>{onSelect(line.id);setDetailMode('settings');setDetailLineId(line.id)}}>设置</button>

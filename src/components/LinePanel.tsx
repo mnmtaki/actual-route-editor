@@ -6,7 +6,6 @@ import { worldUnitsToKilometers } from '../data/distance'
 import { getEffectiveLineColor, getLineDisplayName } from '../data/lineIdentity'
 import { getPassengerStationCount, getPassengerStationCountForLine } from '../data/passengerStats'
 import { isFakeLine } from '../data/fakeLines'
-import { materializeAarcFakeLineEntries } from '../data/aarcFakeLineEntries'
 import type { OpeningPhasePath } from '../data/openingPhases'
 import { LineBranchPanel, LineDetailPanel } from './LineDetailPanel'
 import { setCurrentLineOwnColor } from '../data/lineColorHistory'
@@ -59,11 +58,6 @@ export function LinePanel({
   mobileMode?: boolean
   onMobileLongPress?: (lineId: string) => void
 }) {
-  useEffect(() => {
-    const materialized = materializeAarcFakeLineEntries(project)
-    if (materialized !== project) onChange(materialized)
-  }, [project, onChange])
-
   const lineStats = project.lines.map(line => ({ line, length: worldUnitsToKilometers(project.geometry.segments.filter(segment => segment.lineId === line.id).reduce((sum, segment) => sum + getSegmentCurveLength(project, segment), 0), project), stations: getPassengerStationCountForLine(project, line.id) }))
   const lineIds = new Set(project.lines.map(line => line.id))
   // First-level list is for root/independent lines only. Real child lines live

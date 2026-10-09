@@ -8,6 +8,8 @@ describe('line structure panel',()=>{
   const {container}=render(<LinePanel project={structuredClone(demoProject)} selection={null} activeLineId={null} onSelect={()=>{}} onChange={()=>{}} onAddLine={()=>{}}/>)
   expect(screen.getByRole('complementary',{name:'线路结构'})).toBeTruthy()
   expect(container.querySelectorAll('.line-list-color')).toHaveLength(demoProject.lines.length)
+  expect(container.querySelectorAll('.line-list-color-strip')).toHaveLength(demoProject.lines.length)
+  expect(container.querySelectorAll('.line-list-color-input')).toHaveLength(demoProject.lines.length)
   expect(container.querySelectorAll('.line-state-button')).toHaveLength(0)
   expect(screen.getAllByRole('button',{name:/支线设置$/})).toHaveLength(demoProject.lines.length)
   expect(screen.getAllByRole('button',{name:/线路设置$/})).toHaveLength(demoProject.lines.length)

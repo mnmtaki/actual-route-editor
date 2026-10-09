@@ -202,15 +202,18 @@ input[type="color"] {
 }
 
 .line-list-color {
-  width: 10px;
-  min-width: 10px;
-  height: 28px;
-  min-height: 28px;
+  width: 8px;
+  min-width: 8px;
+  height: 32px;
+  min-height: 32px;
   padding: 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
+  appearance: none;
+  -webkit-appearance: none;
+  overflow: hidden;
   cursor: pointer;
 }
 
@@ -218,7 +221,11 @@ input[type="color"] {
   padding: 0;
 }
 
-.line-list-color::-webkit-color-swatch,
+.line-list-color::-webkit-color-swatch {
+  border: 0;
+  border-radius: 0;
+}
+
 .line-list-color::-moz-color-swatch {
   border: 0;
   border-radius: 0;

@@ -6,6 +6,7 @@ import { projectPointToSvgPath, screenPointToWorld } from '../geometry/screenPoi
 import { snapEditorPoint, type SnapGuide, type SnapNode, type SnapRaySource } from '../geometry/alignmentSnap'
 import { getStationHandleStyle } from './stationHandle'
 import { hitMapObjects, mergeMapSelections, selectionIdentity, type MapItemSelection } from '../data/mapMarquee'
+import { moveSelectedMapObjects } from '../data/mapBatchOperations'
 import { getSegmentStyleIntervalAtProgress, getStructureNodePoint } from '../data/structure'
 import { MapElementsLayer } from './MapElements'
 import { AarcTextTagsLayer } from './AarcTextTags'
@@ -33,6 +34,7 @@ type Gesture =
   | { kind: 'idle' }
   | { kind: 'panningCanvas'; pointerId: number; lastClient: Point }
   | { kind: 'selectingMap'; pointerId: number; start: Point; current: Point; moved: boolean }
+  | { kind: 'movingMapSelection'; pointerId: number; start: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
   | { kind: 'calibrationTap'; pointerId: number; startClient: Point; lastClient: Point; moved: boolean }
   | { kind: 'pinchingCanvas'; pointerIds: [number, number]; initialDistance: number; startView: View; startWorld: Point }
   | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineLabel' | 'draggingMapElement' | 'draggingLineLegend' | 'draggingBackground' | 'draggingBasemapPoint' | 'draggingBasemapPath' | 'draggingRoadPoint'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; ownerRoadId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
@@ -54,11 +56,11 @@ function dedupeSnapSources(items: SnapRaySource[]) {
   })
 }
 
-export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, mapSelectMode = false, mapSelectAppend = false, mapSelections = [], onMapSelectionChange, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, snapOptions = { node: false, neighbor: false, grid: false }, view, setView }: {
+export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, mapSelectMode = false, mapSelectAppend = false, mapMoveMode = false, mapSelections = [], onMapSelectionChange, onMapMoveCommit, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, snapOptions = { node: false, neighbor: false, grid: false }, view, setView }: {
   project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; roadDraft?: Road | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
   calibration?: { points: Point[] } | null; onCalibrationPoint?: (point: Point) => void
   selectedStationIds?: string[]; onToggleStationSelection?: (stationId: string) => void
-  mapSelectMode?: boolean; mapSelectAppend?: boolean; mapSelections?: MapItemSelection[]; onMapSelectionChange?: (items: MapItemSelection[]) => void
+  mapSelectMode?: boolean; mapSelectAppend?: boolean; mapMoveMode?: boolean; mapSelections?: MapItemSelection[]; onMapSelectionChange?: (items: MapItemSelection[]) => void; onMapMoveCommit?: (before: ActualRouteProject, next: ActualRouteProject) => void
   onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void; onFinishDrawing?: () => void
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void; onEditBlocked?: (message: string) => void
   snapOptions?: { node: boolean; neighbor: boolean; grid: boolean }
@@ -84,6 +86,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const basemapCanvasPointer = useRef<DrawingCanvasPointer | null>(null)
   const [preview, setPreview] = useState<ActualRouteProject | null>(null)
   const [marqueePreview, setMarqueePreview] = useState<{ start: Point; current: Point; hits: MapItemSelection[] } | null>(null)
+  const [mapMovePreview, setMapMovePreview] = useState<ActualRouteProject | null>(null)
   const [dragAffectedLineIds, setDragAffectedLineIds] = useState<Set<string>>(() => new Set())
   const [dragStationOverlay, setDragStationOverlay] = useState<DragStationOverlay>(() => ({ stationIds: new Set(), markers: false, labels: false }))
   const [dragLineLabelOverlay, setDragLineLabelOverlay] = useState<DragLineLabelOverlay>(() => ({ labelIds: new Set(), source: null }))
@@ -93,7 +96,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
   const [alignmentGuides, setAlignmentGuides] = useState<SnapGuide[]>([])
-  const shown = preview ?? project
+  const shown = mapMovePreview ?? preview ?? project
   const staticHistoricalIdentityProject = useMemo(() => projectWithLineColorsAt(projectWithLineParentsAt(project, project.timeline.currentDate), project.timeline.currentDate), [project])
   const activeLineLabelProject = useMemo(() => {
     if (!preview || dragLineLabelOverlay.source === null || dragLineLabelOverlay.labelIds.size === 0) return null
@@ -367,6 +370,13 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const handleCanvasPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
     if (mapSelectMode && !drawing && !calibration && event.button === 0 && event.pointerType === 'mouse') {
+      if (mapMoveMode && mapSelections.length) {
+        const validation = moveSelectedMapObjects(project, mapSelections, 1, 1)
+        if (validation.blocked) { onEditBlocked?.(validation.blocked); return }
+        capture(event)
+        gesture.current = { kind: 'movingMapSelection', pointerId: event.pointerId, start: pointerToWorld(event.clientX,event.clientY), before: project, latest: project, moved: false }
+        return
+      }
       capture(event)
       const start = pointerToWorld(event.clientX, event.clientY)
       gesture.current = { kind: 'selectingMap', pointerId: event.pointerId, start, current: start, moved: false }
@@ -451,6 +461,18 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       return
     }
     const current = gesture.current
+    if (current.kind === 'movingMapSelection') {
+      if (current.pointerId !== event.pointerId) return
+      const point = pointerToWorld(event.clientX,event.clientY)
+      const dx = point.x - current.start.x, dy = point.y - current.start.y
+      if (Math.hypot(dx,dy) < 0.01) return
+      const result = moveSelectedMapObjects(current.before, mapSelections, dx, dy)
+      if (result.blocked) { onEditBlocked?.(result.blocked); return }
+      current.latest = result.project
+      current.moved = true
+      setMapMovePreview(result.project)
+      return
+    }
     if (current.kind === 'selectingMap') {
       if (current.pointerId !== event.pointerId) return
       const point = pointerToWorld(event.clientX, event.clientY)
@@ -565,6 +587,12 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       return
     }
     const current = gesture.current
+    if (current.kind === 'movingMapSelection' && current.pointerId === event.pointerId) {
+      if (event.type === 'pointerup' && current.moved) onMapMoveCommit?.(current.before, current.latest)
+      setMapMovePreview(null)
+      gesture.current = { kind: 'idle' }
+      return
+    }
     if (current.kind === 'selectingMap' && current.pointerId === event.pointerId) {
       if (event.type === 'pointerup') {
         const point = pointerToWorld(event.clientX, event.clientY)
@@ -758,6 +786,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   })()
 
   const displayedMapSelections = marqueePreview ? mergeMapSelections(mapSelections, marqueePreview.hits, mapSelectAppend) : mapSelections
+  const mapRenderProject = mapMovePreview ?? project
   const displayedMapKeys = new Set(displayedMapSelections.map(selectionIdentity))
   const mapSelectionMarker = (x: number, y: number, key: string) => displayedMapKeys.has(key) ? <circle key={key} cx={x} cy={y} r={9} fill="none" stroke="#bd8b19" strokeWidth={2} vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null
 
@@ -801,7 +830,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
         />
       : <>
           <VectorBasemapLayer
-            project={project}
+            project={mapRenderProject}
             draft={roadDraft}
             selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
             hitRadius={stationHitRadius}
@@ -821,7 +850,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
         </>}
     {basemapDrawingOverlay}
     <NetworkLineLayer
-      project={project}
+      project={mapRenderProject}
       excludeArtworkLineIds={dragAffectedLineIds}
       renderHits
       onSegmentPointerDown={handleSegmentPointerDown}
@@ -835,7 +864,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     {selectedInterval&&<g data-layer="style-interval-selection" data-editor="true" pointerEvents="none"><path d={selectedInterval.path} fill="none" stroke="#d2a72f" strokeWidth={(shown.lines.find(line=>line.id===selectedInterval.segment.lineId)?.lineWidth??shown.settings.lineWidth)+7} strokeLinecap="round" strokeLinejoin="round" opacity=".24" vectorEffect="non-scaling-stroke"/></g>}
     {phasePreview && <g data-layer="opening-phase-preview" pointerEvents="none">{phasePreview.segmentIds.map(id => { const segment = shown.geometry.segments.find(item => item.id === id); const rawLine = segment ? shown.lines.find(item => item.id === segment.lineId) : null; const line = rawLine ? lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate) : null; return segment && line ? <path key={id} d={getSegmentPath(shown, segment)} className="opening-phase-preview-segment" stroke={line.color} /> : null })}{phasePreview.stationIds.map(id => { const station = shown.stations.find(item => item.id === id); return station && isCompoundStationCanonical(shown, station) ? <circle key={id} cx={station.x} cy={station.y} r={effectiveStationStyle(station, shown.settings).stationSize * .9} className="opening-phase-preview-station" /> : null })}</g>}
     <NetworkStationLayer
-      project={project}
+      project={mapRenderProject}
       selection={selection}
       selectedStationIds={selectedStationIds}
       hitRadius={stationHitRadius}
@@ -853,10 +882,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       renderLabels={false}
       overlay
     />}
-    <AarcFakeLinesLayer project={project} part="stations" />
-    <AarcPointLinksLayer project={project} />
+    <AarcFakeLinesLayer project={mapRenderProject} part="stations" />
+    <AarcPointLinksLayer project={mapRenderProject} />
     <NetworkStationLayer
-      project={project}
+      project={mapRenderProject}
       selection={selection}
       selectedStationIds={selectedStationIds}
       hitRadius={stationHitRadius}
@@ -914,7 +943,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       overlay
     />}
     <MapElementsLayer
-      project={project}
+      project={mapRenderProject}
       selectedId={selection?.type === 'mapElement' ? selection.id : undefined}
       hitRadius={stationHitRadius}
       excludeElementIds={dragMapElementOverlay.elementIds.size ? dragMapElementOverlay.elementIds : undefined}

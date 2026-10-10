@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { demoProject } from './demo'
+import { createEmptyProject } from './storage'
+import { materializeAarcFakeLineEntries } from './aarcFakeLineEntries'
 import { hitMapObjects, mergeMapSelections, selectionIdentity } from './mapMarquee'
 
 describe('mouse map marquee', () => {
@@ -22,6 +24,16 @@ describe('mouse map marquee', () => {
     const large = hitMapObjects(project, { left: -1, right: 1001, top: -1, bottom: 1001 })
     expect(small.some(item => item.type === 'background')).toBe(false)
     expect(large.some(item => item.type === 'background')).toBe(true)
+  })
+  it('can marquee-select imported fake lines even though they have no native segments', () => {
+    const source = createEmptyProject()
+    source.aarc = { format: 'aarc', raw: {
+      lines: [{ id: 7, name: '图例伪线', type: 0, isFake: true, pts: [1, 2] }],
+      points: [{ id: 1, pos: [0, 0] }, { id: 2, pos: [100, 0] }],
+    } }
+    const project = materializeAarcFakeLineEntries(source)
+    const hits = hitMapObjects(project, { left: 40, right: 60, top: -5, bottom: 5 })
+    expect(hits.some(item => item.type === 'line' && item.id === 'aarc-line-7')).toBe(true)
   })
   it('supports mouse-only append mode while keeping previous selections', () => {
     const a = { type: 'station' as const, id: 'a' }, b = { type: 'road' as const, id: 'b' }

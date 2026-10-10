@@ -47,6 +47,24 @@ export function hitMapObjects(project: ActualRouteProject, rect: MapRect): MapIt
       if (point && inside(point, rect)) push({ type: 'structureNode', id: node.id, segmentId: segment.id })
     }
   }
+  // Imported AARC fake lines render directly from source paths and have no
+  // ordinary native Segments, so handle their retained source points.
+  const rawSource = project.aarc?.raw
+  const rawLines = Array.isArray(rawSource?.lines) ? rawSource.lines as Array<Record<string, unknown>> : []
+  const rawPoints = Array.isArray(rawSource?.points) ? rawSource.points as Array<Record<string, unknown>> : []
+  const sourcePointPositions = new Map(rawPoints.flatMap(item => {
+    const pos = item.pos
+    if (!Array.isArray(pos) || pos.length < 2) return []
+    const x = Number(pos[0]), y = Number(pos[1])
+    return Number.isFinite(x) && Number.isFinite(y) ? [[Number(item.id), { x, y }] as const] : []
+  }))
+  for (const line of project.lines) {
+    if (!line.visible || !line.isFake || line.source?.format !== 'aarc') continue
+    const sourceId = Number(line.source.sourceLineId ?? line.source.lineId)
+    const raw = rawLines.find(item => Number(item.id) === sourceId)
+    const pts = Array.isArray(raw?.pts) ? raw.pts.map(id => sourcePointPositions.get(Number(id))).filter((point): point is Point => Boolean(point)) : []
+    if (polylineTouches(pts, rect)) push({ type: 'line', id: line.id })
+  }
   for (const line of project.lines) if (line.visible) for (const badge of line.lineBadges ?? []) {
     if (badge.visible && intersects(rect, { left: badge.x - badge.size / 2, right: badge.x + badge.size / 2, top: badge.y - badge.size / 2, bottom: badge.y + badge.size / 2 })) push({ type: 'lineLabel', id: badge.id, lineId: line.id, source: 'native' })
   }

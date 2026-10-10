@@ -37,6 +37,7 @@ import { LineMultiInspector } from "./components/LineMultiInspector";
 import { StationMultiInspector } from "./components/StationMultiInspector";
 import { MapMultiInspector } from "./components/MapMultiInspector";
 import type { MapItemSelection } from "./data/mapMarquee";
+import { deleteSelectedMapObjects } from "./data/mapBatchOperations";
 import { getLineDisplayName } from "./data/lineIdentity";
 import { PresentationPreview } from "./presentation/PresentationPreview";
 import {
@@ -88,6 +89,7 @@ export default function App() {
   const [styleOpen, setStyleOpen] = useState(false);
   const [mapSelectMode, setMapSelectMode] = useState(false);
   const [mapSelectAppend, setMapSelectAppend] = useState(false);
+  const [mapMoveMode, setMapMoveMode] = useState(false);
   const [mapSelections, setMapSelections] = useState<MapItemSelection[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selection, setSelection] = useState<Selection>(null),
@@ -189,6 +191,13 @@ export default function App() {
     setActiveLineId(project.lines[0]?.id ?? null);
     setSelection(null);
     setSelectedStationIds([]);
+  };
+  const deleteMapSelections = () => {
+    if (!mapSelections.length) return;
+    if (!window.confirm(`确定删除选中的 ${mapSelections.length} 个地图对象？关联的车站和区间可能一同删除，可以撤销。`)) return;
+    const result = deleteSelectedMapObjects(history.project, mapSelections);
+    if (result.blocked) { setNotice(result.blocked); return; }
+    if (result.changed) { history.commit(result.project); setMapSelections([]); setMapMoveMode(false); setNotice("已批量删除所选对象（可撤销）"); }
   };
   const handleCanvasSelect = (next: Selection) => {
     setMapSelections([]);
@@ -1129,9 +1138,9 @@ export default function App() {
           mapSelectMode={mapSelectMode}
           mapSelectAppend={mapSelectAppend}
           mapSelectCount={mapSelections.length}
-          onToggleMapSelectMode={() => { setMapSelectMode(value => !value); setMapSelectAppend(false); setMapSelections([]); }}
+          onToggleMapSelectMode={() => { setMapSelectMode(value => !value); setMapSelectAppend(false); setMapMoveMode(false); setMapSelections([]); }}
           onToggleMapSelectAppend={() => setMapSelectAppend(value => !value)}
-          onClearMapSelection={() => setMapSelections([])}
+          onClearMapSelection={() => { setMapSelections([]); setMapMoveMode(false); }}
           snapOptions={snapOptions}
           onToggleSnapOption={(key) => setSnapOptions(current => ({ ...current, [key]: !current[key] }))}
           projectName={getProjectName(history.project)}
@@ -1217,6 +1226,8 @@ export default function App() {
               project={history.project}
               mapSelectMode={mapSelectMode}
               mapSelectAppend={mapSelectAppend}
+              mapMoveMode={mapMoveMode}
+              onMapMoveCommit={(before,next) => { history.commitFrom(before,next); setNotice("已整体移动所选对象（可撤销）"); }}
               mapSelections={mapSelections}
               onMapSelectionChange={items => { setMapSelections(items); setSelectedLineIds([]); setSelectedStationIds([]); setSelection(null); }}
               selection={selection}
@@ -1261,7 +1272,7 @@ export default function App() {
             onDelete={batchDeleteSelectedLines}
             onSetVisible={value => batchSetLineValue("visible", value)}
             onSetLocked={value => batchSetLineValue("locked", value)}
-          /> : mapSelections.length > 0 ? <MapMultiInspector project={history.project} selections={mapSelections} onClear={() => setMapSelections([])} onChoose={item => { setMapSelections([]); setMapSelectMode(false); handleCanvasSelect(item); }} /> : selectedStationIds.length > 1 ? <StationMultiInspector project={history.project} selectedStationIds={selectedStationIds} onChange={history.commit} /> : <Inspector
+          /> : mapSelections.length > 0 ? <MapMultiInspector project={history.project} selections={mapSelections} onClear={() => { setMapSelections([]); setMapMoveMode(false); }} onMove={() => setMapMoveMode(value => !value)} moving={mapMoveMode} onDelete={deleteMapSelections} onChoose={item => { setMapSelections([]); setMapSelectMode(false); setMapMoveMode(false); handleCanvasSelect(item); }} /> : selectedStationIds.length > 1 ? <StationMultiInspector project={history.project} selectedStationIds={selectedStationIds} onChange={history.commit} /> : <Inspector
             project={history.project}
             selection={selection}
             onChange={history.commit}

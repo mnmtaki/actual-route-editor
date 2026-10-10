@@ -790,3 +790,16 @@ summary:focus-visible,
 .station-count,.style-range output,.build-version{color:var(--ui-text-muted)!important}
 .style-range,.style-select,.structure-control{color:var(--ui-text-secondary)}
 .opening-phases-title strong,.station-opening-row strong,.visual-style-panel h4,.typography-section-title{color:var(--ui-text)}
+
+/* Mouse-only map selection mode: keep navigation unchanged outside the mode. */
+.map-selection-toggle.is-active,
+.map-selection-toggle[aria-pressed="true"] {
+  border-color: #bd8b19 !important;
+  background: var(--ui-accent-soft) !important;
+  color: var(--ui-text) !important;
+}
+.network-canvas.is-map-selecting { cursor: crosshair; }
+.map-selection-summary { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 0; }
+.map-selection-summary span { border: 1px solid var(--ui-border); border-radius: 4px; padding: 4px 7px; font-size: 11px; }
+.map-selection-items { display: grid; gap: 4px; max-height: 50vh; overflow-y: auto; margin-top: 10px; }
+.map-selection-items button { padding: 7px 9px; min-height: 31px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

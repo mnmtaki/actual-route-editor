@@ -455,7 +455,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       if (current.pointerId !== event.pointerId) return
       const point = pointerToWorld(event.clientX, event.clientY)
       current.current = point
-      current.moved ||= Math.hypot(event.clientX - pointers.current.get(event.pointerId)!.x, event.clientY - pointers.current.get(event.pointerId)!.y) > 4
+      current.moved ||= Math.hypot(point.x - current.start.x, point.y - current.start.y) > 4 * liveViewRef.current.width / Math.max(1, svgRef.current?.clientWidth ?? 920)
       const rect = { left: Math.min(current.start.x, point.x), top: Math.min(current.start.y, point.y), right: Math.max(current.start.x, point.x), bottom: Math.max(current.start.y, point.y) }
       setMarqueePreview({ start: current.start, current: point, hits: hitMapObjects(project, rect) })
       return

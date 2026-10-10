@@ -5,6 +5,7 @@ import { translateStationWithAnchors } from './stationAnchor'
 import { deleteLineAndOrphans, deleteStationConsistently } from './operations'
 import { deleteStructureNode, getStructureNodePoint } from './structure'
 import { findSegmentProgressForPoint } from '../geometry/path'
+import { moveAarcTextTags, ownerLineForAarcTag, removeAarcTextTags } from './aarcTextTagLifecycle'
 
 type Result = { project: ActualRouteProject; blocked?: string; changed: boolean }
 const success = (project: ActualRouteProject): Result => ({ project, changed: true })
@@ -73,7 +74,7 @@ export function moveSelectedMapObjects(project: ActualRouteProject, items: reado
   for (const line of next.lines) for (const label of line.lineBadges ?? []) {
     if (selectedLabels.has(label.id) || target.lineIds.has(line.id)) { label.x += dx; label.y += dy }
   }
-  for (const tag of next.textTags ?? []) if (selectedLabels.has(tag.id) || (tag.lineId && target.lineIds.has(tag.lineId))) { tag.x += dx; tag.y += dy }
+  moveAarcTextTags(next, new Set((next.textTags ?? []).filter(tag => selectedLabels.has(tag.id) || idsByType(items, 'aarcTextTag').has(tag.id) || (ownerLineForAarcTag(next, tag) && target.lineIds.has(ownerLineForAarcTag(next, tag)!))).map(tag => tag.id)), dx, dy)
   const elementIds = idsByType(items, 'mapElement')
   for (const item of next.mapElements ?? []) if (elementIds.has(item.id)) { item.x += dx; item.y += dy }
   const roads = idsByType(items, 'road'), roadPoints = idsByType(items, 'roadPoint')
@@ -146,7 +147,7 @@ export function deleteSelectedMapObjects(project: ActualRouteProject, items: rea
   }
   const labels = idsByType(items, 'lineLabel')
   for (const line of next.lines) line.lineBadges = line.lineBadges?.filter(label => !labels.has(label.id))
-  next.textTags = next.textTags?.filter(tag => !labels.has(tag.id))
+  removeAarcTextTags(next, new Set([...labels, ...idsByType(items, 'aarcTextTag')]))
   const elements = idsByType(items, 'mapElement')
   next.mapElements = next.mapElements?.filter(element => !elements.has(element.id))
   const roads = idsByType(items, 'road'), roadPoints = idsByType(items, 'roadPoint')

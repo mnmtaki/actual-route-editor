@@ -3,7 +3,7 @@ import type { MapItemSelection } from '../data/mapMarquee'
 
 const names: Record<MapItemSelection['type'], string> = {
   line: '线路', station: '车站', segment: '线路区间', waypoint: '路径点',
-  structureNode: '样式点', lineLabel: '线路标签', mapElement: '自由文本',
+  structureNode: '样式点', lineLabel: '线路标签', mapElement: '自由文本', aarcTextTag: 'AARC 文本标签',
   road: '道路', roadPoint: '道路节点', basemapPath: '底图路径',
   lineLegend: '线路图例', background: '底图图片',
 }
@@ -25,6 +25,7 @@ export function MapMultiInspector({ project, selections, onClear, onChoose, onMo
     if (selection.type === 'road') return project.roads?.find(item => item.id === selection.id)?.name || selection.id
     if (selection.type === 'basemapPath') return project.basemapPaths?.find(item => item.id === selection.id)?.name || selection.id
     if (selection.type === 'mapElement') return project.mapElements?.find(item => item.id === selection.id)?.text.slice(0, 26) || selection.id
+    if (selection.type === 'aarcTextTag') { const tag = project.textTags?.find(item => item.id === selection.id); return tag?.textOverride || tag?.text || tag?.kind || selection.id }
     return selection.type === 'background' ? '底图图片' : selection.id
   }
   return <aside className="right-panel panel map-multi-inspector" data-testid="map-multi-inspector">

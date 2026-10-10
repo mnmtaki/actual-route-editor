@@ -5,7 +5,7 @@ import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPla
 import { projectPointToSvgPath, screenPointToWorld } from '../geometry/screenPoint'
 import { snapEditorPoint, type SnapGuide, type SnapNode, type SnapRaySource } from '../geometry/alignmentSnap'
 import { getStationHandleStyle } from './stationHandle'
-import { hitMapObjects, mergeMapSelections, selectionIdentity, type MapItemSelection } from '../data/mapMarquee'
+import { hitMapObjects, measureAarcTextTagBounds, mergeMapSelections, selectionIdentity, type MapRect, type MapItemSelection } from '../data/mapMarquee'
 import { moveSelectedMapObjects } from '../data/mapBatchOperations'
 import { getSegmentStyleIntervalAtProgress, getStructureNodePoint } from '../data/structure'
 import { MapElementsLayer } from './MapElements'
@@ -33,7 +33,7 @@ type Point = { x: number; y: number }
 type Gesture =
   | { kind: 'idle' }
   | { kind: 'panningCanvas'; pointerId: number; lastClient: Point }
-  | { kind: 'selectingMap'; pointerId: number; start: Point; current: Point; moved: boolean }
+  | { kind: 'selectingMap'; pointerId: number; start: Point; current: Point; moved: boolean; textTagBounds: ReadonlyMap<string, MapRect> }
   | { kind: 'movingMapSelection'; pointerId: number; start: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
   | { kind: 'calibrationTap'; pointerId: number; startClient: Point; lastClient: Point; moved: boolean }
   | { kind: 'pinchingCanvas'; pointerIds: [number, number]; initialDistance: number; startView: View; startWorld: Point }
@@ -379,7 +379,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       }
       capture(event)
       const start = pointerToWorld(event.clientX, event.clientY)
-      gesture.current = { kind: 'selectingMap', pointerId: event.pointerId, start, current: start, moved: false }
+      gesture.current = { kind: 'selectingMap', pointerId: event.pointerId, start, current: start, moved: false, textTagBounds: svgRef.current ? measureAarcTextTagBounds(svgRef.current) : new Map() }
       setMarqueePreview({ start, current: start, hits: [] })
       return
     }
@@ -479,7 +479,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       current.current = point
       current.moved ||= Math.hypot(point.x - current.start.x, point.y - current.start.y) > 4 * liveViewRef.current.width / Math.max(1, svgRef.current?.clientWidth ?? 920)
       const rect = { left: Math.min(current.start.x, point.x), top: Math.min(current.start.y, point.y), right: Math.max(current.start.x, point.x), bottom: Math.max(current.start.y, point.y) }
-      setMarqueePreview({ start: current.start, current: point, hits: hitMapObjects(project, rect) })
+      setMarqueePreview({ start: current.start, current: point, hits: hitMapObjects(project, rect, current.textTagBounds) })
       return
     }
     if (current.kind === 'pinchingCanvas') {
@@ -598,7 +598,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
         const point = pointerToWorld(event.clientX, event.clientY)
         const radius = current.moved ? 0 : Math.max(liveViewRef.current.width / Math.max(1, svgRef.current?.clientWidth ?? 920) * 8, 2)
         const rect = { left: Math.min(current.start.x, point.x) - radius, top: Math.min(current.start.y, point.y) - radius, right: Math.max(current.start.x, point.x) + radius, bottom: Math.max(current.start.y, point.y) + radius }
-        const hits = hitMapObjects(project, rect)
+        const hits = hitMapObjects(project, rect, current.textTagBounds)
         onMapSelectionChange?.(mergeMapSelections(mapSelections, hits, mapSelectAppend))
       }
       setMarqueePreview(null)
@@ -975,7 +975,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
         ...(segment.structureNodes ?? []).map(node => { const point = getStructureNodePoint(mapRenderProject, segment, node); return point ? mapSelectionMarker(point.x,point.y,'structureNode:'+node.id) : null })
       ])}
       {mapRenderProject.lines.flatMap(line => (line.lineBadges ?? []).map(badge => mapSelectionMarker(badge.x,badge.y,'lineLabel:'+badge.id+':native')))}
-      {(mapRenderProject.textTags ?? []).map(tag => mapSelectionMarker(tag.x,tag.y,'lineLabel:'+tag.id+':aarc'))}
+      {(mapRenderProject.textTags ?? []).map(tag => mapSelectionMarker(tag.x,tag.y, displayedMapKeys.has('aarcTextTag:'+tag.id) ? 'aarcTextTag:'+tag.id : 'lineLabel:'+tag.id+':aarc'))}
       {(mapRenderProject.mapElements ?? []).map(element => mapSelectionMarker(element.x,element.y,'mapElement:'+element.id))}
       {(mapRenderProject.roads ?? []).filter(road => displayedMapKeys.has('road:'+road.id)).map(road => <polyline key={road.id} points={road.points.map(point => point.x+','+point.y).join(' ')} fill="none" stroke="#ca9b2e" strokeWidth={8} strokeOpacity=".55" pointerEvents="none"/>)}
       {(mapRenderProject.basemapPaths ?? []).filter(path => displayedMapKeys.has('basemapPath:'+path.id)).map(path => <polyline key={path.id} points={path.points.map(point => point.x+','+point.y).join(' ')} fill="none" stroke="#ca9b2e" strokeWidth={8} strokeOpacity=".55" pointerEvents="none"/>)}

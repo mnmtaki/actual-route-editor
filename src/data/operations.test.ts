@@ -99,6 +99,25 @@ describe('line-driven editing operations', () => {
     expect((next.aarc?.raw?.lines as Array<{id:number}>).map(line => line.id)).toEqual([3])
     expect(materializeAarcFakeLineEntries(next)).toBe(next)
   })
+  it('cascades deleted AARC line and branch tags without removing unrelated map annotations', () => {
+    const project = structuredClone(demoProject)
+    project.lines.find(line => line.id === 'line-a')!.source = { format: 'aarc', sourceLineId: 7 }
+    project.lines.find(line => line.id === 'line-b')!.source = { format: 'aarc', sourceLineId: 8 }
+    project.textTags = [
+      { id: 'aarc-text-tag-1', kind: 'LineNameLabel', lineId: 'line-a', x: 0, y: 0, source: { format: 'aarc', textTagId: 1, forId: 7 } },
+      { id: 'aarc-text-tag-2', kind: 'LineNameLabel', lineId: 'line-b', x: 10, y: 0, source: { format: 'aarc', textTagId: 2, forId: 8 } },
+      { id: 'aarc-text-tag-3', kind: 'FreeMapText', x: 20, y: 0, source: { format: 'aarc', textTagId: 3 } },
+      { id: 'aarc-text-tag-4', kind: 'TerrainNameLabel', x: 30, y: 0, source: { format: 'aarc', textTagId: 4, forId: 10, targetKind: 'terrain' } },
+    ]
+    project.aarc = { format: 'aarc', raw: { textTags: [1, 2, 3, 4].map(id => ({ id, pos: [id, 0] })) } }
+    const next = deleteLineAndOrphans(project, 'line-a')
+    expect(next.textTags?.map(tag => tag.id)).toEqual(['aarc-text-tag-2', 'aarc-text-tag-3', 'aarc-text-tag-4'])
+    expect((next.aarc?.raw?.textTags as Array<{ id: number }>).map(tag => tag.id)).toEqual([2, 3, 4])
+    expect(project.textTags).toHaveLength(4)
+    const batch = batchDeleteLines(project, ['line-a', 'line-b'])
+    expect(batch.textTags?.map(tag => tag.id)).toEqual(['aarc-text-tag-3', 'aarc-text-tag-4'])
+    expect((batch.aarc?.raw?.textTags as Array<{ id: number }>).map(tag => tag.id)).toEqual([3, 4])
+  })
   it('does not modify locked AARC fake lines or their source artwork', () => {
     const source = createEmptyProject()
     source.aarc = { format: 'aarc', raw: { lines: [{ id: 7, isFake: true, type: 0, pts: [1, 2] }] } }

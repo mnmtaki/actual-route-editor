@@ -35,6 +35,36 @@ describe('mouse map marquee', () => {
     const hits = hitMapObjects(project, { left: 40, right: 60, top: -5, bottom: 5 })
     expect(hits.some(item => item.type === 'line' && item.id === 'aarc-line-7')).toBe(true)
   })
+  it('selects AARC free/terrain/icon tags without requiring a native line owner', () => {
+    const project = createEmptyProject()
+    project.textTags = [
+      { id: 'free', kind: 'FreeMapText', x: 40, y: 40, text: '广场' },
+      { id: 'terrain', kind: 'TerrainNameLabel', x: 70, y: 40, text: '江流', source: { format: 'aarc', forId: 9, targetKind: 'terrain' } },
+      { id: 'icon', kind: 'MapIcon', x: 90, y: 40, iconId: 'icon-1' },
+    ]
+    const hits = hitMapObjects(project, { left: 30, right: 100, top: 20, bottom: 60 })
+    expect(hits.filter(item => item.type === 'aarcTextTag').map(item => item.id)).toEqual(['free', 'terrain', 'icon'])
+  })
+  it('selects an AARC tag by rendered bounds even when its anchor is outside the rectangle', () => {
+    const project = createEmptyProject()
+    project.textTags = [{ id: 'long-label', kind: 'FreeMapText', x: 200, y: 200, text: '很长的文字' }]
+    const rect = { left: 80, top: 150, right: 100, bottom: 170 }
+    expect(hitMapObjects(project, rect)).toHaveLength(0)
+    const bounds = new Map([['long-label', { left: 70, top: 155, right: 220, bottom: 185 }]])
+    expect(hitMapObjects(project, rect, bounds)).toContainEqual({ type: 'aarcTextTag', id: 'long-label' })
+  })
+  it('resolves AARC fake-line tag owners from source references without losing independent tags', () => {
+    const source = createEmptyProject()
+    source.aarc = { format: 'aarc', raw: { lines: [{ id: 7, name: '伪线', type: 0, isFake: true, pts: [1, 2] }], points: [{ id: 1, pos: [0, 0] }, { id: 2, pos: [100, 0] }] } }
+    const project = materializeAarcFakeLineEntries(source)
+    project.textTags = [
+      { id: 'fake-name', kind: 'FreeMapText', x: 30, y: 20, source: { format: 'aarc', forId: 7 } },
+      { id: 'free-name', kind: 'FreeMapText', x: 40, y: 20 },
+    ]
+    const hits = hitMapObjects(project, { left: 20, top: 10, right: 50, bottom: 30 })
+    expect(hits).toContainEqual({ type: 'lineLabel', id: 'fake-name', lineId: 'aarc-line-7', source: 'aarc' })
+    expect(hits).toContainEqual({ type: 'aarcTextTag', id: 'free-name' })
+  })
   it('supports mouse-only append mode while keeping previous selections', () => {
     const a = { type: 'station' as const, id: 'a' }, b = { type: 'road' as const, id: 'b' }
     expect(mergeMapSelections([a], [a, b], true)).toEqual([a, b])

@@ -2,6 +2,7 @@ import type { ActualRouteProject, Selection } from '../data/model'
 import { getSegmentCurveSamples } from '../geometry/path'
 import { getStructureNodePoint } from '../data/structure'
 import { getLineLegendLayout } from '../data/lineLegend'
+import { ownerLineForAarcTag } from './aarcTextTagLifecycle'
 
 export type MapItemSelection = Exclude<Selection, null>
 export type MapRect = { left: number; top: number; right: number; bottom: number }
@@ -28,7 +29,7 @@ const polylineTouches = (points: Point[], rect: MapRect) => points.some((point, 
 const visibleLine = (project: ActualRouteProject, lineId: string) => project.lines.find(line => line.id === lineId)?.visible !== false
 export const selectionIdentity = (item: MapItemSelection): string => item.type + ':' + (item.type === 'background' ? 'background' : 'id' in item ? item.id : '') + (item.type === 'lineLabel' ? ':' + item.source : '')
 
-export function hitMapObjects(project: ActualRouteProject, rect: MapRect): MapItemSelection[] {
+export function hitMapObjects(project: ActualRouteProject, rect: MapRect, textTagBounds?: ReadonlyMap<string, MapRect>): MapItemSelection[] {
   const hits: MapItemSelection[] = []
   const push = (item: MapItemSelection) => hits.push(item)
   for (const station of project.stations) {
@@ -68,7 +69,14 @@ export function hitMapObjects(project: ActualRouteProject, rect: MapRect): MapIt
   for (const line of project.lines) if (line.visible) for (const badge of line.lineBadges ?? []) {
     if (badge.visible && intersects(rect, { left: badge.x - badge.size / 2, right: badge.x + badge.size / 2, top: badge.y - badge.size / 2, bottom: badge.y + badge.size / 2 })) push({ type: 'lineLabel', id: badge.id, lineId: line.id, source: 'native' })
   }
-  for (const tag of project.textTags ?? []) if (tag.lineId && visibleLine(project, tag.lineId) && inside(tag, rect)) push({ type: 'lineLabel', id: tag.id, lineId: tag.lineId, source: 'aarc' })
+  for (const tag of project.textTags ?? []) {
+    const ownerLineId = ownerLineForAarcTag(project, tag)
+    if (ownerLineId && !visibleLine(project, ownerLineId)) continue
+    const visualBounds = textTagBounds?.get(tag.id)
+    if (!(visualBounds ? intersects(visualBounds, rect) : inside(tag, rect))) continue
+    if (ownerLineId) push({ type: 'lineLabel', id: tag.id, lineId: ownerLineId, source: 'aarc' })
+    else push({ type: 'aarcTextTag', id: tag.id })
+  }
   for (const element of project.mapElements ?? []) if (element.visible && inside(element, rect)) push({ type: 'mapElement', id: element.id })
   for (const road of project.roads ?? []) if (road.visible && polylineTouches(road.points, rect)) {
     push({ type: 'road', id: road.id })
@@ -93,4 +101,41 @@ export function mergeMapSelections(previous: readonly MapItemSelection[], hits: 
   const result = new Map(previous.map(item => [selectionIdentity(item), item]))
   for (const item of hits) result.set(selectionIdentity(item), item)
   return [...result.values()]
+}
+
+/**
+ * Measure actual SVG artwork instead of testing only a tag's anchor point.
+ * Called once at the beginning of a mouse selection gesture, never per frame.
+ * On unsupported SVG engines hitMapObjects safely falls back to anchor testing.
+ */
+export function measureAarcTextTagBounds(svg: SVGSVGElement): ReadonlyMap<string, MapRect> {
+  const result = new Map<string, MapRect>()
+  try {
+    const root = svg.getScreenCTM()
+    if (!root) return result
+    const inverse = root.inverse()
+    for (const element of svg.querySelectorAll<SVGGraphicsElement>('[data-aarc-text-tag-layer] [data-aarc-text-tag-id]')) {
+      if (typeof element.getBBox !== 'function' || typeof element.getScreenCTM !== 'function') continue
+      const screen = element.getScreenCTM()
+      if (!screen) continue
+      const box = element.getBBox()
+      if (!Number.isFinite(box.x + box.y + box.width + box.height) || (box.width === 0 && box.height === 0)) continue
+      const matrix = inverse.multiply(screen)
+      const corners = [
+        [box.x, box.y], [box.x + box.width, box.y],
+        [box.x, box.y + box.height], [box.x + box.width, box.y + box.height],
+      ].map(([x, y]) => ({ x: matrix.a * x + matrix.c * y + matrix.e, y: matrix.b * x + matrix.d * y + matrix.f }))
+      const id = element.getAttribute('data-aarc-text-tag-id')
+      if (!id) continue
+      result.set(id, {
+        left: Math.min(...corners.map(point => point.x)),
+        top: Math.min(...corners.map(point => point.y)),
+        right: Math.max(...corners.map(point => point.x)),
+        bottom: Math.max(...corners.map(point => point.y)),
+      })
+    }
+  } catch {
+    // SVG bounds APIs may be unavailable in non-browser test environments.
+  }
+  return result
 }

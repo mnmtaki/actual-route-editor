@@ -42,6 +42,21 @@ describe('map batch movement and deletion', () => {
     expect(result.project.lines.some(line => line.id === segment.lineId)).toBe(true)
     for (const other of before.slice(1)) expect(result.project.geometry.segments.some(item => item.id === other.id)).toBe(true)
   })
+  it('moves and deletes AARC free tags and keeps retained raw coordinates synchronized', () => {
+    const project = structuredClone(demoProject)
+    project.textTags = [
+      { id: 'aarc-text-tag-9', kind: 'FreeMapText', x: 10, y: 20, text: '备注', source: { format: 'aarc', textTagId: 9, raw: { id: 9, pos: [10, 20] } }, raw: { id: 9, pos: [10, 20] } },
+    ]
+    project.aarc = { format: 'aarc', raw: { textTags: [{ id: 9, pos: [10, 20] }] } }
+    const selected = [{ type: 'aarcTextTag' as const, id: 'aarc-text-tag-9' }]
+    const moved = moveSelectedMapObjects(project, selected, 15, -5)
+    expect(moved.project.textTags?.[0]).toMatchObject({ x: 25, y: 15 })
+    expect((moved.project.aarc?.raw?.textTags as Array<{ pos: number[] }>)[0].pos).toEqual([25, 15])
+    expect((project.aarc?.raw?.textTags as Array<{ pos: number[] }>)[0].pos).toEqual([10, 20])
+    const deleted = deleteSelectedMapObjects(moved.project, selected)
+    expect(deleted.project.textTags).toHaveLength(0)
+    expect(deleted.project.aarc?.raw?.textTags).toEqual([])
+  })
   it('deletes mixed non-network objects in one operation while leaving the original snapshot unchanged', () => {
     const project = structuredClone(demoProject)
     project.mapElements = [{ id: 'text-1', type: 'text', x: 1, y: 2, text: 'Hi', fontSize: 12, fontWeight: 'normal', textAlign: 'start', rotation: 0, visible: true }]

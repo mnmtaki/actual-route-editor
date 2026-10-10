@@ -8,6 +8,7 @@ import { labelOffsetFor } from './style'
 import { isLineLocked, isSegmentGeometryLocked, isStationGeometryLocked } from './lineLock'
 import { getEffectiveLineColor } from './lineIdentity'
 import { clearDeletedLineParentReferences } from './lineParentHistory'
+import { ownerLineForAarcTag, removeAarcTextTags } from './aarcTextTagLifecycle'
 
 export interface Point { x: number; y: number }
 
@@ -239,6 +240,15 @@ export function deleteLineAndOrphans(project: ActualRouteProject, lineId: string
     }
     if (next.aarc.fakeLines) next.aarc.fakeLines = next.aarc.fakeLines.filter(sourceLineSurvives)
   }
+  // Delete AARC name tags bound to every removed line (including child/fake lines).
+  // Free text, icons and terrain labels do not belong to the deleted Line.
+  const attachedTextTags = new Set((next.textTags ?? [])
+    .filter(tag => {
+      const ownerId = ownerLineForAarcTag(next, tag)
+      return ownerId !== undefined && deletedIds.has(ownerId)
+    })
+    .map(tag => tag.id))
+  removeAarcTextTags(next, attachedTextTags)
   next.lines = next.lines.filter(line => !deletedIds.has(line.id))
   clearDeletedLineParentReferences(next, deletedIds)
   next.stationLineRelations = next.stationLineRelations.filter(relation => !deletedIds.has(relation.lineId))

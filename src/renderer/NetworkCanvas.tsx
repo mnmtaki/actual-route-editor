@@ -13,7 +13,7 @@ import { AarcPointLinksLayer } from './AarcPointLinks'
 import { LineLegendLayer } from './LineLegend'
 import { LineBadgesLayer } from './LineBadges'
 import { VectorBasemapLayer } from './VectorBasemap'
-import { AarcFakeLinesLayer } from './AarcFakeLines'
+import { AarcFakeLinesLayer, buildAarcFakeLinePath, getAarcFakeLineBySourceId } from './AarcFakeLines'
 import type { DrawingMode, LineDraftPoint } from '../data/basemapPaths'
 import { effectiveLineWidth, effectiveStationStyle, snapLabelOffset } from '../data/style'
 import { isSegmentGeometryLocked, isStationGeometryLocked, lockedStationMessage } from '../data/lineLock'
@@ -935,6 +935,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     {drawing?.kind === 'basemap' && !(shown.basemapPaths?.find(path => path.id === drawing.pathId)?.points.length) && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置第一个地形节点</text></g>}
     {mapSelectMode && !drawing && !calibration && <g data-layer="map-multiselect" data-editor="true">
       {project.geometry.segments.filter(segment => displayedMapKeys.has('segment:' + segment.id) || displayedMapKeys.has('line:' + segment.lineId)).map(segment => <path key={'selected-segment-'+segment.id} d={getSegmentPath(project,segment)} fill="none" stroke="#ca9b2e" strokeOpacity=".5" strokeWidth={(project.lines.find(line=>line.id===segment.lineId)?.lineWidth ?? project.settings.lineWidth) + 10} pointerEvents="none"/>)}
+      {project.lines.filter(line => line.isFake && displayedMapKeys.has('line:'+line.id) && line.source?.format === 'aarc').map(line => {
+        const sourceId = Number(line.source?.sourceLineId ?? line.source?.lineId)
+        const raw = getAarcFakeLineBySourceId(project, sourceId)
+        return raw ? <path key={'selected-fake-'+line.id} d={buildAarcFakeLinePath(project,raw)} fill="none" stroke="#ca9b2e" strokeOpacity=".55" strokeWidth={12} pointerEvents="none"/> : null
+      })}
       {project.stations.map(station => mapSelectionMarker(station.x, station.y, 'station:'+station.id))}
       {project.geometry.segments.flatMap(segment => [
         ...segment.waypoints.map(point => mapSelectionMarker(point.x,point.y,'waypoint:'+point.id)),

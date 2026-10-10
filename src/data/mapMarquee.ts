@@ -38,8 +38,8 @@ export function hitMapObjects(project: ActualRouteProject, rect: MapRect): MapIt
     if (!visibleLine(project, segment.lineId)) continue
     const points = getSegmentCurveSamples(project, segment, 16)
     if (polylineTouches(points, rect)) {
+      // A box crossing one segment must not implicitly select and delete the whole line.
       push({ type: 'segment', id: segment.id })
-      push({ type: 'line', id: segment.lineId })
     }
     for (const waypoint of segment.waypoints) if (inside(waypoint, rect)) push({ type: 'waypoint', id: waypoint.id, segmentId: segment.id })
     for (const node of segment.structureNodes ?? []) {

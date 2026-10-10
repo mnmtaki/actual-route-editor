@@ -8,10 +8,13 @@ const names: Record<MapItemSelection['type'], string> = {
   lineLegend: '线路图例', background: '底图图片',
 }
 
-export function MapMultiInspector({ project, selections, onClear, onChoose }: {
+export function MapMultiInspector({ project, selections, onClear, onChoose, onMove, moving = false, onDelete }: {
   project: ActualRouteProject
   selections: MapItemSelection[]
   onClear: () => void
+  onMove: () => void
+  moving?: boolean
+  onDelete: () => void
   onChoose: (selection: MapItemSelection) => void
 }) {
   const counts = new Map<string, number>()
@@ -27,9 +30,9 @@ export function MapMultiInspector({ project, selections, onClear, onChoose }: {
   return <aside className="right-panel panel map-multi-inspector" data-testid="map-multi-inspector">
     <div className="panel-heading"><div><h2>地图多选</h2><span className="panel-subtitle">已选择 {selections.length} 个对象</span></div></div>
     <div className="inspector-body">
-      <p className="meta-note">框选模式下可用鼠标拖选。点击“追加”可将新框选结果加入当前选择。选择不同类型的对象时，不自动执行混合批量删除。</p>
+      <p className="meta-note">框选后点击“移动所选”，再在地图上拖动即可整体移动。删除会在确认后一次执行，可撤销。</p>
       <div className="map-selection-summary">{[...counts].map(([name, count]) => <span key={name}>{name} {count}</span>)}</div>
-      <button type="button" onClick={onClear}>清空选择</button>
+      <div className="map-selection-actions"><button type="button" aria-pressed={moving} onClick={onMove}>{moving ? '完成移动' : '移动所选'}</button><button type="button" className="danger" onClick={onDelete}>删除所选</button><button type="button" onClick={onClear}>清空选择</button></div>
       <div className="map-selection-items">{selections.slice(0, 100).map((item, index) => <button type="button" key={item.type + ':' + (item.type === 'background' ? 'background' : item.id) + ':' + index} onClick={() => onChoose(item)}>{names[item.type]}：{label(item)}</button>)}</div>
       {selections.length > 100 && <p className="meta-note">其余 {selections.length - 100} 个对象已选中，但未在列表展开。</p>}
     </div>

@@ -5,6 +5,7 @@ import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPla
 import { projectPointToSvgPath, screenPointToWorld } from '../geometry/screenPoint'
 import { snapEditorPoint, type SnapGuide, type SnapNode, type SnapRaySource } from '../geometry/alignmentSnap'
 import { getStationHandleStyle } from './stationHandle'
+import { hitMapObjects, mergeMapSelections, selectionIdentity, type MapItemSelection } from '../data/mapMarquee'
 import { getSegmentStyleIntervalAtProgress, getStructureNodePoint } from '../data/structure'
 import { MapElementsLayer } from './MapElements'
 import { AarcTextTagsLayer } from './AarcTextTags'
@@ -31,6 +32,7 @@ type Point = { x: number; y: number }
 type Gesture =
   | { kind: 'idle' }
   | { kind: 'panningCanvas'; pointerId: number; lastClient: Point }
+  | { kind: 'selectingMap'; pointerId: number; start: Point; current: Point; moved: boolean }
   | { kind: 'calibrationTap'; pointerId: number; startClient: Point; lastClient: Point; moved: boolean }
   | { kind: 'pinchingCanvas'; pointerIds: [number, number]; initialDistance: number; startView: View; startWorld: Point }
   | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineLabel' | 'draggingMapElement' | 'draggingLineLegend' | 'draggingBackground' | 'draggingBasemapPoint' | 'draggingBasemapPath' | 'draggingRoadPoint'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; ownerRoadId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
@@ -52,10 +54,11 @@ function dedupeSnapSources(items: SnapRaySource[]) {
   })
 }
 
-export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, snapOptions = { node: false, neighbor: false, grid: false }, view, setView }: {
+export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, mapSelectMode = false, mapSelectAppend = false, mapSelections = [], onMapSelectionChange, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, snapOptions = { node: false, neighbor: false, grid: false }, view, setView }: {
   project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; roadDraft?: Road | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
   calibration?: { points: Point[] } | null; onCalibrationPoint?: (point: Point) => void
   selectedStationIds?: string[]; onToggleStationSelection?: (stationId: string) => void
+  mapSelectMode?: boolean; mapSelectAppend?: boolean; mapSelections?: MapItemSelection[]; onMapSelectionChange?: (items: MapItemSelection[]) => void
   onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void; onFinishDrawing?: () => void
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void; onEditBlocked?: (message: string) => void
   snapOptions?: { node: boolean; neighbor: boolean; grid: boolean }
@@ -80,6 +83,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const lineCanvasPointer = useRef<DrawingCanvasPointer | null>(null)
   const basemapCanvasPointer = useRef<DrawingCanvasPointer | null>(null)
   const [preview, setPreview] = useState<ActualRouteProject | null>(null)
+  const [marqueePreview, setMarqueePreview] = useState<{ start: Point; current: Point; hits: MapItemSelection[] } | null>(null)
   const [dragAffectedLineIds, setDragAffectedLineIds] = useState<Set<string>>(() => new Set())
   const [dragStationOverlay, setDragStationOverlay] = useState<DragStationOverlay>(() => ({ stationIds: new Set(), markers: false, labels: false }))
   const [dragLineLabelOverlay, setDragLineLabelOverlay] = useState<DragLineLabelOverlay>(() => ({ labelIds: new Set(), source: null }))
@@ -362,6 +366,13 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
 
   const handleCanvasPointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    if (mapSelectMode && !drawing && !calibration && event.button === 0 && event.pointerType === 'mouse') {
+      capture(event)
+      const start = pointerToWorld(event.clientX, event.clientY)
+      gesture.current = { kind: 'selectingMap', pointerId: event.pointerId, start, current: start, moved: false }
+      setMarqueePreview({ start, current: start, hits: [] })
+      return
+    }
     if (pointers.current.size >= 2) { capture(event); beginPinch(); return }
     if (calibration) { capture(event); gesture.current = { kind: 'calibrationTap', pointerId: event.pointerId, startClient: { x: event.clientX, y: event.clientY }, lastClient: { x: event.clientX, y: event.clientY }, moved: false }; return }
     const target = event.target as Element
@@ -440,6 +451,15 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       return
     }
     const current = gesture.current
+    if (current.kind === 'selectingMap') {
+      if (current.pointerId !== event.pointerId) return
+      const point = pointerToWorld(event.clientX, event.clientY)
+      current.current = point
+      current.moved ||= Math.hypot(event.clientX - pointers.current.get(event.pointerId)!.x, event.clientY - pointers.current.get(event.pointerId)!.y) > 4
+      const rect = { left: Math.min(current.start.x, point.x), top: Math.min(current.start.y, point.y), right: Math.max(current.start.x, point.x), bottom: Math.max(current.start.y, point.y) }
+      setMarqueePreview({ start: current.start, current: point, hits: hitMapObjects(project, rect) })
+      return
+    }
     if (current.kind === 'pinchingCanvas') {
       const first = pointers.current.get(current.pointerIds[0]), second = pointers.current.get(current.pointerIds[1])
       if (!first || !second) return
@@ -545,6 +565,18 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       return
     }
     const current = gesture.current
+    if (current.kind === 'selectingMap' && current.pointerId === event.pointerId) {
+      if (event.type === 'pointerup') {
+        const point = pointerToWorld(event.clientX, event.clientY)
+        const radius = current.moved ? 0 : Math.max(liveViewRef.current.width / Math.max(1, svgRef.current?.clientWidth ?? 920) * 8, 2)
+        const rect = { left: Math.min(current.start.x, point.x) - radius, top: Math.min(current.start.y, point.y) - radius, right: Math.max(current.start.x, point.x) + radius, bottom: Math.max(current.start.y, point.y) + radius }
+        const hits = hitMapObjects(project, rect)
+        onMapSelectionChange?.(mergeMapSelections(mapSelections, hits, mapSelectAppend))
+      }
+      setMarqueePreview(null)
+      gesture.current = { kind: 'idle' }
+      return
+    }
     if (current.kind === 'pinchingCanvas') {
       if (pointers.current.size < 2) { gesture.current = { kind: 'idle' }; setDragAffectedLineIds(new Set()); setDragStationOverlay({ stationIds: new Set(), markers: false, labels: false }); setDragLineLabelOverlay({ labelIds: new Set(), source: null }); setDragMapElementOverlay({ elementIds: new Set() }); setDragVectorBasemapOverlay({ kind: null, objectIds: new Set() }); commitLiveView() }
       return
@@ -725,7 +757,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     </g>
   })()
 
-  return <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''}`} tabIndex={0} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
+  const displayedMapSelections = marqueePreview ? mergeMapSelections(mapSelections, marqueePreview.hits, mapSelectAppend) : mapSelections
+  const displayedMapKeys = new Set(displayedMapSelections.map(selectionIdentity))
+  const mapSelectionMarker = (x: number, y: number, key: string) => displayedMapKeys.has(key) ? <circle key={key} cx={x} cy={y} r={9} fill="none" stroke="#bd8b19" strokeWidth={2} vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null
+
+  return <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''} ${mapSelectMode ? 'is-map-selecting' : ''}`} tabIndex={0} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
     onPointerDown={handleCanvasPointerDown} onPointerMove={handlePointerMove} onPointerUp={endGesture} onPointerCancel={endGesture} onContextMenu={event=>event.preventDefault()}
     onDoubleClick={event => { if (drawing && drawing.kind !== 'line') { event.preventDefault(); drawingClick.current = null; if (pointerDoubleFinish.current) { pointerDoubleFinish.current = false; return } onFinishDrawing?.() } }}
     onWheel={event => {
@@ -897,6 +933,23 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     <g data-layer="station-actions" data-editor="true">{selection?.type === 'station' && !drawing && (() => { const station = shown.stations.find(item => item.id === selection.id); if (!station) return null; const handle = getStationHandleStyle(shown, station.id, shown.timeline.currentDate); return <g className="station-extend" transform={`translate(${handle.x} ${handle.y})`} onPointerDown={event => { event.stopPropagation(); onExtend(station.id) }}><circle className="station-extend-hit" r={Math.max(stationHitRadius, 18)} fill="transparent" pointerEvents="all" /><circle className="station-extend-button" r="8.5" fill="white" stroke={handle.color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" pointerEvents="none" /><path className="station-extend-plus" d="M -3.2 0 H 3.2 M 0 -3.2 V 3.2" stroke={handle.color} strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" pointerEvents="none" /></g> })()}</g>
     {drawing?.kind === 'line' && !lineDraft?.anchorStationId && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置起点站</text></g>}
     {drawing?.kind === 'basemap' && !(shown.basemapPaths?.find(path => path.id === drawing.pathId)?.points.length) && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置第一个地形节点</text></g>}
+    {mapSelectMode && !drawing && !calibration && <g data-layer="map-multiselect" data-editor="true">
+      {project.geometry.segments.filter(segment => displayedMapKeys.has('segment:' + segment.id) || displayedMapKeys.has('line:' + segment.lineId)).map(segment => <path key={'selected-segment-'+segment.id} d={getSegmentPath(project,segment)} fill="none" stroke="#ca9b2e" strokeOpacity=".5" strokeWidth={(project.lines.find(line=>line.id===segment.lineId)?.lineWidth ?? project.settings.lineWidth) + 10} pointerEvents="none"/>)}
+      {project.stations.map(station => mapSelectionMarker(station.x, station.y, 'station:'+station.id))}
+      {project.geometry.segments.flatMap(segment => [
+        ...segment.waypoints.map(point => mapSelectionMarker(point.x,point.y,'waypoint:'+point.id)),
+        ...(segment.structureNodes ?? []).map(node => { const point = getStructureNodePoint(project, segment, node); return point ? mapSelectionMarker(point.x,point.y,'structureNode:'+node.id) : null })
+      ])}
+      {project.lines.flatMap(line => (line.lineBadges ?? []).map(badge => mapSelectionMarker(badge.x,badge.y,'lineLabel:'+badge.id+':native')))}
+      {(project.textTags ?? []).map(tag => mapSelectionMarker(tag.x,tag.y,'lineLabel:'+tag.id+':aarc'))}
+      {(project.mapElements ?? []).map(element => mapSelectionMarker(element.x,element.y,'mapElement:'+element.id))}
+      {(project.roads ?? []).filter(road => displayedMapKeys.has('road:'+road.id)).map(road => <polyline key={road.id} points={road.points.map(point => point.x+','+point.y).join(' ')} fill="none" stroke="#ca9b2e" strokeWidth={8} strokeOpacity=".55" pointerEvents="none"/>)}
+      {(project.basemapPaths ?? []).filter(path => displayedMapKeys.has('basemapPath:'+path.id)).map(path => <polyline key={path.id} points={path.points.map(point => point.x+','+point.y).join(' ')} fill="none" stroke="#ca9b2e" strokeWidth={8} strokeOpacity=".55" pointerEvents="none"/>)}
+      {(project.roads ?? []).flatMap(road => road.points.map(point => mapSelectionMarker(point.x,point.y,'roadPoint:'+point.id)))}
+      {project.lineLegend && displayedMapKeys.has('lineLegend:'+project.lineLegend.id) && <circle cx={project.lineLegend.x} cy={project.lineLegend.y} r="14" stroke="#bd8b19" strokeWidth="3" fill="none" pointerEvents="none"/>}
+      {marqueePreview && <rect data-testid="map-marquee-rectangle" x={Math.min(marqueePreview.start.x,marqueePreview.current.x)} y={Math.min(marqueePreview.start.y,marqueePreview.current.y)} width={Math.abs(marqueePreview.start.x-marqueePreview.current.x)} height={Math.abs(marqueePreview.start.y-marqueePreview.current.y)} fill="#d6ad4333" stroke="#bc8e28" strokeWidth={1.5} vectorEffect="non-scaling-stroke" pointerEvents="none"/>}
+      <rect data-testid="map-marquee-hit-area" x={view.x-view.width} y={view.y-view.height} width={view.width*3} height={view.height*3} fill="transparent" pointerEvents="all" />
+    </g>}
     {calibration && <g data-editor="true" data-layer="calibration-overlay"><rect x={view.x - view.width} y={view.y - view.height} width={view.width * 3} height={view.height * 3} fill="transparent" pointerEvents="all" onPointerDown={event => handleCanvasPointerDown(event as unknown as React.PointerEvent<SVGSVGElement>)} /><line x1={calibration.points[0]?.x ?? 0} y1={calibration.points[0]?.y ?? 0} x2={calibration.points[1]?.x ?? calibration.points[0]?.x ?? 0} y2={calibration.points[1]?.y ?? calibration.points[0]?.y ?? 0} stroke="#c89521" strokeWidth="2" strokeDasharray="8 5" pointerEvents="none" />{calibration.points.map((point,index)=><circle key={index} cx={point.x} cy={point.y} r="8" fill="#fff9e8" stroke="#c89521" strokeWidth="2" pointerEvents="none" />)}<text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#765c1a" fontSize="16" pointerEvents="none">{calibration.points.length ? '再点一下选择第二个点' : '点击地图上的第一个点'}</text></g>}
     </g>
   </svg>

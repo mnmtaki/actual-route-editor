@@ -963,24 +963,24 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     {drawing?.kind === 'line' && !lineDraft?.anchorStationId && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置起点站</text></g>}
     {drawing?.kind === 'basemap' && !(shown.basemapPaths?.find(path => path.id === drawing.pathId)?.points.length) && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置第一个地形节点</text></g>}
     {mapSelectMode && !drawing && !calibration && <g data-layer="map-multiselect" data-editor="true">
-      {project.geometry.segments.filter(segment => displayedMapKeys.has('segment:' + segment.id) || displayedMapKeys.has('line:' + segment.lineId)).map(segment => <path key={'selected-segment-'+segment.id} d={getSegmentPath(project,segment)} fill="none" stroke="#ca9b2e" strokeOpacity=".5" strokeWidth={(project.lines.find(line=>line.id===segment.lineId)?.lineWidth ?? project.settings.lineWidth) + 10} pointerEvents="none"/>)}
-      {project.lines.filter(line => line.isFake && displayedMapKeys.has('line:'+line.id) && line.source?.format === 'aarc').map(line => {
+      {mapRenderProject.geometry.segments.filter(segment => displayedMapKeys.has('segment:' + segment.id) || displayedMapKeys.has('line:' + segment.lineId)).map(segment => <path key={'selected-segment-'+segment.id} d={getSegmentPath(mapRenderProject,segment)} fill="none" stroke="#ca9b2e" strokeOpacity=".5" strokeWidth={(mapRenderProject.lines.find(line=>line.id===segment.lineId)?.lineWidth ?? mapRenderProject.settings.lineWidth) + 10} pointerEvents="none"/>)}
+      {mapRenderProject.lines.filter(line => line.isFake && displayedMapKeys.has('line:'+line.id) && line.source?.format === 'aarc').map(line => {
         const sourceId = Number(line.source?.sourceLineId ?? line.source?.lineId)
-        const raw = getAarcFakeLineBySourceId(project, sourceId)
-        return raw ? <path key={'selected-fake-'+line.id} d={buildAarcFakeLinePath(project,raw)} fill="none" stroke="#ca9b2e" strokeOpacity=".55" strokeWidth={12} pointerEvents="none"/> : null
+        const raw = getAarcFakeLineBySourceId(mapRenderProject, sourceId)
+        return raw ? <path key={'selected-fake-'+line.id} d={buildAarcFakeLinePath(mapRenderProject,raw)} fill="none" stroke="#ca9b2e" strokeOpacity=".55" strokeWidth={12} pointerEvents="none"/> : null
       })}
-      {project.stations.map(station => mapSelectionMarker(station.x, station.y, 'station:'+station.id))}
-      {project.geometry.segments.flatMap(segment => [
+      {mapRenderProject.stations.map(station => mapSelectionMarker(station.x, station.y, 'station:'+station.id))}
+      {mapRenderProject.geometry.segments.flatMap(segment => [
         ...segment.waypoints.map(point => mapSelectionMarker(point.x,point.y,'waypoint:'+point.id)),
-        ...(segment.structureNodes ?? []).map(node => { const point = getStructureNodePoint(project, segment, node); return point ? mapSelectionMarker(point.x,point.y,'structureNode:'+node.id) : null })
+        ...(segment.structureNodes ?? []).map(node => { const point = getStructureNodePoint(mapRenderProject, segment, node); return point ? mapSelectionMarker(point.x,point.y,'structureNode:'+node.id) : null })
       ])}
-      {project.lines.flatMap(line => (line.lineBadges ?? []).map(badge => mapSelectionMarker(badge.x,badge.y,'lineLabel:'+badge.id+':native')))}
-      {(project.textTags ?? []).map(tag => mapSelectionMarker(tag.x,tag.y,'lineLabel:'+tag.id+':aarc'))}
-      {(project.mapElements ?? []).map(element => mapSelectionMarker(element.x,element.y,'mapElement:'+element.id))}
-      {(project.roads ?? []).filter(road => displayedMapKeys.has('road:'+road.id)).map(road => <polyline key={road.id} points={road.points.map(point => point.x+','+point.y).join(' ')} fill="none" stroke="#ca9b2e" strokeWidth={8} strokeOpacity=".55" pointerEvents="none"/>)}
-      {(project.basemapPaths ?? []).filter(path => displayedMapKeys.has('basemapPath:'+path.id)).map(path => <polyline key={path.id} points={path.points.map(point => point.x+','+point.y).join(' ')} fill="none" stroke="#ca9b2e" strokeWidth={8} strokeOpacity=".55" pointerEvents="none"/>)}
-      {(project.roads ?? []).flatMap(road => road.points.map(point => mapSelectionMarker(point.x,point.y,'roadPoint:'+point.id)))}
-      {project.lineLegend && displayedMapKeys.has('lineLegend:'+project.lineLegend.id) && <circle cx={project.lineLegend.x} cy={project.lineLegend.y} r="14" stroke="#bd8b19" strokeWidth="3" fill="none" pointerEvents="none"/>}
+      {mapRenderProject.lines.flatMap(line => (line.lineBadges ?? []).map(badge => mapSelectionMarker(badge.x,badge.y,'lineLabel:'+badge.id+':native')))}
+      {(mapRenderProject.textTags ?? []).map(tag => mapSelectionMarker(tag.x,tag.y,'lineLabel:'+tag.id+':aarc'))}
+      {(mapRenderProject.mapElements ?? []).map(element => mapSelectionMarker(element.x,element.y,'mapElement:'+element.id))}
+      {(mapRenderProject.roads ?? []).filter(road => displayedMapKeys.has('road:'+road.id)).map(road => <polyline key={road.id} points={road.points.map(point => point.x+','+point.y).join(' ')} fill="none" stroke="#ca9b2e" strokeWidth={8} strokeOpacity=".55" pointerEvents="none"/>)}
+      {(mapRenderProject.basemapPaths ?? []).filter(path => displayedMapKeys.has('basemapPath:'+path.id)).map(path => <polyline key={path.id} points={path.points.map(point => point.x+','+point.y).join(' ')} fill="none" stroke="#ca9b2e" strokeWidth={8} strokeOpacity=".55" pointerEvents="none"/>)}
+      {(mapRenderProject.roads ?? []).flatMap(road => road.points.map(point => mapSelectionMarker(point.x,point.y,'roadPoint:'+point.id)))}
+      {mapRenderProject.lineLegend && displayedMapKeys.has('lineLegend:'+mapRenderProject.lineLegend.id) && <circle cx={mapRenderProject.lineLegend.x} cy={mapRenderProject.lineLegend.y} r="14" stroke="#bd8b19" strokeWidth="3" fill="none" pointerEvents="none"/>}
       {marqueePreview && <rect data-testid="map-marquee-rectangle" x={Math.min(marqueePreview.start.x,marqueePreview.current.x)} y={Math.min(marqueePreview.start.y,marqueePreview.current.y)} width={Math.abs(marqueePreview.start.x-marqueePreview.current.x)} height={Math.abs(marqueePreview.start.y-marqueePreview.current.y)} fill="#d6ad4333" stroke="#bc8e28" strokeWidth={1.5} vectorEffect="non-scaling-stroke" pointerEvents="none"/>}
       <rect data-testid="map-marquee-hit-area" x={view.x-view.width} y={view.y-view.height} width={view.width*3} height={view.height*3} fill="transparent" pointerEvents="all" />
     </g>}

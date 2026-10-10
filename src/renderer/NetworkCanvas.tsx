@@ -281,7 +281,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     const startView = liveViewRef.current
     gesture.current = { kind: 'pinchingCanvas', pointerIds: [firstId, secondId], initialDistance, startView, startWorld: screenPointToWorld(svgRef.current!, center.x, center.y, startView) }
   }, [cancelScheduledPreview])
-  const startObjectDrag = useCallback((kind: Extract<Gesture, { before: ActualRouteProject }>['kind'], event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string, ownerPathId?: string, ownerRoadId?: string) => {
+  const startObjectDrag = useCallback((kind: Exclude<Extract<Gesture, { before: ActualRouteProject }>['kind'], 'movingMapSelection'>, event: React.PointerEvent, origin: Point, id?: string, segmentId?: string, ownerLineId?: string, ownerPathId?: string, ownerRoadId?: string) => {
     event.stopPropagation(); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); capture(event)
     if (pointers.current.size >= 2) { beginPinch(); return false }
     const target = { kind, id, segmentId, ownerLineId, ownerPathId, ownerRoadId }

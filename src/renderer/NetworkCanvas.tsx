@@ -33,6 +33,7 @@ type Point = { x: number; y: number }
 type Gesture =
   | { kind: 'idle' }
   | { kind: 'panningCanvas'; pointerId: number; lastClient: Point }
+  | { kind: 'mobileTouchPending'; pointerId: number; startClient: Point; lastClient: Point; moved: boolean; onTap: () => void }
   | { kind: 'selectingMap'; pointerId: number; start: Point; current: Point; moved: boolean; textTagBounds: ReadonlyMap<string, MapRect> }
   | { kind: 'movingMapSelection'; pointerId: number; start: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
   | { kind: 'calibrationTap'; pointerId: number; startClient: Point; lastClient: Point; moved: boolean }
@@ -264,6 +265,19 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
 
   const pointerToWorld = useCallback((clientX: number, clientY: number): Point => screenPointToWorld(svgRef.current!, clientX, clientY, liveViewRef.current), [])
   const capture = useCallback((event: React.PointerEvent) => event.currentTarget.setPointerCapture?.(event.pointerId), [])
+  // Mobile touch only. A first touch selects the object on release; a swipe pans
+  // the map instead of accidentally editing the map's densely packed objects.
+  // Mouse and pen handling remain unchanged.
+  const isMobileTouch = (event: React.PointerEvent) =>
+    event.pointerType === 'touch' && window.matchMedia?.('(max-width: 699px)').matches
+  const startMobileTouchTap = (event: React.PointerEvent, onTap: () => void) => {
+    event.stopPropagation()
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    capture(event)
+    if (pointers.current.size >= 2) { beginPinch(); return }
+    const point = { x: event.clientX, y: event.clientY }
+    gesture.current = { kind: 'mobileTouchPending', pointerId: event.pointerId, startClient: point, lastClient: point, moved: false, onTap }
+  }
   const beginPinch = useCallback(() => {
     const points = [...pointers.current.entries()].slice(0, 2)
     if (points.length < 2) return
@@ -285,6 +299,22 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     event.stopPropagation(); pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY }); capture(event)
     if (pointers.current.size >= 2) { beginPinch(); return false }
     const target = { kind, id, segmentId, ownerLineId, ownerPathId, ownerRoadId }
+    const touchTarget: Selection = kind === 'draggingStation' || kind === 'draggingLabel'
+      ? id ? { type: 'station', id } : null
+      : kind === 'draggingWaypoint' ? id && segmentId ? { type: 'waypoint', id, segmentId } : null
+      : kind === 'draggingStructureNode' ? id && segmentId ? { type: 'structureNode', id, segmentId } : null
+      : kind === 'draggingLineLabel' ? id && ownerLineId ? { type: 'lineLabel', id, lineId: ownerLineId, source: project.textTags?.some(tag => tag.id === id) ? 'aarc' : 'native' } : null
+      : kind === 'draggingMapElement' ? id ? { type: 'mapElement', id } : null
+      : kind === 'draggingLineLegend' ? id ? { type: 'lineLegend', id } : null
+      : kind === 'draggingRoadPoint' ? id && ownerRoadId ? { type: 'roadPoint', id, roadId: ownerRoadId } : null
+      : kind === 'draggingBasemapPoint' || kind === 'draggingBasemapPath' ? ownerPathId ? { type: 'basemapPath', id: ownerPathId } : null
+      : kind === 'draggingBackground' ? { type: 'background' } : null
+    const alreadySelected = touchTarget && selection && touchTarget.type === selection.type
+      && ('id' in touchTarget ? 'id' in selection && touchTarget.id === selection.id : true)
+    if (isMobileTouch(event) && touchTarget && !alreadySelected) {
+      startMobileTouchTap(event, () => onSelect(touchTarget))
+      return false
+    }
     gesture.current = { ...target, pointerId: event.pointerId, startWorld: pointerToWorld(event.clientX, event.clientY), origin, before: project, latest: project, moved: false }
     setDragAffectedLineIds(getDragAffectedLineIds(project, target))
     setDragStationOverlay(getDragStationOverlay(project, target))
@@ -293,7 +323,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     setDragVectorBasemapOverlay(getDragVectorBasemapOverlay(target))
     setPreview(project)
     return true
-  }, [beginPinch, capture, pointerToWorld, project])
+  }, [beginPinch, capture, pointerToWorld, project, selection, onSelect])
 
   const addDraftPointAt = (position: Point, bypassAlignment = false) => {
     if (!lineDraft?.anchorStationId) return
@@ -505,6 +535,13 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       return
     }
     if (current.kind === 'idle' || current.pointerId !== event.pointerId) return
+    if (current.kind === 'mobileTouchPending') {
+      const next = { x: event.clientX, y: event.clientY }
+      current.moved ||= Math.hypot(next.x - current.startClient.x, next.y - current.startClient.y) > 8
+      if (current.moved) panLiveView(current.lastClient, next)
+      current.lastClient = next
+      return
+    }
     if (current.kind === 'panningCanvas') {
       panLiveView(current.lastClient, { x: event.clientX, y: event.clientY })
       current.lastClient = { x: event.clientX, y: event.clientY }
@@ -587,6 +624,12 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       return
     }
     const current = gesture.current
+    if (current.kind === 'mobileTouchPending' && current.pointerId === event.pointerId) {
+      gesture.current = { kind: 'idle' }
+      if (current.moved) commitLiveView()
+      else if (event.type === 'pointerup') current.onTap()
+      return
+    }
     if (current.kind === 'movingMapSelection' && current.pointerId === event.pointerId) {
       if (event.type === 'pointerup' && current.moved) onMapMoveCommit?.(current.before, current.latest)
       setMapMovePreview(null)
@@ -629,6 +672,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (drawing) return
     event.stopPropagation()
     if (road.locked) return
+    if (isMobileTouch(event)) { startMobileTouchTap(event, () => onSelect({ type: 'road', id: road.id })); return }
     onSelect({ type: 'road', id: road.id })
   }, [drawing, onSelect])
 
@@ -644,6 +688,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const handleBasemapPathPointerDown = useCallback((event: React.PointerEvent, path: NonNullable<ActualRouteProject['basemapPaths']>[number]) => {
     if (drawing) return
     event.stopPropagation()
+    if (isMobileTouch(event) && selection?.type !== 'basemapPath') {
+      startMobileTouchTap(event, () => onSelect({ type: 'basemapPath', id: path.id }))
+      return
+    }
     onSelect({ type: 'basemapPath', id: path.id })
     if (!path.locked && path.points.length) startObjectDrag('draggingBasemapPath', event, path.points[0], undefined, undefined, undefined, path.id)
   }, [drawing, onSelect, startObjectDrag])
@@ -678,6 +726,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
 
   const handleBackgroundPointerDown = useCallback((event: React.PointerEvent<SVGImageElement>) => {
     if (drawing || !backgroundProject.background || backgroundProject.background.locked) return
+    if (isMobileTouch(event) && selection?.type !== 'background') {
+      startMobileTouchTap(event, () => onSelect({ type: 'background' }))
+      return
+    }
     onSelect({ type: 'background' })
     startObjectDrag('draggingBackground', event, { x: backgroundProject.background.x, y: backgroundProject.background.y })
   }, [backgroundProject.background, drawing, onSelect, startObjectDrag])
@@ -702,6 +754,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     if (drawing?.kind === 'line') { connectDrawingToStation(station.id); return }
     if (drawing) { onConnectStation(station.id); return }
     if (isStationGeometryLocked(project, station.id)) {
+      if (isMobileTouch(event)) { startMobileTouchTap(event, () => onSelect({ type: 'station', id: station.id })); return }
       onSelect({ type: 'station', id: station.id })
       onEditBlocked?.(lockedStationMessage(project, station.id))
       return
@@ -728,6 +781,13 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       screenPointToWorld(svgRef.current!, event.clientX, event.clientY, liveViewRef.current),
     )
     const progress = findSegmentProgressForPoint(project, segment, projected)
+    if (isMobileTouch(event)) {
+      startMobileTouchTap(event, () => {
+        onSelect({ type: 'segment', id: segment.id, progress })
+        onSegmentPoint(segment.id, projected)
+      })
+      return
+    }
     onSelect({ type: 'segment', id: segment.id, progress })
     onSegmentPoint(segment.id, projected)
   }, [drawing, project, onSelect, onSegmentPoint])

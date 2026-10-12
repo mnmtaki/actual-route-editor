@@ -132,7 +132,15 @@ export default function App() {
     setDrawing(null); setRoadDraft(null); setDialog(null); setChoice(null);
     setSegmentPoint(null); setPhasePreview(null); setCalibration(null);
     setSettingsOpen(false); setStyleOpen(false); setRasterSvg(null); setPresentationOpen(false);
-    setView({ x: 40, y: 40, width: 920, height: 680 });
+    if (project.stations.length) {
+      const xs = project.stations.map(station => station.x);
+      const ys = project.stations.map(station => station.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const width = Math.max(300, maxX - minX + 200);
+      const height = Math.max(220, maxY - minY + 200);
+      setView({ x: minX - 100, y: minY - 100, width, height });
+    } else setView({ x: 40, y: 40, width: 920, height: 680 });
   };
   const runLibraryAction = async (action: () => Promise<void>) => {
     if (libraryBusy || switching.current) return;

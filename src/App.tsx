@@ -190,6 +190,16 @@ export default function App() {
       }
     });
   };
+  const openImportedProject = (project: ActualRouteProject) => {
+    void runLibraryAction(async () => {
+      const created = await createLocalProject(project);
+      currentProjectId.current = created.id;
+      currentRevision.current = created.revision;
+      rememberActiveLocalProject(created.id);
+      resetEditorForProject(created.project);
+      setNotice("已导入为独立工程：" + getProjectName(project));
+    });
+  };
   const [presentationOpen, setPresentationOpen] = useState(false);
   const [snapOptions, setSnapOptions] = useState({ node: false, neighbor: false, grid: false });
   const [rasterSvg, setRasterSvg] = useState<string | null>(null);
@@ -882,8 +892,7 @@ export default function App() {
         if (format === "aarc") {
           const result = convertAarcToActualRouteProject(raw, f.name),
             n = result.project;
-          history.commit(n);
-          resetLineSelectionForProject(n);
+          openImportedProject(n);
           const xs = n.stations.map((s) => s.x),
             ys = n.stations.map((s) => s.y),
             pad = 100;
@@ -917,8 +926,7 @@ export default function App() {
           );
         } else {
           const n = parseProjectJson(t);
-          history.commit(n);
-          resetLineSelectionForProject(n);
+          openImportedProject(n);
           setNotice("工程 JSON 已恢复");
         }
       } catch (e) {
@@ -932,8 +940,7 @@ export default function App() {
         if (detectProjectFormat(raw) === "aarc") {
           const result = convertAarcToActualRouteProject(raw, f.name),
             n = result.project;
-          history.commit(n);
-          resetLineSelectionForProject(n);
+          openImportedProject(n);
           const xs = n.stations.map((s) => s.x),
             ys = n.stations.map((s) => s.y),
             pad = 100;
@@ -967,8 +974,7 @@ export default function App() {
           );
         } else {
           const n = importTopologyJson(t);
-          history.commit(n);
-          resetLineSelectionForProject(n);
+          openImportedProject(n);
           setNotice("旧拓扑已转换；坐标已重新初始化");
         }
       } catch (e) {
@@ -1015,8 +1021,7 @@ export default function App() {
       if (format === "aarc") {
         const result = convertAarcToActualRouteProject(raw, file.name),
           n = result.project;
-        history.commit(n);
-        resetLineSelectionForProject(n);
+        openImportedProject(n);
         setView(bounds());
         setNotice(
           "已导入 AARC 工程； " +
@@ -1029,13 +1034,11 @@ export default function App() {
         );
       } else if (kind === "project") {
         const n = parseProjectJson(t);
-        history.commit(n);
-        resetLineSelectionForProject(n);
+        openImportedProject(n);
         setNotice("工程 JSON 已恢复");
       } else {
         const n = importTopologyJson(t);
-        history.commit(n);
-        resetLineSelectionForProject(n);
+        openImportedProject(n);
         setNotice("旧拓扑已转换；坐标已重新初始化");
       }
     } catch (e) {

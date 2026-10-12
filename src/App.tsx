@@ -19,7 +19,8 @@ import { detectProjectFormat } from "./import-export/detectProjectFormat";
 import { convertAarcToActualRouteProject } from "./import-export/aarc";
 import { importTopologyJson } from "./import-export/topologyAdapter";
 import { exportSvg } from "./import-export/svgExport";
-import { loadInitialProject, saveProjectToStorage } from "./data/storage";
+import { loadInitialProject, createEmptyProject } from "./data/storage";
+import { initializeLocalProjects, listLocalProjects, loadLocalProject, saveLocalProject, createLocalProject, deleteLocalProject, renameLocalProject, rememberActiveLocalProject, type LocalProjectSummary } from "./data/localProjectLibrary";
 import {
   addWaypointToSegment,
   appendStationToLine,
@@ -84,6 +85,129 @@ type Point = { x: number; y: number };
 export default function App() {
   const [initial] = useState(loadInitialProject),
     history = useProjectHistory(initial);
+  const [libraryReady, setLibraryReady] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryItems, setLibraryItems] = useState<LocalProjectSummary[]>([]);
+  const [libraryBusy, setLibraryBusy] = useState(false);
+  const [libraryError, setLibraryError] = useState("");
+  const currentProjectId = useRef<string | null>(null);
+  const currentRevision = useRef(0);
+  const savingQueue = useRef<Promise<void>>(Promise.resolve());
+  const saveProblem = useRef<string | null>(null);
+  const switching = useRef(false);
+  const latestProject = useRef(initial);
+  latestProject.current = history.project;
+  const refreshLibrary = async () => setLibraryItems(await listLocalProjects());
+  useEffect(() => {
+    let cancelled = false;
+    void initializeLocalProjects(initial).then(loaded => {
+      if (cancelled) return;
+      currentProjectId.current = loaded.id;
+      currentRevision.current = loaded.revision;
+      history.reset(loaded.project);
+      latestProject.current = loaded.project;
+      setLibraryReady(true);
+    }).catch(e => setNotice(e instanceof Error ? e.message : "无法打开本地工程库，请先导出 JSON 备份"));
+    return () => { cancelled = true };
+  }, []);
+  const persistProject = (project: ActualRouteProject) => {
+    const id = currentProjectId.current;
+    if (!id || saveProblem.current) return Promise.reject(new Error(saveProblem.current ?? "工程库尚未初始化"));
+    const task = savingQueue.current.then(async () => {
+      if (saveProblem.current) throw new Error(saveProblem.current);
+      currentRevision.current = await saveLocalProject(id, project, currentRevision.current);
+    });
+    savingQueue.current = task.catch(error => {
+      saveProblem.current = error instanceof Error ? error.message : "本地存档保存失败";
+      setNotice(saveProblem.current);
+    });
+    return task;
+  };
+  const resetEditorForProject = (project: ActualRouteProject) => {
+    history.reset(project);
+    latestProject.current = project;
+    setSelection(null); setSelectedLineIds([]); setSelectedStationIds([]);
+    setActiveLineId(project.lines[0]?.id ?? null); setSelectionAnchorLineId(null);
+    setMapSelections([]); setMapSelectMode(false); setMapMoveMode(false);
+    setDrawing(null); setRoadDraft(null); setDialog(null); setChoice(null);
+    setSegmentPoint(null); setPhasePreview(null); setCalibration(null);
+    setSettingsOpen(false); setStyleOpen(false); setRasterSvg(null); setPresentationOpen(false);
+    if (project.stations.length) {
+      const xs = project.stations.map(station => station.x);
+      const ys = project.stations.map(station => station.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const width = Math.max(300, maxX - minX + 200);
+      const height = Math.max(220, maxY - minY + 200);
+      setView({ x: minX - 100, y: minY - 100, width, height });
+    } else setView({ x: 40, y: 40, width: 920, height: 680 });
+  };
+  const runLibraryAction = async (action: () => Promise<void>) => {
+    if (libraryBusy || switching.current) return;
+    switching.current = true; setLibraryBusy(true); setLibraryError("");
+    try {
+      if (saveProblem.current) throw new Error(saveProblem.current);
+      // Finish all scheduled/queued saves before changing the active project.
+      await savingQueue.current;
+      if (currentProjectId.current) await persistProject(latestProject.current);
+      await action();
+      await refreshLibrary();
+    } catch (error) {
+      setLibraryError(error instanceof Error ? error.message : "工程操作失败");
+    } finally { switching.current = false; setLibraryBusy(false); }
+  };
+  const activateProject = async (id: string) => runLibraryAction(async () => {
+    if (id === currentProjectId.current) { setLibraryOpen(false); return; }
+    const loaded = await loadLocalProject(id);
+    currentProjectId.current = loaded.id; currentRevision.current = loaded.revision;
+    rememberActiveLocalProject(id);
+    resetEditorForProject(loaded.project); setLibraryOpen(false);
+    setNotice("已打开工程：" + getProjectName(loaded.project));
+  });
+  const createProject = async (copyCurrent: boolean) => runLibraryAction(async () => {
+    const next = copyCurrent ? structuredClone(latestProject.current) : createEmptyProject();
+    if (copyCurrent) { const name = getProjectName(next) + " - 副本"; next.name = name; next.projectName = name; }
+    const created = await createLocalProject(next);
+    currentProjectId.current = created.id; currentRevision.current = created.revision;
+    rememberActiveLocalProject(created.id);
+    resetEditorForProject(created.project); setLibraryOpen(false);
+    setNotice(copyCurrent ? "工程副本已创建" : "新工程已创建");
+  });
+  const renameLibraryProject = async (item: LocalProjectSummary) => {
+    const name = window.prompt("工程新名称", item.name)?.trim();
+    if (!name || name === item.name) return;
+    await runLibraryAction(async () => {
+      const renamed = await renameLocalProject(item.id, name);
+      if (item.id === currentProjectId.current) {
+        currentRevision.current = renamed.revision;
+        resetEditorForProject(renamed.project);
+      }
+    });
+  };
+  const removeLibraryProject = async (item: LocalProjectSummary) => {
+    if (libraryItems.length < 2) { setLibraryError("至少保留一个工程，请先新建其他工程"); return; }
+    if (!window.confirm("确定删除「" + item.name + "」？此操作会永久删除本地存档，请先导出 JSON 备份。")) return;
+    await runLibraryAction(async () => {
+      await deleteLocalProject(item.id);
+      if (item.id === currentProjectId.current) {
+        const others = (await listLocalProjects()).filter(x => x.id !== item.id);
+        const next = await loadLocalProject(others[0].id);
+        currentProjectId.current = next.id; currentRevision.current = next.revision;
+        rememberActiveLocalProject(next.id);
+        resetEditorForProject(next.project);
+      }
+    });
+  };
+  const openImportedProject = (project: ActualRouteProject) => {
+    void runLibraryAction(async () => {
+      const created = await createLocalProject(project);
+      currentProjectId.current = created.id;
+      currentRevision.current = created.revision;
+      rememberActiveLocalProject(created.id);
+      resetEditorForProject(created.project);
+      setNotice("已导入为独立工程：" + getProjectName(project));
+    });
+  };
   const [presentationOpen, setPresentationOpen] = useState(false);
   const [snapOptions, setSnapOptions] = useState({ node: false, neighbor: false, grid: false });
   const [rasterSvg, setRasterSvg] = useState<string | null>(null);
@@ -120,12 +244,11 @@ export default function App() {
     colorRef = useRef<HTMLInputElement>(null),
     dateRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    const t = setTimeout(() => {
-      if (!saveProjectToStorage(history.project))
-        setNotice("自动保存不可用，请导出工程 JSON");
-    }, 400);
-    return () => clearTimeout(t);
-  }, [history.project]);
+    if (!libraryReady || switching.current || saveProblem.current) return;
+    const project = history.project;
+    const timer = setTimeout(() => { void persistProject(project).catch(() => undefined); }, 400);
+    return () => clearTimeout(timer);
+  }, [history.project, libraryReady]);
   useEffect(() => {
     const close = () => {
       setSelection(null);
@@ -777,8 +900,7 @@ export default function App() {
         if (format === "aarc") {
           const result = convertAarcToActualRouteProject(raw, f.name),
             n = result.project;
-          history.commit(n);
-          resetLineSelectionForProject(n);
+          openImportedProject(n);
           const xs = n.stations.map((s) => s.x),
             ys = n.stations.map((s) => s.y),
             pad = 100;
@@ -812,8 +934,7 @@ export default function App() {
           );
         } else {
           const n = parseProjectJson(t);
-          history.commit(n);
-          resetLineSelectionForProject(n);
+          openImportedProject(n);
           setNotice("工程 JSON 已恢复");
         }
       } catch (e) {
@@ -827,8 +948,7 @@ export default function App() {
         if (detectProjectFormat(raw) === "aarc") {
           const result = convertAarcToActualRouteProject(raw, f.name),
             n = result.project;
-          history.commit(n);
-          resetLineSelectionForProject(n);
+          openImportedProject(n);
           const xs = n.stations.map((s) => s.x),
             ys = n.stations.map((s) => s.y),
             pad = 100;
@@ -862,8 +982,7 @@ export default function App() {
           );
         } else {
           const n = importTopologyJson(t);
-          history.commit(n);
-          resetLineSelectionForProject(n);
+          openImportedProject(n);
           setNotice("旧拓扑已转换；坐标已重新初始化");
         }
       } catch (e) {
@@ -910,8 +1029,7 @@ export default function App() {
       if (format === "aarc") {
         const result = convertAarcToActualRouteProject(raw, file.name),
           n = result.project;
-        history.commit(n);
-        resetLineSelectionForProject(n);
+        openImportedProject(n);
         setView(bounds());
         setNotice(
           "已导入 AARC 工程； " +
@@ -924,13 +1042,11 @@ export default function App() {
         );
       } else if (kind === "project") {
         const n = parseProjectJson(t);
-        history.commit(n);
-        resetLineSelectionForProject(n);
+        openImportedProject(n);
         setNotice("工程 JSON 已恢复");
       } else {
         const n = importTopologyJson(t);
-        history.commit(n);
-        resetLineSelectionForProject(n);
+        openImportedProject(n);
         setNotice("旧拓扑已转换；坐标已重新初始化");
       }
     } catch (e) {
@@ -1085,6 +1201,7 @@ export default function App() {
         onImportTopology={() => void importNativeJson("topology")}
         onImportBackground={() => void importNativeBackground()}
         onExportProject={() => void saveProjectFile()}
+        onOpenProjectLibrary={() => { setLibraryError(""); void refreshLibrary().then(() => setLibraryOpen(true)).catch(error => setNotice(String(error))); }}
         onExportSvg={() => void saveSvgFile()}
         onExportImage={() => setRasterSvg(svgFile())}
         onShareProject={() => void shareProjectFile()}
@@ -1115,6 +1232,18 @@ export default function App() {
         onRedo={history.redo}
         nativeFiles={isAndroidApp()}
       />
+      {libraryOpen && <div className="project-library-backdrop" role="presentation" onClick={event => { if (event.target === event.currentTarget && !libraryBusy) setLibraryOpen(false) }}>
+        <section className="project-library-dialog" role="dialog" aria-modal="true" aria-label="本地工程库">
+          <header><div><h2>本地工程库</h2><p>仅保存在当前设备的浏览器内，不会自动同步到其他设备。</p></div><button type="button" aria-label="关闭工程库" onClick={() => setLibraryOpen(false)} disabled={libraryBusy}>×</button></header>
+          <div className="project-library-actions"><button type="button" onClick={() => void createProject(false)} disabled={libraryBusy}>＋ 新建工程</button><button type="button" onClick={() => void createProject(true)} disabled={libraryBusy}>复制当前工程</button></div>
+          {libraryError && <p role="alert" className="project-library-error">{libraryError}</p>}
+          <div className="project-library-list">{libraryItems.map(item => <article key={item.id} className={item.id === currentProjectId.current ? "project-library-item is-current" : "project-library-item"}>
+            <div><strong>{item.name}</strong><small>{item.lines} 条线路 · {item.stations} 座车站 · {new Date(item.updatedAt).toLocaleString()}</small></div>
+            <div className="project-library-item-actions"><button type="button" disabled={libraryBusy || item.id === currentProjectId.current} onClick={() => void activateProject(item.id)}>{item.id === currentProjectId.current ? "正在编辑" : "打开"}</button><button type="button" disabled={libraryBusy} onClick={() => void renameLibraryProject(item)}>重命名</button><button type="button" disabled={libraryBusy} onClick={() => void removeLibraryProject(item)}>删除</button></div>
+          </article>)}</div>
+          <footer>切换前会保存当前工程。重要数据仍建议定期导出 JSON 备份。</footer>
+        </section>
+      </div>}
       <div className="app-shell">
         <Toolbar
           canUndo={history.canUndo}
@@ -1146,6 +1275,7 @@ export default function App() {
           snapOptions={snapOptions}
           onToggleSnapOption={(key) => setSnapOptions(current => ({ ...current, [key]: !current[key] }))}
           projectName={getProjectName(history.project)}
+          onOpenProjectLibrary={() => { setLibraryError(""); void refreshLibrary().then(() => setLibraryOpen(true)).catch(error => setNotice(String(error))); }}
           onProjectNameChange={(name) => history.commit((current) => {
             const next = structuredClone(current)
             next.projectName = name

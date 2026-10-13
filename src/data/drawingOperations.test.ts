@@ -1,9 +1,42 @@
 import { describe, expect, it } from 'vitest'
 import { createEmptyProject } from './storage'
 import { demoProject } from './demo'
-import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, createLine, demoteTerminalStationToDrawingPoint } from './operations'
+import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, createLine, demoteTerminalStationToDrawingPoint, finishLineDrawingWithWaypoints } from './operations'
 
 describe('line drawing geometry operations', () => {
+  it('finishes the pending draft by turning its final point into a Station while retaining earlier waypoints', () => {
+    const created = createLine(createEmptyProject(), { name: '终点保护', color: '#336699' })
+    const seeded = appendStationToLineWithWaypoints(created.project, created.lineId, { x: 100, y: 120 }, [], null)
+    const result = finishLineDrawingWithWaypoints(seeded.project, created.lineId, seeded.stationId, [
+      { id: 'draft-a', x: 170, y: 180 },
+      { id: 'draft-b', x: 270, y: 200 },
+      { id: 'draft-terminal', x: 350, y: 260 },
+    ])!
+    expect(result.project.lines.find(line => line.id === created.lineId)?.stationSequence).toEqual([seeded.stationId, result.stationId])
+    expect(result.project.stations.find(station => station.id === result.stationId)).toMatchObject({ x: 350, y: 260 })
+    expect(result.project.geometry.segments.find(segment => segment.id === result.segmentId)).toMatchObject({
+      fromStationId: seeded.stationId, toStationId: result.stationId, mode: 'smooth',
+      waypoints: [{ id: 'draft-a', x: 170, y: 180, type: 'smooth' }, { id: 'draft-b', x: 270, y: 200, type: 'smooth' }],
+    })
+    expect(seeded.project.geometry.segments).toHaveLength(0)
+  })
+
+  it('saves a single leftover control point as terminal Station with no extra waypoint', () => {
+    const created = createLine(createEmptyProject(), { name: '单控制点', color: '#336699' })
+    const seeded = appendStationToLineWithWaypoints(created.project, created.lineId, { x: 100, y: 120 }, [], null)
+    const result = finishLineDrawingWithWaypoints(seeded.project, created.lineId, seeded.stationId, [{ id: 'last', x: 300, y: 150 }])!
+    expect(result.project.geometry.segments.find(segment => segment.id === result.segmentId)?.waypoints).toHaveLength(0)
+    expect(result.project.stations.find(station => station.id === result.stationId)).toMatchObject({ x: 300, y: 150 })
+  })
+
+  it('does not add or change Stations and Segments when no draft point remains', () => {
+    const created = createLine(createEmptyProject(), { name: '已完成区间', color: '#336699' })
+    const seeded = appendStationToLineWithWaypoints(created.project, created.lineId, { x: 100, y: 120 }, [], null)
+    const committed = appendStationToLineWithWaypoints(seeded.project, created.lineId, { x: 330, y: 250 }, [{ id: 'via', x: 220, y: 170 }], seeded.stationId)
+    expect(finishLineDrawingWithWaypoints(committed.project, created.lineId, committed.stationId, [])).toBeNull()
+    expect(committed.project.geometry.segments).toHaveLength(1)
+    expect(committed.project.stations).toHaveLength(2)
+  })
   it('commits draft control points into the station-to-station Segment', () => {
     const created = createLine(createEmptyProject(), { name: '绘制测试', color: '#336699' })
     const first = appendStationToLineWithWaypoints(created.project, created.lineId, { x: 100, y: 100 }, [], null)

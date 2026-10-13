@@ -40,6 +40,25 @@ export function appendStationToLineWithWaypoints(
   return { ...result, segmentId }
 }
 
+/**
+ * Complete an unfinished line interval on "Finish drawing".
+ * Treat the last draft control point as the final station and preserve all
+ * preceding draft control points as the committed segment's waypoints.
+ * An empty draft requires no changes, and must not create a duplicate station.
+ */
+export function finishLineDrawingWithWaypoints(
+  project: ActualRouteProject,
+  lineId: string,
+  anchorStationId: string | null,
+  draftPoints: readonly DrawingWaypointPoint[],
+  openingPhaseId?: string,
+): { project: ActualRouteProject; stationId: string; segmentId: string | null } | null {
+  if (!draftPoints.length) return null
+  if (!anchorStationId) throw new Error('未找到绘制起点，末尾控制点未保存；请先选择起点站')
+  const endpoint = draftPoints[draftPoints.length - 1]
+  return appendStationToLineWithWaypoints(project, lineId, endpoint, draftPoints.slice(0, -1), anchorStationId, openingPhaseId)
+}
+
 /** Connect the active drawing interval to an existing Station without discarding its control points. */
 export function connectExistingStationWithWaypoints(
   project: ActualRouteProject,

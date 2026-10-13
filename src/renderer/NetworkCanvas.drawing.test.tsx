@@ -1,8 +1,9 @@
+import { createRef } from 'react'
 import { fireEvent, render } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { demoProject } from '../data/demo'
 import { appendBasemapPoint, createBasemapPath } from '../data/basemapPaths'
-import { NetworkCanvas } from './NetworkCanvas'
+import { NetworkCanvas, type NetworkCanvasHandle } from './NetworkCanvas'
 
 beforeAll(() => {
   class TestPointerEvent extends MouseEvent { pointerId: number; constructor(type: string, init: MouseEventInit & { pointerId?: number } = {}) { super(type, init); this.pointerId = init.pointerId ?? 1 } }
@@ -26,6 +27,43 @@ const baseProps = {
 }
 
 describe('line drawing canvas interaction', () => {
+  it('commits the entire pending curve when Finish drawing is invoked, rather than dropping the temporary path', () => {
+    const project = structuredClone(demoProject)
+    const ref = createRef<NetworkCanvasHandle>()
+    const onDragCommit = vi.fn()
+    const onSelect = vi.fn()
+    const { container, rerender } = render(<NetworkCanvas {...baseProps} project={project} ref={ref} onDragCommit={onDragCommit} onSelect={onSelect} />)
+    const svg = container.querySelector('svg')!
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+    const background = container.querySelector('.canvas-bg')!
+    for (const [id, x, y] of [[81, 650, 210], [82, 760, 280]] as const) {
+      fireEvent.pointerDown(background, { pointerId: id, clientX: x, clientY: y, bubbles: true })
+      fireEvent.pointerUp(svg, { pointerId: id, clientX: x, clientY: y, bubbles: true })
+    }
+    expect(container.querySelectorAll('[data-draft-point-id]')).toHaveLength(2)
+    expect(ref.current?.hasPendingLineDraft()).toBe(true)
+    expect(ref.current?.finalizeLineDraft()).toBe(true)
+    expect(onDragCommit).toHaveBeenCalledTimes(1)
+    const committed = onDragCommit.mock.calls[0][1] as typeof project
+    const newStation = committed.stations.find(station => !project.stations.some(old => old.id === station.id))!
+    const newSegment = committed.geometry.segments.find(segment => !project.geometry.segments.some(old => old.id === segment.id))!
+    expect(newStation).toMatchObject({ x: 760, y: 280 })
+    expect(newSegment).toMatchObject({ fromStationId: 's4', toStationId: newStation.id })
+    expect(newSegment.waypoints).toMatchObject([{ x: 650, y: 210 }])
+    expect(onSelect).toHaveBeenCalledWith({ type: 'station', id: newStation.id })
+    rerender(<NetworkCanvas {...baseProps} project={committed} ref={ref} drawing={null} />)
+    expect(container.querySelector('[data-layer="line-drawing-overlay"]')).toBeNull()
+    expect(committed.geometry.segments.some(segment => segment.id === newSegment.id)).toBe(true)
+  })
+
+  it('finishes immediately without creating a duplicate Station if draft is empty', () => {
+    const ref = createRef<NetworkCanvasHandle>()
+    const onDragCommit = vi.fn()
+    render(<NetworkCanvas {...baseProps} project={structuredClone(demoProject)} ref={ref} onDragCommit={onDragCommit} />)
+    expect(ref.current?.hasPendingLineDraft()).toBe(false)
+    expect(ref.current?.finalizeLineDraft()).toBe(false)
+    expect(onDragCommit).not.toHaveBeenCalled()
+  })
   it('adds a control point at the clicked blank-canvas position and previews the draft smoothly', () => {
     const { container } = render(<NetworkCanvas {...baseProps} project={structuredClone(demoProject)} />)
     const svg = container.querySelector('svg')!

@@ -7,7 +7,7 @@ import { ProjectSettingsPanel } from "./components/ProjectSettingsPanel";
 import { Inspector } from "./components/Inspector";
 import { ContextActions } from "./components/ContextActions";
 import { MobileShell } from "./components/MobileShell";
-import { NetworkCanvas } from "./renderer/NetworkCanvas";
+import { NetworkCanvas, type NetworkCanvasHandle } from "./renderer/NetworkCanvas";
 import type { ActualRouteProject, Selection, StructureType } from "./data/model";
 import { uid } from "./data/model";
 import { useProjectHistory } from "./history/useProjectHistory";
@@ -245,6 +245,7 @@ export default function App() {
     [phasePreview, setPhasePreview] = useState<OpeningPhasePath | null>(null),
     [calibration, setCalibration] = useState<{ points: Point[] } | null>(null),
     [calibrationDialog, setCalibrationDialog] = useState<{ a: Point; b: Point; value: string; unit: 'm' | 'km' } | null>(null);
+  const lineDrawingCanvasRef = useRef<NetworkCanvasHandle>(null);
   const projectInput = useRef<HTMLInputElement>(null),
     topologyInput = useRef<HTMLInputElement>(null),
     backgroundInput = useRef<HTMLInputElement>(null),
@@ -504,6 +505,17 @@ export default function App() {
     );
   };
   const finishDrawing = () => {
+    if (drawing?.kind === "line") {
+      try {
+        if (!lineDrawingCanvasRef.current) throw new Error("画布尚未就绪，无法完成绘制")
+        const createdStation = lineDrawingCanvasRef.current.finalizeLineDraft();
+        setDrawing(null);
+        setNotice(createdStation ? "末尾控制点已自动转为终点站，线路已保存" : "线路绘制已完成");
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "完成线路绘制失败，请保留草稿并重试");
+      }
+      return;
+    }
     if (drawing?.kind === "basemap") {
       setDrawing(null);
       setNotice("底图路径已完成");
@@ -1367,6 +1379,7 @@ export default function App() {
               </div>
             )}
             <NetworkCanvas
+              ref={lineDrawingCanvasRef}
               project={history.project}
               mapSelectMode={mapSelectMode}
               mapSelectAppend={mapSelectAppend}

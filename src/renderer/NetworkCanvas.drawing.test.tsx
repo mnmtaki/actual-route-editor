@@ -1,5 +1,6 @@
 import { createRef } from 'react'
 import { fireEvent, render } from '@testing-library/react'
+import { createRef } from 'react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { demoProject } from '../data/demo'
 import { appendBasemapPoint, createBasemapPath } from '../data/basemapPaths'
@@ -27,6 +28,28 @@ const baseProps = {
 }
 
 describe('line drawing canvas interaction', () => {
+  it('undoes and redoes a draft control-point drag without undoing a station', () => {
+    const project = structuredClone(demoProject)
+    const ref = createRef<NetworkCanvasHandle>()
+    const onDragCommit = vi.fn()
+    const onDraftHistoryChange = vi.fn()
+    const { container } = render(<NetworkCanvas {...baseProps} ref={ref} project={project} onDragCommit={onDragCommit} onDraftHistoryChange={onDraftHistoryChange} />)
+    const svg = container.querySelector('svg')!
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+    const background = container.querySelector('.canvas-bg')!
+    fireEvent.pointerDown(background, { pointerId: 181, clientX: 650, clientY: 220, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 181, clientX: 650, clientY: 220, bubbles: true })
+    const handle = container.querySelector('[data-draft-point-id]')!
+    fireEvent.pointerDown(handle, { pointerId: 182, clientX: 650, clientY: 220, bubbles: true })
+    fireEvent.pointerMove(svg, { pointerId: 182, clientX: 700, clientY: 260, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 182, clientX: 700, clientY: 260, bubbles: true })
+    expect(container.querySelector('[data-draft-point-id] circle:nth-of-type(2)')).toHaveAttribute('cx', '700')
+    expect(ref.current?.undoDraftEdit()).toBe(true)
+    expect(container.querySelector('[data-draft-point-id] circle:nth-of-type(2)')).toHaveAttribute('cx', '650')
+    expect(ref.current?.redoDraftEdit()).toBe(true)
+    expect(container.querySelector('[data-draft-point-id] circle:nth-of-type(2)')).toHaveAttribute('cx', '700')
+    expect(onDragCommit).not.toHaveBeenCalled()
+  })
   it('commits the entire pending curve when Finish drawing is invoked, rather than dropping the temporary path', () => {
     const project = structuredClone(demoProject)
     const ref = createRef<NetworkCanvasHandle>()

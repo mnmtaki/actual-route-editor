@@ -26,6 +26,7 @@ import { isCompoundStationCanonical } from '../data/compoundStation'
 import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, demoteTerminalStationToDrawingPoint } from '../data/operations'
 import { cloneProjectForDrag, getDragAffectedLineIds, getDragLineLabelOverlay, getDragMapElementOverlay, getDragStationOverlay, getDragVectorBasemapOverlay, type DragLineLabelOverlay, type DragMapElementOverlay, type DragStationOverlay, type DragVectorBasemapOverlay } from './dragPreview'
 import { NetworkLineLayer } from './NetworkLineLayer'
+import { StationSpacingLayer } from './StationSpacingLayer'
 import { NetworkStationLayer } from './NetworkStationLayer'
 
 type View = { x: number; y: number; width: number; height: number }
@@ -57,14 +58,14 @@ function dedupeSnapSources(items: SnapRaySource[]) {
   })
 }
 
-export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, mapSelectMode = false, mapSelectAppend = false, mapMoveMode = false, mapSelections = [], onMapSelectionChange, onMapMoveCommit, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, snapOptions = { node: false, neighbor: false, grid: false }, view, setView }: {
+export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, mapSelectMode = false, mapSelectAppend = false, mapMoveMode = false, mapSelections = [], onMapSelectionChange, onMapMoveCommit, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, snapOptions = { node: false, neighbor: false, grid: false }, showStationSpacing = false, view, setView }: {
   project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; roadDraft?: Road | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
   calibration?: { points: Point[] } | null; onCalibrationPoint?: (point: Point) => void
   selectedStationIds?: string[]; onToggleStationSelection?: (stationId: string) => void
   mapSelectMode?: boolean; mapSelectAppend?: boolean; mapMoveMode?: boolean; mapSelections?: MapItemSelection[]; onMapSelectionChange?: (items: MapItemSelection[]) => void; onMapMoveCommit?: (before: ActualRouteProject, next: ActualRouteProject) => void
   onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void; onFinishDrawing?: () => void
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void; onEditBlocked?: (message: string) => void
-  snapOptions?: { node: boolean; neighbor: boolean; grid: boolean }
+  snapOptions?: { node: boolean; neighbor: boolean; grid: boolean }; showStationSpacing?: boolean
   view: View; setView: React.Dispatch<React.SetStateAction<View>>
 }) {
   // onPreview is retained for API compatibility; drag previews are intentionally local
@@ -921,6 +922,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       renderHits={false}
       overlay
     />}
+    {showStationSpacing && !drawing && <StationSpacingLayer project={shown} worldUnitsPerPixel={view.width / Math.max(1, canvasWidth)} />}
     {selectedInterval&&<g data-layer="style-interval-selection" data-editor="true" pointerEvents="none"><path d={selectedInterval.path} fill="none" stroke="#d2a72f" strokeWidth={(shown.lines.find(line=>line.id===selectedInterval.segment.lineId)?.lineWidth??shown.settings.lineWidth)+7} strokeLinecap="round" strokeLinejoin="round" opacity=".24" vectorEffect="non-scaling-stroke"/></g>}
     {phasePreview && <g data-layer="opening-phase-preview" pointerEvents="none">{phasePreview.segmentIds.map(id => { const segment = shown.geometry.segments.find(item => item.id === id); const rawLine = segment ? shown.lines.find(item => item.id === segment.lineId) : null; const line = rawLine ? lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate) : null; return segment && line ? <path key={id} d={getSegmentPath(shown, segment)} className="opening-phase-preview-segment" stroke={line.color} /> : null })}{phasePreview.stationIds.map(id => { const station = shown.stations.find(item => item.id === id); return station && isCompoundStationCanonical(shown, station) ? <circle key={id} cx={station.x} cy={station.y} r={effectiveStationStyle(station, shown.settings).stationSize * .9} className="opening-phase-preview-station" /> : null })}</g>}
     <NetworkStationLayer

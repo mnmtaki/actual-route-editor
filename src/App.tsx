@@ -82,9 +82,17 @@ import { getProjectName, projectFilename as makeProjectFilename } from "./data/p
 import { setLinesBoolean, removeBackground as removeBackgroundCommand } from "./data/editorCommands";
 type Drawing = DrawingMode;
 type Point = { x: number; y: number };
+const STATION_SPACING_VISIBILITY_KEY = 'actual-route-editor.station-spacing-visible.v1';
 export default function App() {
   const [initial] = useState(loadInitialProject),
     history = useProjectHistory(initial);
+  const [showStationSpacing, setShowStationSpacing] = useState(() => {
+    try { return localStorage.getItem(STATION_SPACING_VISIBILITY_KEY) === 'true'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(STATION_SPACING_VISIBILITY_KEY, String(showStationSpacing)); } catch { /* blocked browser storage */ }
+  }, [showStationSpacing]);
+  const toggleStationSpacing = () => setShowStationSpacing(value => !value);
   const [libraryReady, setLibraryReady] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [libraryItems, setLibraryItems] = useState<LocalProjectSummary[]>([]);
@@ -1231,6 +1239,8 @@ export default function App() {
         onUndo={history.undo}
         onRedo={history.redo}
         nativeFiles={isAndroidApp()}
+        showStationSpacing={showStationSpacing}
+        onToggleStationSpacing={toggleStationSpacing}
       />
       {libraryOpen && <div className="project-library-backdrop" role="presentation" onClick={event => { if (event.target === event.currentTarget && !libraryBusy) setLibraryOpen(false) }}>
         <section className="project-library-dialog" role="dialog" aria-modal="true" aria-label="本地工程库">
@@ -1275,6 +1285,8 @@ export default function App() {
           snapOptions={snapOptions}
           onToggleSnapOption={(key) => setSnapOptions(current => ({ ...current, [key]: !current[key] }))}
           projectName={getProjectName(history.project)}
+          showStationSpacing={showStationSpacing}
+          onToggleStationSpacing={toggleStationSpacing}
           onOpenProjectLibrary={() => { setLibraryError(""); void refreshLibrary().then(() => setLibraryOpen(true)).catch(error => setNotice(String(error))); }}
           onProjectNameChange={(name) => history.commit((current) => {
             const next = structuredClone(current)
@@ -1380,6 +1392,7 @@ export default function App() {
               onEditBlocked={setNotice}
               onFinishDrawing={finishDrawing}
               snapOptions={snapOptions}
+              showStationSpacing={showStationSpacing}
               view={view}
               setView={setView}
             />

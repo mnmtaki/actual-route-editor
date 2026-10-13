@@ -1,5 +1,5 @@
 import { createRef } from 'react'
-import { fireEvent, render } from '@testing-library/react'
+import { act, fireEvent, render } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { demoProject } from '../data/demo'
 import { appendBasemapPoint, createBasemapPath } from '../data/basemapPaths'
@@ -43,9 +43,9 @@ describe('line drawing canvas interaction', () => {
     fireEvent.pointerMove(svg, { pointerId: 182, clientX: 700, clientY: 260, bubbles: true })
     fireEvent.pointerUp(svg, { pointerId: 182, clientX: 700, clientY: 260, bubbles: true })
     expect(container.querySelector('[data-draft-point-id] circle:nth-of-type(2)')).toHaveAttribute('cx', '700')
-    expect(ref.current?.undoDraftEdit()).toBe(true)
+    act(() => { expect(ref.current?.undoDraftEdit()).toBe(true) })
     expect(container.querySelector('[data-draft-point-id] circle:nth-of-type(2)')).toHaveAttribute('cx', '650')
-    expect(ref.current?.redoDraftEdit()).toBe(true)
+    act(() => { expect(ref.current?.redoDraftEdit()).toBe(true) })
     expect(container.querySelector('[data-draft-point-id] circle:nth-of-type(2)')).toHaveAttribute('cx', '700')
     expect(onDragCommit).not.toHaveBeenCalled()
   })

@@ -19,6 +19,7 @@ export function useProjectHistory(initial: ActualRouteProject) {
   const commitFrom = useCallback((before: ActualRouteProject, next: ActualRouteProject) => {
     setHistory((state) => ({ past: [...state.past.slice(-79), before], present: next, future: [] }))
   }, [])
+  const discardRedo = useCallback(() => setHistory((state) => state.future.length ? { ...state, future: [] } : state), [])
   const undo = useCallback(() => setHistory((state) => {
     const previous = state.past.at(-1)
     return previous ? { past: state.past.slice(0, -1), present: previous, future: [state.present, ...state.future] } : state
@@ -27,5 +28,5 @@ export function useProjectHistory(initial: ActualRouteProject) {
     const next = state.future[0]
     return next ? { past: [...state.past, state.present], present: next, future: state.future.slice(1) } : state
   }), [])
-  return { project: history.present, commit, reset, replace, commitFrom, undo, redo, canUndo: history.past.length > 0, canRedo: history.future.length > 0 }
+  return { project: history.present, commit, reset, replace, commitFrom, discardRedo, undo, redo, canUndo: history.past.length > 0, canRedo: history.future.length > 0 }
 }

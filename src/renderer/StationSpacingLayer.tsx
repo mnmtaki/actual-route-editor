@@ -41,9 +41,8 @@ export function buildStationSpacingLabels(project: ActualRouteProject): StationS
 }
 
 /**
- * Labels sit directly over the track and stay a legible screen size.
- * At overview scales, short intervals cannot accommodate a badge and are
- * suppressed until the user zooms in.
+ * Compact outlined distance annotations sit just above the track.
+ * Hide colliding labels at overview zoom levels.
  */
 export const StationSpacingLayer = memo(function StationSpacingLayer({
   project, worldUnitsPerPixel,
@@ -52,19 +51,17 @@ export const StationSpacingLayer = memo(function StationSpacingLayer({
   const scale = Math.max(0.0001, worldUnitsPerPixel)
   const occupied: Array<{ left: number; right: number; top: number; bottom: number }> = []
   const visible = labels.filter(label => {
-    const labelWidth = Math.max(49, label.text.length * 7 + 12)
+    const labelWidth = Math.max(42, label.text.length * 6.3 + 6)
     const x = label.x / scale, y = label.y / scale
-    const rect = { left: x - labelWidth / 2 - 3, right: x + labelWidth / 2 + 3, top: y - 13, bottom: y + 13 }
+    const rect = { left: x - labelWidth / 2 - 2, right: x + labelWidth / 2 + 2, top: y - 18, bottom: y + 4 }
     if (occupied.some(other => rect.left < other.right && rect.right > other.left && rect.top < other.bottom && rect.bottom > other.top)) return false
     occupied.push(rect)
     return true
   })
   return <g data-layer="station-spacing-labels" data-editor="true" pointerEvents="none" aria-label="区间站距标注">
     {visible.map(label => {
-      const width = Math.max(49, label.text.length * 7 + 12)
       return <g key={label.segmentId} data-spacing-segment-id={label.segmentId} transform={`translate(${label.x} ${label.y}) scale(${scale})`}>
-        <rect x={-width / 2} y={-11} width={width} height={22} rx={5} fill="#fffdf9" fillOpacity=".96" stroke={label.color} strokeOpacity=".55" strokeWidth="1" />
-        <text x="0" y=".5" dominantBaseline="middle" textAnchor="middle" fill={label.color} fontSize="12" fontFamily="system-ui, sans-serif" fontWeight="700">{label.text}</text>
+        <text x="0" y="-9" dominantBaseline="middle" textAnchor="middle" fill={label.color} stroke="#fffdf9" strokeWidth="3" strokeLinejoin="round" paintOrder="stroke" fontSize="11.5" fontFamily="system-ui, sans-serif" fontWeight="600">{label.text}</text>
       </g>
     })}
   </g>

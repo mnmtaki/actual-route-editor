@@ -1,6 +1,5 @@
 import { createRef } from 'react'
 import { fireEvent, render } from '@testing-library/react'
-import { createRef } from 'react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { demoProject } from '../data/demo'
 import { appendBasemapPoint, createBasemapPath } from '../data/basemapPaths'

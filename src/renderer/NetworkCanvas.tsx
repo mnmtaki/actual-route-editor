@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react'
 import type { ActualRouteProject, Road, Selection } from '../data/model'
 import { uid } from '../data/model'
 import { findSegmentProgressForPoint, getSegmentPath, getSegmentRoundedCornerPlans, getSegmentSubpathSpans, pathSpansToSvgPath } from '../geometry/path'
@@ -23,11 +23,17 @@ import { lineWithEffectiveColor } from '../data/lineIdentity'
 import { projectWithLineParentsAt } from '../data/lineParentHistory'
 import { projectWithLineColorsAt } from '../data/lineColorHistory'
 import { isCompoundStationCanonical } from '../data/compoundStation'
-import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, demoteTerminalStationToDrawingPoint } from '../data/operations'
+import { appendStationToLineWithWaypoints, connectExistingStationWithWaypoints, demoteTerminalStationToDrawingPoint, finishLineDrawingWithWaypoints } from '../data/operations'
 import { cloneProjectForDrag, getDragAffectedLineIds, getDragLineLabelOverlay, getDragMapElementOverlay, getDragStationOverlay, getDragVectorBasemapOverlay, type DragLineLabelOverlay, type DragMapElementOverlay, type DragStationOverlay, type DragVectorBasemapOverlay } from './dragPreview'
 import { NetworkLineLayer } from './NetworkLineLayer'
 import { StationSpacingLayer } from './StationSpacingLayer'
 import { NetworkStationLayer } from './NetworkStationLayer'
+
+export interface NetworkCanvasHandle {
+  /** Commits the unfinished draft interval, returns true if a terminal Station was created. */
+  finalizeLineDraft: () => boolean
+  hasPendingLineDraft: () => boolean
+}
 
 type View = { x: number; y: number; width: number; height: number }
 type Point = { x: number; y: number }
@@ -58,7 +64,7 @@ function dedupeSnapSources(items: SnapRaySource[]) {
   })
 }
 
-export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, mapSelectMode = false, mapSelectAppend = false, mapMoveMode = false, mapSelections = [], onMapSelectionChange, onMapMoveCommit, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, snapOptions = { node: false, neighbor: false, grid: false }, showStationSpacing = false, view, setView }: {
+export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, mapSelectMode = false, mapSelectAppend = false, mapMoveMode = false, mapSelections = [], onMapSelectionChange, onMapMoveCommit, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, snapOptions = { node: false, neighbor: false, grid: false }, showStationSpacing = false, view, setView, ref }: {
   project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; roadDraft?: Road | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
   calibration?: { points: Point[] } | null; onCalibrationPoint?: (point: Point) => void
   selectedStationIds?: string[]; onToggleStationSelection?: (stationId: string) => void
@@ -66,7 +72,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void; onFinishDrawing?: () => void
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void; onEditBlocked?: (message: string) => void
   snapOptions?: { node: boolean; neighbor: boolean; grid: boolean }; showStationSpacing?: boolean
-  view: View; setView: React.Dispatch<React.SetStateAction<View>>
+  view: View; setView: React.Dispatch<React.SetStateAction<View>>; ref?: Ref<NetworkCanvasHandle>
 }) {
   // onPreview is retained for API compatibility; drag previews are intentionally local
   // so App/history does not rerender on every pointer movement.
@@ -325,6 +331,19 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     setPreview(project)
     return true
   }, [beginPinch, capture, pointerToWorld, project, selection, onSelect])
+
+  useImperativeHandle(ref, () => ({
+    finalizeLineDraft: () => {
+      if (drawing?.kind !== 'line') throw new Error('当前不在线路绘制模式')
+      if (!lineDraft?.points.length) return false
+      const result = finishLineDrawingWithWaypoints(project, lineDraft.lineId, lineDraft.anchorStationId, lineDraft.points, lineDraft.phaseId)
+      if (!result) return false
+      onDragCommit(project, result.project)
+      onSelect({ type: 'station', id: result.stationId })
+      return true
+    },
+    hasPendingLineDraft: () => drawing?.kind === 'line' && Boolean(lineDraft?.points.length),
+  }), [drawing, lineDraft, project, onDragCommit, onSelect])
 
   const addDraftPointAt = (position: Point, bypassAlignment = false) => {
     if (!lineDraft?.anchorStationId) return

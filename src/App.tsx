@@ -504,6 +504,19 @@ export default function App() {
       "正在绘制道路；点击地图添加节点，Enter/双击完成当前道路，Esc退出",
     );
   };
+  const [draftHistoryAvailability, setDraftHistoryAvailability] = useState({ canUndo: false, canRedo: false });
+  const undoEditor = () => {
+    if (drawing?.kind === "line" && lineDrawingCanvasRef.current?.undoDraftEdit()) return;
+    if (drawing?.kind === "line") setDrawing(null);
+    history.undo();
+  };
+  const redoEditor = () => {
+    if (drawing?.kind === "line" && lineDrawingCanvasRef.current?.redoDraftEdit()) return;
+    if (drawing?.kind === "line") setDrawing(null);
+    history.redo();
+  };
+  const canUndoEditor = history.canUndo || (drawing?.kind === "line" && draftHistoryAvailability.canUndo);
+  const canRedoEditor = history.canRedo || (drawing?.kind === "line" && draftHistoryAvailability.canRedo);
   const finishDrawing = () => {
     if (drawing?.kind === "line") {
       try {
@@ -1246,10 +1259,10 @@ export default function App() {
         onFinishDrawing={finishDrawing}
         onExitDrawing={exitDrawingTool}
         onStartCalibration={startCalibration}
-        canUndo={history.canUndo}
-        canRedo={history.canRedo}
-        onUndo={history.undo}
-        onRedo={history.redo}
+        canUndo={canUndoEditor}
+        canRedo={canRedoEditor}
+        onUndo={undoEditor}
+        onRedo={redoEditor}
         nativeFiles={isAndroidApp()}
         showStationSpacing={showStationSpacing}
         onToggleStationSpacing={toggleStationSpacing}
@@ -1268,10 +1281,10 @@ export default function App() {
       </div>}
       <div className="app-shell">
         <Toolbar
-          canUndo={history.canUndo}
-          canRedo={history.canRedo}
-          undo={history.undo}
-          redo={history.redo}
+          canUndo={canUndoEditor}
+          canRedo={canRedoEditor}
+          undo={undoEditor}
+          redo={redoEditor}
           fitAll={fitAll}
           zoomSelection={zoomSelection}
           onNewLine={startLine}
@@ -1402,6 +1415,8 @@ export default function App() {
               onSegmentPoint={(id, p) => setSegmentPoint({ id, p })}
               onPreview={history.replace}
               onDragCommit={history.commitFrom}
+              onDraftHistoryChange={(canUndo, canRedo) => setDraftHistoryAvailability({ canUndo, canRedo })}
+              onDraftEdit={history.discardRedo}
               onEditBlocked={setNotice}
               onFinishDrawing={finishDrawing}
               snapOptions={snapOptions}

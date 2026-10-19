@@ -29,11 +29,11 @@ import {
   createBranchLine,
   createLine,
   deleteLineAndOrphans,
-  deleteStationConsistently,
   insertStationIntoSegment,
   stationLineIds,
 } from "./data/operations";
 import { selectLineInList, selectLinesByMarquee } from "./data/lineSelection";
+import { deleteStationPreservingNetwork } from "./data/stationDeletion";
 import { LineMultiInspector } from "./components/LineMultiInspector";
 import { StationMultiInspector } from "./components/StationMultiInspector";
 import { MapMultiInspector } from "./components/MapMultiInspector";
@@ -734,8 +734,21 @@ export default function App() {
       return;
     }
     let n = history.project;
-    if (selection.type === "station")
-      n = deleteStationConsistently(n, selection.id);
+    if (selection.type === "station") {
+      if (drawing?.kind === "line" && lineDrawingCanvasRef.current?.getDrawingAnchorStationId() === selection.id && lineDrawingCanvasRef.current.hasPendingLineDraft()) {
+        setNotice("该站是当前绘制起点，仍有未保存控制点；请先完成绘制或撤销草稿");
+        return;
+      }
+      const result = deleteStationPreservingNetwork(n, selection.id);
+      if (!result.ok) { setNotice(result.reason); return; }
+      n = result.project;
+      if (drawing?.kind === "line" && lineDrawingCanvasRef.current?.getDrawingAnchorStationId() === selection.id) {
+        setDrawing(null);
+        setNotice("已删除当前绘制起点，绘制模式已结束");
+      } else {
+        setNotice(result.reconnected ? "已删除中间站并连接两侧区间" : "车站已删除，其余车站已保留");
+      }
+    }
     else if (selection.type === "line")
       n = deleteLineAndOrphans(n, selection.id);
     else if (selection.type === "lineLabel") {

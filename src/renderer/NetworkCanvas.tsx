@@ -33,6 +33,7 @@ export interface NetworkCanvasHandle {
   /** Commits the unfinished draft interval, returns true if a terminal Station was created. */
   finalizeLineDraft: () => boolean
   hasPendingLineDraft: () => boolean
+  getDrawingAnchorStationId: () => string | null
   undoDraftEdit: () => boolean
   redoDraftEdit: () => boolean
 }
@@ -380,6 +381,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       return true
     },
     hasPendingLineDraft: () => drawing?.kind === 'line' && Boolean(lineDraft?.points.length),
+    getDrawingAnchorStationId: () => latestLineDraft.current?.anchorStationId ?? null,
     undoDraftEdit: () => {
       const current = latestLineDraft.current
       if (drawing?.kind !== 'line' || !current || !draftPast.current.length) return false

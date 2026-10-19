@@ -95,8 +95,12 @@ export type ActiveSegment = Segment & { effectiveLineIdAtCurrentDate: string }
 export function getEditorVisibleStationsAtTime(project: ActualRouteProject, time: string) {
   const passengerStations = getActiveNetworkAtTime(project, time).stations
   const canonicalIds = new Set(passengerStations.map(station => station.id))
+  const stationsWithAnySegment = new Set(project.geometry.segments.flatMap(s => [s.fromStationId, s.toStationId]))
   for (const relation of project.stationLineRelations) {
-    if (!getEditorVisibleFakeLinesAtStation(project, relation.stationId, time).some(line => line.id === relation.lineId)) continue
+    const line = project.lines.find(item => item.id === relation.lineId)
+    const standalone = !stationsWithAnySegment.has(relation.stationId) && line?.visible &&
+      isLineOperationalAt(line, time) && isRelationOperationalAt(relation, time)
+    if (!standalone && !getEditorVisibleFakeLinesAtStation(project, relation.stationId, time).some(line => line.id === relation.lineId)) continue
     canonicalIds.add(getCompoundStationCanonical(project, relation.stationId)?.id ?? relation.stationId)
   }
   return project.stations.filter(station => canonicalIds.has(station.id))

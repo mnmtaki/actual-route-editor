@@ -3,9 +3,9 @@ import { getSegmentStyleIntervalAtProgress, type WaypointStructureChange } from 
 import { DropdownArrow } from './Toolbar'
 import { getLineDisplayName } from '../data/lineIdentity'
 
-export function ContextActions({ project, selection, onExtend, onInsertStation, onAddWaypoint, onStraighten: _onStraighten, onStructureChange: _onStructureChange, onSetStructureAtPoint, onWaypointStructureChange: _onWaypointStructureChange, onStructureNodeChange: _onStructureNodeChange, onDelete }: {
+export function ContextActions({ project, selection, onExtend, onInsertStation, onAddWaypoint, onStraighten: _onStraighten, onStructureChange: _onStructureChange, onSetStructureAtPoint, onWaypointStructureChange: _onWaypointStructureChange, onStructureNodeChange: _onStructureNodeChange, onConvertSelectedPoint, onDelete }: {
   project: ActualRouteProject; selection: Selection; onExtend: (stationId: string) => void; onInsertStation: () => void; onAddWaypoint: () => void; onStraighten: () => void
-  onStructureChange: (value: StructureType) => void; onSetStructureAtPoint?: (value: StructureType) => void; onWaypointStructureChange?: (value: WaypointStructureChange) => void; onStructureNodeChange?: (value: StructureType) => void; onDelete: () => void
+  onStructureChange: (value: StructureType) => void; onSetStructureAtPoint?: (value: StructureType) => void; onWaypointStructureChange?: (value: WaypointStructureChange) => void; onStructureNodeChange?: (value: StructureType) => void; onConvertSelectedPoint?: () => void; onDelete: () => void
 }) {
   if (!selection) return null
   const title = selection.type === 'station' ? project.stations.find(item => item.id === selection.id)?.name ?? '站点' : selection.type === 'segment' ? '线路段' : selection.type === 'waypoint' ? '控制点' : selection.type === 'structureNode' ? '样式点' : selection.type === 'line' ? getLineDisplayName(project, selection.id) || '线路' : selection.type === 'lineLabel' ? '线路标签' : '底图'
@@ -17,6 +17,7 @@ export function ContextActions({ project, selection, onExtend, onInsertStation, 
   const pointSelection = selection.type === 'waypoint' || selection.type === 'structureNode'
   return <section className="context-sheet" aria-label="对象操作"><div className="sheet-handle"/><strong>{title}</strong><div className="context-buttons">
     {selection.type==='station'&&<button className="primary" onClick={()=>onExtend(selection.id)}>＋ 从本站延伸</button>}
+    {(selection.type==='station'||selection.type==='waypoint') && onConvertSelectedPoint && <button type="button" onClick={onConvertSelectedPoint}>{selection.type==='station'?'切换为控制点':'切换为站点'}</button>}
     {selection.type==='waypoint'&&<span className="context-hint">拖动控制点改变线路形状；删除请在属性栏操作</span>}
     {selection.type==='structureNode'&&<span className="context-hint">拖动样式点可移动样式分界；修改样式或结构请选择对应线路段；删除请在属性栏操作</span>}
     {!pointSelection&&<button className="danger" onClick={onDelete}>删除</button>}

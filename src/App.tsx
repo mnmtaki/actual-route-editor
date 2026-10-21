@@ -34,6 +34,7 @@ import {
 } from "./data/operations";
 import { selectLineInList, selectLinesByMarquee } from "./data/lineSelection";
 import { deleteStationPreservingNetwork } from "./data/stationDeletion";
+import { convertWaypointToStation, convertStationToWaypoint } from "./data/pointConversion";
 import { LineMultiInspector } from "./components/LineMultiInspector";
 import { StationMultiInspector } from "./components/StationMultiInspector";
 import { MapMultiInspector } from "./components/MapMultiInspector";
@@ -819,6 +820,23 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedLineIds, selection, activeLineId, history.project]);
+  const convertSelectedPoint = () => {
+    if (!selection || drawing) {
+      setNotice("请先完成当前绘制，再转换正式车站或控制点");
+      return;
+    }
+    const result = selection.type === "waypoint"
+      ? convertWaypointToStation(history.project, selection.segmentId, selection.id)
+      : selection.type === "station"
+        ? convertStationToWaypoint(history.project, selection.id)
+        : null;
+    if (!result) return;
+    if (!result.ok) { setNotice(result.reason); return; }
+    history.commit(result.project);
+    setSelection(result.selection);
+    setSelectedStationIds(result.selection.type === "station" ? [result.selection.id] : []);
+    setNotice(result.selection.type === "station" ? "控制点已转为车站（可撤销）" : "车站已转为控制点（可撤销）");
+  };
   const segmentAction = (kind: "station" | "waypoint" | "straight") => {
     if (selection?.type !== "segment") return;
     if (isSegmentGeometryLocked(history.project, selection.id)) {
@@ -1264,6 +1282,7 @@ export default function App() {
         onExtend={extend}
         onInsertStation={() => segmentAction("station")}
         onAddWaypoint={() => segmentAction("waypoint")}
+        onConvertSelectedPoint={convertSelectedPoint}
         onStraighten={() => segmentAction("straight")}
         onStructureChange={setSelectedSegmentStructure}
         onSetStructureAtPoint={setStructureAtPoint}
@@ -1443,6 +1462,7 @@ export default function App() {
               onExtend={extend}
               onInsertStation={() => segmentAction("station")}
               onAddWaypoint={() => segmentAction("waypoint")}
+              onConvertSelectedPoint={convertSelectedPoint}
               onStraighten={() => segmentAction("straight")}
               onStructureChange={setSelectedSegmentStructure}
               onSetStructureAtPoint={setStructureAtPoint}

@@ -21,9 +21,9 @@ describe('direct manipulation gestures', () => {
     const { container } = render(<NetworkCanvas {...baseProps} project={project}
       selection={{ type: 'station', id: station.id }} onExtend={onExtend} onSelect={onSelect} onDragCommit={onDragCommit} />)
     const plus = container.querySelector('[data-station-extend-id="s2"]')!
-    const position = plus.getAttribute('transform')!.match(/translate\\(([-.\\d]+) ([-.\\d]+)\\)/)
-    expect(position).not.toBeNull()
-    const [, px, py] = position!.map(Number)
+    const position = plus.getAttribute('transform')!
+    expect(position).toContain('translate(')
+    const [px, py] = position.slice('translate('.length, -1).split(' ').map(Number)
     const stationHit = container.querySelector('[data-layer="stations"] [data-station-id="s2"]')!
     const stationHitRadius = Number(container.querySelector('.station-extend-hit')?.getAttribute('r'))
     expect(Math.hypot(px - station.x, py - station.y)).toBeGreaterThan(stationHitRadius * 2)

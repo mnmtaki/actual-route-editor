@@ -14,6 +14,59 @@ beforeAll(() => {
 const baseProps = { selection: null, drawing: null, onSelect: vi.fn(), onCreatePoint: vi.fn(), onConnectStation: vi.fn(), onExtend: vi.fn(), onSegmentPoint: vi.fn(), onPreview: vi.fn(), onDragCommit: vi.fn(), view: { x: 0, y: 0, width: 920, height: 680 }, setView: vi.fn() }
 
 describe('direct manipulation gestures', () => {
+  it('enters line drawing only on an intentional release of the separate +, never on press or drag', () => {
+    const project = structuredClone(demoProject)
+    const onExtend = vi.fn(), onSelect = vi.fn(), onDragCommit = vi.fn()
+    const station = project.stations.find(item => item.id === 's2')!
+    const { container } = render(<NetworkCanvas {...baseProps} project={project}
+      selection={{ type: 'station', id: station.id }} onExtend={onExtend} onSelect={onSelect} onDragCommit={onDragCommit} />)
+    const plus = container.querySelector('[data-station-extend-id="s2"]')!
+    const position = plus.getAttribute('transform')!
+    expect(position).toContain('translate(')
+    const [px, py] = position.slice('translate('.length, -1).split(' ').map(Number)
+    const stationHit = container.querySelector('[data-layer="stations"] [data-station-id="s2"]')!
+    const stationHitRadius = Number(container.querySelector('.station-extend-hit')?.getAttribute('r'))
+    expect(Math.hypot(px - station.x, py - station.y)).toBeGreaterThan(stationHitRadius * 2)
+
+    fireEvent.pointerDown(plus, { pointerId: 81, clientX: px, clientY: py, bubbles: true })
+    expect(onExtend).not.toHaveBeenCalled()
+    fireEvent.pointerMove(plus, { pointerId: 81, clientX: px + 38, clientY: py + 20, bubbles: true })
+    fireEvent.pointerUp(plus, { pointerId: 81, clientX: px + 38, clientY: py + 20, bubbles: true })
+    expect(onExtend).not.toHaveBeenCalled()
+
+    fireEvent.pointerDown(stationHit, { pointerId: 82, clientX: station.x, clientY: station.y, bubbles: true })
+    const svg = container.querySelector('svg')!
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}),
+    })
+    fireEvent.pointerMove(svg, { pointerId: 82, clientX: station.x + 42, clientY: station.y + 27, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 82, clientX: station.x + 42, clientY: station.y + 27, bubbles: true })
+    expect(onExtend).not.toHaveBeenCalled()
+    expect(onDragCommit).toHaveBeenCalledTimes(1)
+    expect(onSelect).toHaveBeenCalledWith({ type: 'station', id: station.id })
+
+    fireEvent.pointerDown(plus, { pointerId: 83, clientX: px, clientY: py, bubbles: true })
+    expect(onExtend).not.toHaveBeenCalled()
+    fireEvent.pointerUp(plus, { pointerId: 83, clientX: px + 1, clientY: py + 1, bubbles: true })
+    expect(onExtend).toHaveBeenCalledTimes(1)
+    expect(onExtend).toHaveBeenCalledWith(station.id)
+  })
+
+  it('ignores cancelled and distant + presses but remains keyboard-operable', () => {
+    const onExtend = vi.fn()
+    const { container } = render(<NetworkCanvas {...baseProps} project={demoProject}
+      selection={{ type: 'station', id: 's4' }} onExtend={onExtend} />)
+    const plus = container.querySelector('[data-station-extend-id="s4"]')!
+    fireEvent.pointerDown(plus, { pointerId: 88, clientX: 100, clientY: 100, bubbles: true })
+    fireEvent.pointerCancel(plus, { pointerId: 88, bubbles: true })
+    fireEvent.pointerUp(plus, { pointerId: 88, clientX: 100, clientY: 100, bubbles: true })
+    fireEvent.pointerDown(plus, { pointerId: 89, clientX: 100, clientY: 100, bubbles: true })
+    fireEvent.pointerUp(plus, { pointerId: 89, clientX: 121, clientY: 101, bubbles: true })
+    expect(onExtend).not.toHaveBeenCalled()
+    fireEvent.keyDown(plus, { key: 'Enter', bubbles: true })
+    expect(onExtend).toHaveBeenCalledTimes(1)
+  })
+
   it('adds endpoint control points immediately and commits them when a point switches to Station',()=>{
     const project=structuredClone(demoProject),onCreatePoint=vi.fn(),onFinishDrawing=vi.fn(),onDragCommit=vi.fn()
     const {container}=render(<NetworkCanvas {...baseProps} project={project} onCreatePoint={onCreatePoint} onFinishDrawing={onFinishDrawing} onDragCommit={onDragCommit} drawing={{kind:'line' as const,lineId:'line-a',anchorStationId:'s4',phaseId:undefined}}/>)

@@ -54,7 +54,7 @@ import {
   updateStructureNode,
   type WaypointStructureChange,
 } from "./data/structure";
-import { findSegmentProgressForPoint } from "./geometry/path";
+import { findSegmentProgressForPoint, sampleSegmentAtLengthRatio } from "./geometry/path";
 import {
   isAndroidApp,
   openImageDocument,
@@ -1204,10 +1204,16 @@ export default function App() {
     setSelection({ type: "mapElement", id });
     setNotice("已添加自由文本，可直接拖动");
   };
-  const addLineBadge = (lineId: string) => {
+  const addLineBadge = (lineId: string, segmentId?: string, progress = 0.5) => {
+    const selectedSegment = segmentId
+      ? history.project.geometry.segments.find(item => item.id === segmentId && item.lineId === lineId)
+      : undefined;
+    const anchor = selectedSegment
+      ? sampleSegmentAtLengthRatio(history.project, selectedSegment, progress)?.point
+      : undefined;
     const id = uid("line_badge"),
-      x = view.x + view.width / 2,
-      y = view.y + view.height / 2;
+      x = anchor?.x ?? view.x + view.width / 2,
+      y = anchor?.y ?? view.y + view.height / 2;
     history.commit((current) => {
       const next = structuredClone(current),
         line = next.lines.find((item) => item.id === lineId);
@@ -1462,6 +1468,7 @@ export default function App() {
               onExtend={extend}
               onInsertStation={() => segmentAction("station")}
               onAddWaypoint={() => segmentAction("waypoint")}
+              onAddLineBadge={addLineBadge}
               onConvertSelectedPoint={convertSelectedPoint}
               onStraighten={() => segmentAction("straight")}
               onStructureChange={setSelectedSegmentStructure}

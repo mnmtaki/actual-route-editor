@@ -54,6 +54,8 @@ type LineDraftState = { lineId: string; phaseId?: string; anchorStationId: strin
 type DrawingPointSelection = { kind: 'draft'; id: string } | { kind: 'station'; id: string } | null
 type DrawingCanvasPointer = { pointerId: number; startClient: Point; lastClient: Point; moved: boolean }
 
+const STATION_EXTEND_TAP_SLOP_PX = 8
+const STATION_EXTEND_HIT_GAP = 8
 const WHEEL_ZOOM_IDLE_MS = 100
 const WHEEL_ZOOM_SENSITIVITY = .0004
 
@@ -94,6 +96,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const drawingClick = useRef<{ time: number; x: number; y: number } | null>(null)
   const pointerDoubleFinish = useRef(false)
   const draftDrag = useRef<{ pointerId: number; id: string; before: LineDraftPoint[] } | null>(null)
+  const stationExtendPointer = useRef<{ pointerId: number; startClient: Point; moved: boolean } | null>(null)
   const lineCanvasPointer = useRef<DrawingCanvasPointer | null>(null)
   const basemapCanvasPointer = useRef<DrawingCanvasPointer | null>(null)
   const [preview, setPreview] = useState<ActualRouteProject | null>(null)
@@ -1113,7 +1116,56 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     <LineLegendLayer project={legendProject} selectedId={selection?.type === 'lineLegend' ? selection.id : undefined} hitRadius={stationHitRadius} onPointerDown={handleLegendPointerDown} />
     <g data-layer="waypoints" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (()=>{const segmentId=selection.type==='segment'?selection.id:selection.segmentId,segment=shown.geometry.segments.find(item=>item.id===segmentId);if(!segment)return null;const cornerIds=new Set(getSegmentRoundedCornerPlans(shown,segment).map(plan=>plan.waypointId));return segment.waypoints.map(waypoint=>{const isCorner=cornerIds.has(waypoint.id),selected=selection.type==='waypoint'&&selection.id===waypoint.id,selectWaypoint=(event:React.PointerEvent)=>{if(isSegmentGeometryLocked(shown,segmentId)){onSelect({type:'waypoint',id:waypoint.id,segmentId});onEditBlocked?.('线路已锁定');return}if(startObjectDrag('draggingWaypoint',event,{x:waypoint.x,y:waypoint.y},waypoint.id,segmentId))onSelect({type:'waypoint',id:waypoint.id,segmentId})};return <g key={waypoint.id} data-corner-handle={isCorner?'true':undefined} data-waypoint-id={waypoint.id} onPointerDown={selectWaypoint}><circle className="waypoint-hit" cx={waypoint.x} cy={waypoint.y} r={stationHitRadius} fill="transparent" pointerEvents="all"/><circle cx={waypoint.x} cy={waypoint.y} r={isCorner?7:8} className={`waypoint ${isCorner?'corner-waypoint':''} ${selected?'selected':''}`} pointerEvents="none"/></g>})})()}</g>
     <g data-layer="style-points" data-editor="true">{!drawing && (selection?.type === 'segment' || selection?.type === 'waypoint' || selection?.type === 'structureNode') && (() => { const segmentId = selection.type === 'segment' ? selection.id : selection.segmentId; const segment = shown.geometry.segments.find(item=>item.id===segmentId); if (!segment) return null; return (segment.structureNodes ?? []).map(node => { const point = getStructureNodePoint(shown, segment, node); if (!point) return null; const selected = selection.type === 'structureNode' && selection.id === node.id, attached=Boolean(node.waypointId); return <g key={node.id} transform={`translate(${point.x} ${point.y})`} data-style-point-id={node.id} data-structure-node-id={node.id} data-attached-waypoint-id={node.waypointId ?? ''} onPointerDown={event => { event.stopPropagation(); if (attached) { onSelect({ type: 'structureNode', id: node.id, segmentId }); return }; if (isSegmentGeometryLocked(shown, segmentId)) { onSelect({ type: 'structureNode', id: node.id, segmentId }); onEditBlocked?.('线路已锁定'); return }; if (startObjectDrag('draggingStructureNode', event, point, node.id, segmentId)) onSelect({ type: 'structureNode', id: node.id, segmentId }) }}><circle r={attached?6:structureHitRadius} fill="transparent" pointerEvents="all" /><path d="M 0 -5 L 5 0 L 0 5 L -5 0 Z" fill={selected?'#fff4c9':'#fffdf9'} stroke={selected?'#b98700':'#353b38'} strokeWidth={selected?2:1.5} vectorEffect="non-scaling-stroke" pointerEvents="none" /></g> }) })()}</g>
-    <g data-layer="station-actions" data-editor="true">{selection?.type === 'station' && !drawing && (() => { const station = shown.stations.find(item => item.id === selection.id); if (!station) return null; const handle = getStationHandleStyle(shown, station.id, shown.timeline.currentDate); return <g className="station-extend" transform={`translate(${handle.x} ${handle.y})`} onPointerDown={event => { event.stopPropagation(); onExtend(station.id) }}><circle className="station-extend-hit" r={Math.max(stationHitRadius, 18)} fill="transparent" pointerEvents="all" /><circle className="station-extend-button" r="8.5" fill="white" stroke={handle.color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" pointerEvents="none" /><path className="station-extend-plus" d="M -3.2 0 H 3.2 M 0 -3.2 V 3.2" stroke={handle.color} strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" pointerEvents="none" /></g> })()}</g>
+    <g data-layer="station-actions" data-editor="true">{selection?.type === 'station' && !drawing && (() => {
+      const station = shown.stations.find(item => item.id === selection.id)
+      if (!station) return null
+      const handle = getStationHandleStyle(shown, station.id, shown.timeline.currentDate)
+      const hitRadius = Math.max(18, stationHitRadius)
+      // The old large transparent + hit target overlapped the selected Station,
+      // stealing pointer-downs intended for moving it. Leave a real gap.
+      const dx = handle.x - station.x, dy = handle.y - station.y
+      const handleLength = Math.hypot(dx, dy)
+      const distance = Math.max(handleLength, stationHitRadius + hitRadius + STATION_EXTEND_HIT_GAP)
+      const hx = station.x + (handleLength > 0.0001 ? dx / handleLength : 0) * distance
+      const hy = station.y + (handleLength > 0.0001 ? dy / handleLength : -1) * distance
+      return <g className="station-extend" role="button" tabIndex={0} aria-label="从本站延伸线路"
+        data-station-extend-id={station.id} transform={`translate(${hx} ${hy})`}
+        onPointerDown={event => {
+          event.stopPropagation()
+          if (event.pointerType === 'mouse' && event.button !== 0) return
+          stationExtendPointer.current = {
+            pointerId: event.pointerId,
+            startClient: { x: event.clientX, y: event.clientY },
+            moved: false,
+          }
+          event.currentTarget.setPointerCapture?.(event.pointerId)
+        }}
+        onPointerMove={event => {
+          event.stopPropagation()
+          const press = stationExtendPointer.current
+          if (press?.pointerId === event.pointerId &&
+            Math.hypot(event.clientX - press.startClient.x, event.clientY - press.startClient.y) > STATION_EXTEND_TAP_SLOP_PX) press.moved = true
+        }}
+        onPointerUp={event => {
+          event.stopPropagation()
+          const press = stationExtendPointer.current
+          stationExtendPointer.current = null
+          if (press?.pointerId === event.pointerId && !press.moved &&
+            Math.hypot(event.clientX - press.startClient.x, event.clientY - press.startClient.y) <= STATION_EXTEND_TAP_SLOP_PX) onExtend(station.id)
+        }}
+        onPointerCancel={event => { event.stopPropagation(); stationExtendPointer.current = null }}
+        onKeyDown={event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            event.stopPropagation()
+            onExtend(station.id)
+          }
+        }}>
+        <circle className="station-extend-hit" r={hitRadius} fill="transparent" pointerEvents="all" />
+        <circle className="station-extend-button" r="8.5" fill="white" stroke={handle.color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" pointerEvents="none" />
+        <path className="station-extend-plus" d="M -3.2 0 H 3.2 M 0 -3.2 V 3.2" stroke={handle.color} strokeWidth="1.5" strokeLinecap="round" vectorEffect="non-scaling-stroke" pointerEvents="none" />
+      </g>
+    })()}</g>
     {drawing?.kind === 'line' && !lineDraft?.anchorStationId && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置起点站</text></g>}
     {drawing?.kind === 'basemap' && !(shown.basemapPaths?.find(path => path.id === drawing.pathId)?.points.length) && <g data-editor="true" pointerEvents="none"><text x={view.x + view.width / 2} y={view.y + 34} textAnchor="middle" fill="#557981" fontSize="16">点击空白位置放置第一个地形节点</text></g>}
     {mapSelectMode && !drawing && !calibration && <g data-layer="map-multiselect" data-editor="true">

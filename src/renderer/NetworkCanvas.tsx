@@ -673,7 +673,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       }
     } else if (current.kind === 'draggingLabel') {
       const station = next.stations.find(item => item.id === current.id)
-      if (station) { const rawX=current.origin.x + rawDx, rawY=current.origin.y + rawDy; if (stationLabelMode === 'free') { station.labelOffsetX=rawX; station.labelOffsetY=rawY; station.labelFreeAnchor ??= resolveLabelAnchor(current.origin.x,current.origin.y) } else { const offset=snapLabelOffset(rawX,rawY); station.labelOffsetX=offset.x; station.labelOffsetY=offset.y; delete station.labelFreeAnchor } }
+      if (station) { const rawX=current.origin.x + rawDx, rawY=current.origin.y + rawDy; if (stationLabelMode === 'free') { station.labelOffsetX=rawX; station.labelOffsetY=rawY; station.labelFreeAnchor ??= (() => { const anchor=resolveLabelAnchor(current.origin.x,current.origin.y); return {horizontal:anchor.textAnchor,vertical:anchor.verticalAnchor} })() } else { const offset=snapLabelOffset(rawX,rawY); station.labelOffsetX=offset.x; station.labelOffsetY=offset.y; delete station.labelFreeAnchor } }
     } else if (current.kind === 'draggingLineLabel') {
       const badge = next.lines.find(line => line.id === current.ownerLineId)?.lineBadges?.find(item => item.id === current.id)
       if (badge) { badge.x = current.origin.x + rawDx; badge.y = current.origin.y + rawDy }

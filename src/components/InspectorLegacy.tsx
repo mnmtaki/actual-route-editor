@@ -111,7 +111,7 @@ export function Inspector({ project, selection, onChange, onDelete, onAddLineBad
       <Field label="颜色"><input type="color" value={typeof terrain.color === 'string' && /^#[0-9a-f]{6}$/i.test(terrain.color) ? terrain.color : '#64748b'} onChange={event=>patch(next=>{const target=fakeTerrainSource(next,selection.id);if(target)target.color=event.target.value})}/></Field>
       <Field label="宽度比例"><input type="number" min=".01" step=".1" value={Number(terrain.width)||1} onChange={event=>patch(next=>{const target=fakeTerrainSource(next,selection.id);if(target)target.width=Math.max(.01,Number(event.target.value)||1)})}/></Field>
       <button className="danger" onClick={onDelete}>删除原始地形</button>
-    </>}
+    </>
   } else if (selection?.type === 'aarcTextTag') {
     const tag = project.textTags?.find(item => item.id === selection.id)
     if (tag) content = <>

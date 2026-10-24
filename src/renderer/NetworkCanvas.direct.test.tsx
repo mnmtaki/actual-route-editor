@@ -447,7 +447,7 @@ describe('direct manipulation gestures', () => {
     const {container}=render(<NetworkCanvas {...baseProps} project={project} stationLabelMode="direction" onDragCommit={onDragCommit}/>)
     const svg=container.querySelector('svg')!
     vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
-    const label=container.querySelector('.station-label-group')!
+    const label=container.querySelector(`[data-label-anchor-x="${station.x+station.labelOffsetX}"][data-label-anchor-y="${station.y+station.labelOffsetY}"]`)!
     fireEvent.pointerDown(label,{pointerId:202,clientX:station.x+station.labelOffsetX,clientY:station.y+station.labelOffsetY,bubbles:true})
     fireEvent.pointerMove(svg,{pointerId:202,clientX:station.x+station.labelOffsetX+30,clientY:station.y+station.labelOffsetY+20,bubbles:true})
     fireEvent.pointerUp(svg,{pointerId:202,clientX:station.x+station.labelOffsetX+30,clientY:station.y+station.labelOffsetY+20,bubbles:true})

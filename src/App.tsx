@@ -41,6 +41,7 @@ import { MapMultiInspector } from "./components/MapMultiInspector";
 import type { MapItemSelection } from "./data/mapMarquee";
 import { deleteSelectedMapObjects } from "./data/mapBatchOperations";
 import { removeAarcTextTags } from "./data/aarcTextTagLifecycle";
+import { removePointLinks, removeFakeTerrain } from "./data/aarcRetainedObjects";
 import { getLineDisplayName } from "./data/lineIdentity";
 import { PresentationPreview } from "./presentation/PresentationPreview";
 import {
@@ -763,6 +764,8 @@ export default function App() {
     } else {
       n = structuredClone(n);
       if (selection.type === "aarcTextTag") removeAarcTextTags(n, new Set([selection.id]));
+      else if (selection.type === "aarcPointLink") removePointLinks(n, new Set([selection.id]));
+      else if (selection.type === "aarcFakeTerrain") removeFakeTerrain(n, new Set([selection.id]));
       else if (selection.type === "segment") {
         n.geometry.segments = n.geometry.segments.filter(
           (s) => s.id !== selection.id,

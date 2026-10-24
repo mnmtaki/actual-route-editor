@@ -11,6 +11,7 @@ import { getSegmentStyleIntervalAtProgress, getStructureNodePoint } from '../dat
 import { MapElementsLayer } from './MapElements'
 import { AarcTextTagsLayer } from './AarcTextTags'
 import { AarcPointLinksLayer } from './AarcPointLinks'
+import { getAarcFakeSourceLines } from './AarcFakeLines'
 import { LineLegendLayer } from './LineLegend'
 import { LineBadgesLayer } from './LineBadges'
 import { VectorBasemapLayer } from './VectorBasemap'
@@ -1048,7 +1049,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       overlay
     />}
     <AarcFakeLinesLayer project={mapRenderProject} part="stations" />
-    <AarcPointLinksLayer project={mapRenderProject} />
+    <AarcPointLinksLayer project={mapRenderProject} selectedId={selection?.type === 'aarcPointLink' ? selection.id : undefined} onSelect={drawing ? undefined : id => onSelect({type:'aarcPointLink',id})} />
     <NetworkStationLayer
       project={mapRenderProject}
       selection={selection}
@@ -1191,6 +1192,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       ])}
       {mapRenderProject.lines.flatMap(line => (line.lineBadges ?? []).map(badge => mapSelectionMarker(badge.x,badge.y,'lineLabel:'+badge.id+':native')))}
       {(mapRenderProject.textTags ?? []).map(tag => mapSelectionMarker(tag.x,tag.y, displayedMapKeys.has('aarcTextTag:'+tag.id) ? 'aarcTextTag:'+tag.id : 'lineLabel:'+tag.id+':aarc'))}
+      {getAarcFakeSourceLines(mapRenderProject).filter(line => Number(line.type) === 1 && displayedMapKeys.has('aarcFakeTerrain:'+String(line.id))).map(line => <path key={'terrain-'+line.id} d={buildAarcFakeLinePath(mapRenderProject,line)} fill="none" stroke="#ca9b2e" strokeWidth={12} opacity=".6" pointerEvents="none"/>)}
       {(mapRenderProject.mapElements ?? []).map(element => mapSelectionMarker(element.x,element.y,'mapElement:'+element.id))}
       {(mapRenderProject.roads ?? []).filter(road => displayedMapKeys.has('road:'+road.id)).map(road => <polyline key={road.id} points={road.points.map(point => point.x+','+point.y).join(' ')} fill="none" stroke="#ca9b2e" strokeWidth={8} strokeOpacity=".55" pointerEvents="none"/>)}
       {(mapRenderProject.basemapPaths ?? []).filter(path => displayedMapKeys.has('basemapPath:'+path.id)).map(path => <polyline key={path.id} points={path.points.map(point => point.x+','+point.y).join(' ')} fill="none" stroke="#ca9b2e" strokeWidth={8} strokeOpacity=".55" pointerEvents="none"/>)}

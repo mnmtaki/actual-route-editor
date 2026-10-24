@@ -6,6 +6,7 @@ import { deleteLineAndOrphans, deleteStationConsistently } from './operations'
 import { deleteStructureNode, getStructureNodePoint } from './structure'
 import { findSegmentProgressForPoint } from '../geometry/path'
 import { moveAarcTextTags, ownerLineForAarcTag, removeAarcTextTags } from './aarcTextTagLifecycle'
+import { removePointLinks, removeFakeTerrain } from './aarcRetainedObjects'
 
 type Result = { project: ActualRouteProject; blocked?: string; changed: boolean }
 const success = (project: ActualRouteProject): Result => ({ project, changed: true })
@@ -103,6 +104,7 @@ export function moveSelectedMapObjects(project: ActualRouteProject, items: reado
 export function deleteSelectedMapObjects(project: ActualRouteProject, items: readonly MapItemSelection[]): Result {
   if (!items.length) return { project, changed: false }
   const target = geometryTargets(project, items)
+  if (items.some(item => item.type === 'aarcPointLink' || item.type === 'aarcFakeTerrain')) return blocked(project, '原始 AARC 连接或地形暂不支持整体平移，请在属性面板编辑或删除')
   for (const id of target.lineIds) {
     if (ownerLocked(project, id)) return blocked(project, '所选线路包含锁定线路，请先解锁')
     // Native deletion cascades to branches, including ones outside the box.
@@ -148,6 +150,8 @@ export function deleteSelectedMapObjects(project: ActualRouteProject, items: rea
   const labels = idsByType(items, 'lineLabel')
   for (const line of next.lines) line.lineBadges = line.lineBadges?.filter(label => !labels.has(label.id))
   removeAarcTextTags(next, new Set([...labels, ...idsByType(items, 'aarcTextTag')]))
+  removePointLinks(next, idsByType(items, 'aarcPointLink'))
+  removeFakeTerrain(next, idsByType(items, 'aarcFakeTerrain'))
   const elements = idsByType(items, 'mapElement')
   next.mapElements = next.mapElements?.filter(element => !elements.has(element.id))
   const roads = idsByType(items, 'road'), roadPoints = idsByType(items, 'roadPoint')

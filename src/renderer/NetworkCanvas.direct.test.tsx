@@ -421,6 +421,38 @@ describe('direct manipulation gestures', () => {
     expect(onPreview).not.toHaveBeenCalled()
   })
 
+  it('freely drags a bilingual station label at arbitrary coordinates and persists its anchor',()=>{
+    const project=structuredClone(demoProject), station=project.stations.find(item=>item.id==='s4')!
+    station.nameS='Linjiang';station.labelRotation=45
+    const onDragCommit=vi.fn()
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} stationLabelMode="free" onDragCommit={onDragCommit}/>)
+    const svg=container.querySelector('svg')!
+    vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
+    const label=container.querySelector('[data-label-rotation="45"]')!
+    const oldX=station.x+station.labelOffsetX,oldY=station.y+station.labelOffsetY
+    fireEvent.pointerDown(label,{pointerId:201,clientX:oldX,clientY:oldY,bubbles:true})
+    fireEvent.pointerMove(svg,{pointerId:201,clientX:oldX+30,clientY:oldY+20,bubbles:true})
+    fireEvent.pointerUp(svg,{pointerId:201,clientX:oldX+30,clientY:oldY+20,bubbles:true})
+    const moved=onDragCommit.mock.calls[0][1].stations.find((item:{id:string})=>item.id==='s4')
+    expect(moved.labelOffsetX).toBeCloseTo(station.labelOffsetX+30)
+    expect(moved.labelOffsetY).toBeCloseTo(station.labelOffsetY+20)
+    expect(moved.labelFreeAnchor).toBeDefined()
+    expect(moved.x).toBe(station.x); expect(moved.y).toBe(station.y)
+    expect(station.labelFreeAnchor).toBeUndefined()
+  })
+  it('returns to the legacy eight-direction behavior when mode is switched back',()=>{
+    const project=structuredClone(demoProject),station=project.stations.find(item=>item.id==='s4')!
+    station.labelFreeAnchor={horizontal:'start',vertical:'above'}
+    const onDragCommit=vi.fn()
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} stationLabelMode="direction" onDragCommit={onDragCommit}/>)
+    const svg=container.querySelector('svg')!
+    vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
+    const label=container.querySelector(`[data-label-anchor-x="${station.x+station.labelOffsetX}"][data-label-anchor-y="${station.y+station.labelOffsetY}"]`)!
+    fireEvent.pointerDown(label,{pointerId:202,clientX:station.x+station.labelOffsetX,clientY:station.y+station.labelOffsetY,bubbles:true})
+    fireEvent.pointerMove(svg,{pointerId:202,clientX:station.x+station.labelOffsetX+30,clientY:station.y+station.labelOffsetY+20,bubbles:true})
+    fireEvent.pointerUp(svg,{pointerId:202,clientX:station.x+station.labelOffsetX+30,clientY:station.y+station.labelOffsetY+20,bubbles:true})
+    expect(onDragCommit.mock.calls[0][1].stations.find((item:{id:string})=>item.id==='s4').labelFreeAnchor).toBeUndefined()
+  })
   it('snaps a rotated bilingual label to the nearest direction without moving its Station',()=>{
     const project=structuredClone(demoProject),station=project.stations.find(item=>item.id==='s4')!;station.nameS='Linjiang';station.labelRotation=45
     const onDragCommit=vi.fn(),{container}=render(<NetworkCanvas {...baseProps} project={project} onDragCommit={onDragCommit}/>)

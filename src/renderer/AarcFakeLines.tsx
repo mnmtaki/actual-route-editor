@@ -147,7 +147,7 @@ function FakeLineArtwork({ project, line }: { project: ActualRouteProject; line:
   </g>
 }
 
-function fakeOnlyStationIds(project: ActualRouteProject): Set<number> {
+export function fakeOnlyStationIds(project: ActualRouteProject): Set<number> {
   const lines = sourceLines(project)
   const memberships = new Map<number, RawAarcLine[]>()
   for (const line of lines) for (const value of Array.isArray(line.pts) ? line.pts : []) {
@@ -160,6 +160,17 @@ function fakeOnlyStationIds(project: ActualRouteProject): Set<number> {
   return new Set([...memberships.entries()].filter(([, list]) => list.length > 0 && list.every(line => line.isFake === true)).map(([id]) => id))
 }
 
+export function getAarcFakeOnlyStationPoints(project: ActualRouteProject): Array<{ id:string; x:number; y:number; name:string }> {
+  const onlyFake = fakeOnlyStationIds(project)
+  const lines = sourceLines(project)
+  return sourcePoints(project).flatMap(point => {
+    const pointId = idValue(point.id), pos = pairValue(point.pos)
+    if (pointId === undefined || !onlyFake.has(pointId) || numberValue(point.sta) !== 1 || !pos) return []
+    const memberships = lines.filter(line => Array.isArray(line.pts) && line.pts.some(id => idValue(id) === pointId))
+    if (memberships.length && memberships.every(line => nativeLineForSource(project,idValue(line.id))?.visible === false)) return []
+    return [{ id:String(pointId), x:pos[0], y:pos[1], name:textValue(point.name) }]
+  })
+}
 function FakeOnlyStations({ project }: { project: ActualRouteProject }) {
   const onlyFake = fakeOnlyStationIds(project)
   if (!onlyFake.size) return null

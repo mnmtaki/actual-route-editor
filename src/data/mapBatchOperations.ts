@@ -6,7 +6,7 @@ import { deleteLineAndOrphans, deleteStationConsistently } from './operations'
 import { deleteStructureNode, getStructureNodePoint } from './structure'
 import { findSegmentProgressForPoint } from '../geometry/path'
 import { moveAarcTextTags, ownerLineForAarcTag, removeAarcTextTags } from './aarcTextTagLifecycle'
-import { removePointLinks, removeFakeTerrain } from './aarcRetainedObjects'
+import { removePointLinks, removeFakeTerrain, modifyAarcFakeStation } from './aarcRetainedObjects'
 
 type Result = { project: ActualRouteProject; blocked?: string; changed: boolean }
 const success = (project: ActualRouteProject): Result => ({ project, changed: true })
@@ -56,6 +56,10 @@ export function moveSelectedMapObjects(project: ActualRouteProject, items: reado
     if (item.type === 'background' && project.background?.locked) return blocked(project, '底图图片已锁定')
   }
   const next = structuredClone(project)
+  for (const id of idsByType(items,'aarcFakeStation')) {
+    const point = (next.aarc?.raw?.points as Array<Record<string,unknown>>|undefined)?.find(p=>String(p.id)===id)
+    if (point && Array.isArray(point.pos)) modifyAarcFakeStation(next,id,{x:Number(point.pos[0])+dx,y:Number(point.pos[1])+dy})
+  }
   for (const id of target.stations) translateStationWithAnchors(next, id, dx, dy)
   for (const segment of next.geometry.segments) {
     for (const point of segment.waypoints) if (target.waypoints.has(point.id)) { point.x += dx; point.y += dy }
@@ -150,6 +154,7 @@ export function deleteSelectedMapObjects(project: ActualRouteProject, items: rea
   const labels = idsByType(items, 'lineLabel')
   for (const line of next.lines) line.lineBadges = line.lineBadges?.filter(label => !labels.has(label.id))
   removeAarcTextTags(next, new Set([...labels, ...idsByType(items, 'aarcTextTag')]))
+  for (const id of idsByType(items, 'aarcFakeStation')) modifyAarcFakeStation(next,id,{remove:true})
   removePointLinks(next, idsByType(items, 'aarcPointLink'))
   removeFakeTerrain(next, idsByType(items, 'aarcFakeTerrain'))
   const elements = idsByType(items, 'mapElement')

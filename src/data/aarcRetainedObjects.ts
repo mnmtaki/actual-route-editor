@@ -30,6 +30,20 @@ export function changePointLinkType(project: ActualRouteProject, id: string, typ
   }
   return true
 }
+export function aarcFakeStationSource(project: ActualRouteProject, id: string): Record<string, unknown> | undefined {
+  return (project.aarc?.raw?.points as Array<Record<string, unknown>> | undefined)?.find(point => String(point.id) === id)
+}
+export function modifyAarcFakeStation(project: ActualRouteProject, id:string, change: { x?:number; y?:number; name?:string; remove?:boolean }): boolean {
+  const point=aarcFakeStationSource(project,id)
+  if (!point) return false
+  if (change.remove) { point.sta = 0; return true }
+  if (change.name !== undefined) point.name=change.name
+  if (change.x !== undefined || change.y !== undefined) {
+    const pos = Array.isArray(point.pos) ? point.pos : []
+    point.pos = [change.x ?? Number(pos[0]),change.y ?? Number(pos[1])]
+  }
+  return true
+}
 export function fakeTerrainSource(project: ActualRouteProject, id: string): Record<string, unknown> | undefined {
   return (project.aarc?.raw?.lines as Array<Record<string, unknown>> | undefined)?.find(line => String(line.id) === id && line.isFake === true && Number(line.type) === 1)
 }

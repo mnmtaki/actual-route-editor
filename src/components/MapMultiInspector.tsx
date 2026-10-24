@@ -3,7 +3,7 @@ import type { MapItemSelection } from '../data/mapMarquee'
 
 const names: Record<MapItemSelection['type'], string> = {
   line: '线路', station: '车站', segment: '线路区间', waypoint: '路径点',
-  structureNode: '样式点', lineLabel: '线路标签', mapElement: '自由文本', aarcTextTag: 'AARC 文本标签', aarcPointLink: '车站连线', aarcFakeTerrain: 'AARC 原始地形',
+  structureNode: '样式点', lineLabel: '线路标签', mapElement: '自由文本', aarcTextTag: 'AARC 文本标签', aarcPointLink: '车站连线', aarcFakeTerrain: 'AARC 原始地形', aarcFakeStation: '伪线站点',
   road: '道路', roadPoint: '道路节点', basemapPath: '底图路径',
   lineLegend: '线路图例', background: '底图图片',
 }
@@ -26,6 +26,7 @@ export function MapMultiInspector({ project, selections, onClear, onChoose, onMo
     if (selection.type === 'basemapPath') return project.basemapPaths?.find(item => item.id === selection.id)?.name || selection.id
     if (selection.type === 'mapElement') return project.mapElements?.find(item => item.id === selection.id)?.text.slice(0, 26) || selection.id
     if (selection.type === 'aarcPointLink') return '连接 '+selection.id.replace('aarc-point-link-','')
+    if (selection.type === 'aarcFakeStation') return '伪线站点 '+selection.id
     if (selection.type === 'aarcFakeTerrain') return '地形 '+selection.id
     if (selection.type === 'aarcTextTag') { const tag = project.textTags?.find(item => item.id === selection.id); return tag?.textOverride || tag?.text || tag?.kind || selection.id }
     return selection.type === 'background' ? '底图图片' : selection.id

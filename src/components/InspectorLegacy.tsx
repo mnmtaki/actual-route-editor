@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { changePointLinkType, sourcePointLinks, fakeTerrainSource } from '../data/aarcRetainedObjects'
+import { changePointLinkType, sourcePointLinks, fakeTerrainSource, aarcFakeStationSource, modifyAarcFakeStation } from '../data/aarcRetainedObjects'
 import type { ActualRouteProject, BasemapPathCategory, LabelDirection, Line, LineStyleOverrides, Selection, SegmentMode, StationStyleOverrides, StructureType } from '../data/model'
 import { uid } from '../data/model'
 import { clearRelationDateOverride, markRelationDateOverride, markSegmentDateOverride, phaseForRelation, phaseForSegment, type OpeningPhasePath } from '../data/openingPhases'
@@ -103,6 +103,17 @@ export function Inspector({ project, selection, onChange, onDelete, onAddLineBad
       </select></Field>
       <p className="meta-note">连接端点仍引用原始 AARC 点。可以更改连接样式或删除，不会连带删除车站。</p>
       <button className="danger" onClick={onDelete}>删除车站连线</button>
+    </>
+  } else if (selection?.type === 'aarcFakeStation') {
+    const source=aarcFakeStationSource(project,selection.id)
+    if (source && Number(source.sta)===1) content=<><h3>AARC 伪线车站标记</h3>
+      <Field label="名称"><input value={String(source.name??'')} onChange={event=>patch(next=>{modifyAarcFakeStation(next,selection.id,{name:event.target.value})})}/></Field>
+      <div className="field-grid">
+        <Field label="X"><input type="number" value={Number((source.pos as number[])[0])} onChange={event=>{const x=Number(event.target.value);if(Number.isFinite(x))patch(next=>{modifyAarcFakeStation(next,selection.id,{x})})}}/></Field>
+        <Field label="Y"><input type="number" value={Number((source.pos as number[])[1])} onChange={event=>{const y=Number(event.target.value);if(Number.isFinite(y))patch(next=>{modifyAarcFakeStation(next,selection.id,{y})})}}/></Field>
+      </div>
+      <p className="meta-note">删除仅去掉此处的伪线站点标记，保留原始线路路径。</p>
+      <button className="danger" onClick={onDelete}>移除伪线站点标记</button>
     </>
   } else if (selection?.type === 'aarcFakeTerrain') {
     const terrain = fakeTerrainSource(project,selection.id)

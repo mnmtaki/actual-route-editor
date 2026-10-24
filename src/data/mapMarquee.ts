@@ -4,7 +4,7 @@ import { getStructureNodePoint } from '../data/structure'
 import { getLineLegendLayout } from '../data/lineLegend'
 import { ownerLineForAarcTag } from './aarcTextTagLifecycle'
 import { resolveAarcPointLinksArtwork } from '../import-export/aarcPointLinks'
-import { getAarcFakeSourceLines } from '../renderer/AarcFakeLines'
+import { getAarcFakeSourceLines, getAarcFakeOnlyStationPoints } from '../renderer/AarcFakeLines'
 
 export type MapItemSelection = Exclude<Selection, null>
 export type MapRect = { left: number; top: number; right: number; bottom: number }
@@ -78,6 +78,9 @@ export function hitMapObjects(project: ActualRouteProject, rect: MapRect, textTa
     if (!(visualBounds ? intersects(visualBounds, rect) : inside(tag, rect))) continue
     if (ownerLineId) push({ type: 'lineLabel', id: tag.id, lineId: ownerLineId, source: 'aarc' })
     else push({ type: 'aarcTextTag', id: tag.id })
+  }
+  for (const point of getAarcFakeOnlyStationPoints(project)) {
+    if (inside(point,rect)) push({type:'aarcFakeStation',id:point.id})
   }
   for (const link of resolveAarcPointLinksArtwork(project).links) {
     if (segmentTouchesRect(link.start, link.end, rect)) push({ type: 'aarcPointLink', id: link.id })

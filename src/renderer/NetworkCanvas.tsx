@@ -11,7 +11,8 @@ import { getSegmentStyleIntervalAtProgress, getStructureNodePoint } from '../dat
 import { MapElementsLayer } from './MapElements'
 import { AarcTextTagsLayer } from './AarcTextTags'
 import { AarcPointLinksLayer } from './AarcPointLinks'
-import { getAarcFakeSourceLines } from './AarcFakeLines'
+import { getAarcFakeSourceLines, getAarcFakeOnlyStationPoints } from './AarcFakeLines'
+import { modifyAarcFakeStation } from '../data/aarcRetainedObjects'
 import { LineLegendLayer } from './LineLegend'
 import { LineBadgesLayer } from './LineBadges'
 import { VectorBasemapLayer } from './VectorBasemap'
@@ -354,6 +355,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       : kind === 'draggingStructureNode' ? id && segmentId ? { type: 'structureNode', id, segmentId } : null
       : kind === 'draggingLineLabel' ? id ? ownerLineId ? { type: 'lineLabel', id, lineId: ownerLineId, source: project.textTags?.some(tag => tag.id === id) ? 'aarc' : 'native' } : project.textTags?.some(tag => tag.id === id) ? { type: 'aarcTextTag', id } : null : null
       : kind === 'draggingMapElement' ? id ? { type: 'mapElement', id } : null
+      : kind === 'draggingAarcFakeStation' ? id ? { type:'aarcFakeStation',id } : null
       : kind === 'draggingLineLegend' ? id ? { type: 'lineLegend', id } : null
       : kind === 'draggingRoadPoint' ? id && ownerRoadId ? { type: 'roadPoint', id, roadId: ownerRoadId } : null
       : kind === 'draggingBasemapPoint' || kind === 'draggingBasemapPath' ? ownerPathId ? { type: 'basemapPath', id: ownerPathId } : null
@@ -676,6 +678,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       if (badge) { badge.x = current.origin.x + rawDx; badge.y = current.origin.y + rawDy }
       const tag = next.textTags?.find(item => item.id === current.id)
       if (tag) { tag.x = current.origin.x + rawDx; tag.y = current.origin.y + rawDy }
+    } else if (current.kind === 'draggingAarcFakeStation') {
+      if (current.id) modifyAarcFakeStation(next,current.id,{x:current.origin.x+rawDx,y:current.origin.y+rawDy})
     } else if (current.kind === 'draggingMapElement') {
       const element = next.mapElements?.find(item => item.id === current.id)
       if (element) { element.x = current.origin.x + rawDx; element.y = current.origin.y + rawDy }
@@ -951,7 +955,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   })()
 
   const displayedMapSelections = marqueePreview ? mergeMapSelections(mapSelections, marqueePreview.hits, mapSelectAppend) : mapSelections
-  const mapRenderProject = mapMovePreview ?? project
+  const mapRenderProject = preview && activeDragKind === 'draggingAarcFakeStation' ? shown : mapMovePreview ?? project
   const displayedMapKeys = new Set(displayedMapSelections.map(selectionIdentity))
   const mapSelectionMarker = (x: number, y: number, key: string) => displayedMapKeys.has(key) ? <circle key={key} cx={x} cy={y} r={9} fill="none" stroke="#bd8b19" strokeWidth={2} vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null
 
@@ -1000,6 +1004,9 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
             selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
             hitRadius={stationHitRadius}
             excludeObjectIds={preview && dragVectorBasemapOverlay.kind === 'road' ? dragVectorBasemapOverlay.objectIds : undefined}
+            selectedAarcTextTagId={selection?.type === 'aarcTextTag' ? selection.id : undefined}
+            onAarcTextTagPointerDown={drawing ? undefined : handleAarcTextTagPointerDown}
+            excludeAarcTextTagIds={dragLineLabelOverlay.source === 'aarc' ? dragLineLabelOverlay.labelIds : undefined}
             onRoadPointerDown={handleRoadPointerDown}
             onRoadPointPointerDown={handleRoadPointPointerDown}
             onPathPointerDown={handleBasemapPathPointerDown}
@@ -1058,6 +1065,14 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
           pointerEvents="stroke" onPointerDown={event => { event.stopPropagation(); onSelect({ type:'aarcFakeTerrain',id:String(line.id) }) }} /> : null
       })}
     </g>}
+    {!drawing && <g data-layer="aarc-fake-station-hits" data-editor="true" pointerEvents="none">
+      {getAarcFakeOnlyStationPoints(mapRenderProject).map(point=><g key={point.id} data-aarc-fake-station-hit={point.id}>
+        <circle cx={point.x} cy={point.y} r={Math.max(7,stationHitRadius*.7)}
+          fill={selection?.type === 'aarcFakeStation' && selection.id === point.id ? '#edc15455' : 'transparent'}
+          stroke={selection?.type === 'aarcFakeStation' && selection.id === point.id ? '#c3952c' : 'none'}
+          pointerEvents="all" onPointerDown={event=>{event.stopPropagation();if(startObjectDrag('draggingAarcFakeStation',event,{x:point.x,y:point.y},point.id))onSelect({type:'aarcFakeStation',id:point.id})}}/>
+      </g>)}
+    </g>}
     <AarcPointLinksLayer project={mapRenderProject} selectedId={selection?.type === 'aarcPointLink' ? selection.id : undefined} onSelect={drawing ? undefined : id => onSelect({type:'aarcPointLink',id})} />
     <NetworkStationLayer
       project={mapRenderProject}
@@ -1111,6 +1126,14 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       onLineLabelPointerDown={handleAarcLineLabelPointerDown}
       onTextTagPointerDown={handleAarcTextTagPointerDown}
     />
+    {activeLineLabelProject && dragLineLabelOverlay.source === 'aarc' && <AarcTextTagsLayer
+      project={activeLineLabelProject}
+      selectedId={selection?.type === 'aarcTextTag' ? selection.id : undefined}
+      hitRadius={stationHitRadius}
+      includeTagIds={dragLineLabelOverlay.labelIds}
+      mode="sunken"
+      overlay
+    />}
     {activeLineLabelProject && dragLineLabelOverlay.source === 'aarc' && <AarcTextTagsLayer
       project={activeLineLabelProject}
       selectedId={selection?.type === 'aarcTextTag' || (selection?.type === 'lineLabel' && selection.source === 'aarc') ? selection.id : undefined}

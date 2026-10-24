@@ -49,6 +49,24 @@ describe('safe station removal', () => {
     expect(getEditorVisibleStationsAtTime(result.project, result.project.timeline.currentDate).map(s => s.id)).toContain(one)
   })
 
+  it('reconnects physical neighbors even when station sequence is stale', () => {
+    const { project, lineId, one, two, three } = threeStations()
+    // A fourth station in the stored order does not reflect the physical
+    // edge incident on the middle station.
+    const extra = appendStationToLineWithWaypoints(project, lineId, { x: 300, y: 250 }, [], three)
+    const stale = structuredClone(extra.project)
+    stale.lines.find(line => line.id === lineId)!.stationSequence = [one, two, extra.stationId, three]
+    const result = deleteStationPreservingNetwork(stale, two)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.reconnected).toBe(true)
+    expect(result.project.stations.some(station => station.id === two)).toBe(false)
+    expect(result.project.geometry.segments.some(segment =>
+      [segment.fromStationId, segment.toStationId].includes(one) &&
+      [segment.fromStationId, segment.toStationId].includes(three))).toBe(true)
+    expect(result.project.stations.some(station => station.id === extra.stationId)).toBe(true)
+  })
+
   it('refuses to merge different structure styles without modifying the project', () => {
     const { project, two } = threeStations()
     project.geometry.segments[1].structureType = 'elevated'

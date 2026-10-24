@@ -8,13 +8,13 @@ export function StationLabel({ station, settings, showForeign, presentation=fals
   const direction=resolveStationLabelDirection(station.labelOffsetX,station.labelOffsetY)
   // For the cardinal vertical sectors, the block is centered on the Station while
   // retaining the exact stored distance. AARC's calibrated block path stays raw.
-  const renderOffsetX=!isAarcBlock&&(direction==='up'||direction==='down')?0:station.labelOffsetX
+  const renderOffsetX=!isAarcBlock&&!station.labelFreeAnchor&&(direction==='up'||direction==='down')?0:station.labelOffsetX
   const x=station.x+renderOffsetX,y=station.y+station.labelOffsetY
   const resolvedName=name ?? station.name, resolvedNameS=nameS ?? station.nameS, foreignLines=showForeign&&resolvedNameS?resolvedNameS.split(/\r?\n/):[]
   const foreignStart=labelSize+foreignLabelGap
-  const anchor=resolveLabelAnchor(station.labelOffsetX,station.labelOffsetY)
+  const anchor=station.labelFreeAnchor ? {textAnchor:station.labelFreeAnchor.horizontal,verticalAnchor:station.labelFreeAnchor.vertical,dominantBaseline:station.labelFreeAnchor.vertical==='below'?'hanging' as const:station.labelFreeAnchor.vertical==='middle'?'middle' as const:'auto' as const} : resolveLabelAnchor(station.labelOffsetX,station.labelOffsetY)
   if(isAarcBlock){
-    const blockAnchor=resolveAarcLabelAnchor([station.labelOffsetX,station.labelOffsetY])
+    const blockAnchor=station.labelFreeAnchor ? { horizontalAlign: station.labelFreeAnchor.horizontal, verticalAlign: station.labelFreeAnchor.vertical==='above'?'bottom' as const:station.labelFreeAnchor.vertical==='below'?'top' as const:'middle' as const } : resolveAarcLabelAnchor([station.labelOffsetX,station.labelOffsetY])
     const metrics=getAarcLabelBlockMetrics(labelSize,foreignLabelSize,foreignLabelGap,foreignLines.length,station.source?.sourceStationNameRowHeight,station.source?.sourceStationSubNameRowHeight)
     const alignmentOffset=getAarcLabelAlignmentOffset(blockAnchor.horizontalAlign,blockAnchor.verticalAlign)
     const blockX=alignmentOffset.x

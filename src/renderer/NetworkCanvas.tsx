@@ -18,7 +18,7 @@ import { LineBadgesLayer } from './LineBadges'
 import { VectorBasemapLayer } from './VectorBasemap'
 import { AarcFakeLinesLayer, buildAarcFakeLinePath, getAarcFakeLineBySourceId } from './AarcFakeLines'
 import type { DrawingMode, LineDraftPoint } from '../data/basemapPaths'
-import { effectiveLineWidth, effectiveStationStyle, snapLabelOffset } from '../data/style'
+import { effectiveLineWidth, effectiveStationStyle, resolveLabelAnchor, snapLabelOffset } from '../data/style'
 import { isSegmentGeometryLocked, isStationGeometryLocked, lockedStationMessage } from '../data/lineLock'
 import { translateStationWithAnchors } from '../data/stationAnchor'
 import { lineWithEffectiveColor } from '../data/lineIdentity'
@@ -71,7 +71,7 @@ function dedupeSnapSources(items: SnapRaySource[]) {
   })
 }
 
-export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, mapSelectMode = false, mapSelectAppend = false, mapMoveMode = false, mapSelections = [], onMapSelectionChange, onMapMoveCommit, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, onDraftHistoryChange, onDraftEdit, snapOptions = { node: false, neighbor: false, grid: false }, showStationSpacing = false, view, setView, ref }: {
+export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, mapSelectMode = false, mapSelectAppend = false, mapMoveMode = false, mapSelections = [], onMapSelectionChange, onMapMoveCommit, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, onDraftHistoryChange, onDraftEdit, snapOptions = { node: false, neighbor: false, grid: false }, stationLabelMode = 'direction', showStationSpacing = false, view, setView, ref }: {
   project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; roadDraft?: Road | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
   calibration?: { points: Point[] } | null; onCalibrationPoint?: (point: Point) => void
   selectedStationIds?: string[]; onToggleStationSelection?: (stationId: string) => void
@@ -79,7 +79,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void; onFinishDrawing?: () => void
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void; onEditBlocked?: (message: string) => void
   onDraftHistoryChange?: (canUndo: boolean, canRedo: boolean) => void; onDraftEdit?: () => void
-  snapOptions?: { node: boolean; neighbor: boolean; grid: boolean }; showStationSpacing?: boolean
+  snapOptions?: { node: boolean; neighbor: boolean; grid: boolean }; stationLabelMode?: 'direction' | 'free'; showStationSpacing?: boolean
   view: View; setView: React.Dispatch<React.SetStateAction<View>>; ref?: Ref<NetworkCanvasHandle>
 }) {
   // onPreview is retained for API compatibility; drag previews are intentionally local
@@ -673,7 +673,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       }
     } else if (current.kind === 'draggingLabel') {
       const station = next.stations.find(item => item.id === current.id)
-      if (station) { const offset=snapLabelOffset(current.origin.x + rawDx, current.origin.y + rawDy); station.labelOffsetX = offset.x; station.labelOffsetY = offset.y }
+      if (station) { const rawX=current.origin.x + rawDx, rawY=current.origin.y + rawDy; if (stationLabelMode === 'free') { station.labelOffsetX=rawX; station.labelOffsetY=rawY; station.labelFreeAnchor ??= resolveLabelAnchor(current.origin.x,current.origin.y) } else { const offset=snapLabelOffset(rawX,rawY); station.labelOffsetX=offset.x; station.labelOffsetY=offset.y; delete station.labelFreeAnchor } }
     } else if (current.kind === 'draggingLineLabel') {
       const badge = next.lines.find(line => line.id === current.ownerLineId)?.lineBadges?.find(item => item.id === current.id)
       if (badge) { badge.x = current.origin.x + rawDx; badge.y = current.origin.y + rawDy }

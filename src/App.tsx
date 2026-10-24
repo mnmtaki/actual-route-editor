@@ -220,6 +220,7 @@ export default function App() {
   };
   const [presentationOpen, setPresentationOpen] = useState(false);
   const [snapOptions, setSnapOptions] = useState({ node: false, neighbor: false, grid: false });
+  const [stationLabelMode, setStationLabelMode] = useState<'direction' | 'free'>('direction');
   const [rasterSvg, setRasterSvg] = useState<string | null>(null);
   const [styleOpen, setStyleOpen] = useState(false);
   const [mapSelectMode, setMapSelectMode] = useState(false);
@@ -1351,6 +1352,8 @@ export default function App() {
           onClearMapSelection={() => { setMapSelections([]); setMapMoveMode(false); }}
           snapOptions={snapOptions}
           onToggleSnapOption={(key) => setSnapOptions(current => ({ ...current, [key]: !current[key] }))}
+          stationLabelMode={stationLabelMode}
+          onStationLabelModeChange={setStationLabelMode}
           projectName={getProjectName(history.project)}
           showStationSpacing={showStationSpacing}
           onToggleStationSpacing={toggleStationSpacing}
@@ -1462,6 +1465,7 @@ export default function App() {
               onEditBlocked={setNotice}
               onFinishDrawing={finishDrawing}
               snapOptions={snapOptions}
+              stationLabelMode={stationLabelMode}
               showStationSpacing={showStationSpacing}
               view={view}
               setView={setView}

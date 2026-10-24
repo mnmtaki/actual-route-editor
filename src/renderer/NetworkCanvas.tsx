@@ -1047,7 +1047,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
         return native?.visible!==false && native && d ? <path key={native.id} data-aarc-fake-line-hit={native.id}
           d={d} stroke={selection?.type==='line'&&selection.id===native.id?'#d39b25':'transparent'}
           strokeWidth={Math.max(12,mapRenderProject.settings.lineWidth)} fill="none"
-          strokeOpacity={selection?.type==='line'&&selection.id===native.id?.7:1}
+          strokeOpacity={selection?.type==='line'&&selection.id===native.id ? .7 : 1}
           pointerEvents="stroke" onPointerDown={event=>{event.stopPropagation();onSelect({type:'line',id:native.id})}}/>:null
       })}
     </g>}

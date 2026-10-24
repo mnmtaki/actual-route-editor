@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { changePointLinkType, sourcePointLinks, fakeTerrainSource, aarcFakeStationSource, modifyAarcFakeStation } from '../data/aarcRetainedObjects'
+import { changePointLinkType, sourcePointLinks, fakeTerrainSource, aarcFakeStationSource, modifyAarcFakeStation, canMoveFakeTerrain, translateFakeTerrain } from '../data/aarcRetainedObjects'
 import type { ActualRouteProject, BasemapPathCategory, LabelDirection, Line, LineStyleOverrides, Selection, SegmentMode, StationStyleOverrides, StructureType } from '../data/model'
 import { uid } from '../data/model'
 import { clearRelationDateOverride, markRelationDateOverride, markSegmentDateOverride, phaseForRelation, phaseForSegment, type OpeningPhasePath } from '../data/openingPhases'
@@ -121,6 +121,8 @@ export function Inspector({ project, selection, onChange, onDelete, onAddLineBad
       <Field label="原始 ID"><input readOnly value={selection.id}/></Field>
       <Field label="颜色"><input type="color" value={typeof terrain.color === 'string' && /^#[0-9a-f]{6}$/i.test(terrain.color) ? terrain.color : '#64748b'} onChange={event=>patch(next=>{const target=fakeTerrainSource(next,selection.id);if(target)target.color=event.target.value})}/></Field>
       <Field label="宽度比例"><input type="number" min=".01" step=".1" value={Number(terrain.width)||1} onChange={event=>patch(next=>{const target=fakeTerrainSource(next,selection.id);if(target)target.width=Math.max(.01,Number(event.target.value)||1)})}/></Field>
+      <p className="meta-note">{canMoveFakeTerrain(project,selection.id)?'可在画布上拖动整体位置；也可使用下面的微调按钮。':'与其他线路共用原始控制点，暂不允许整体平移，以免破坏线网。'}</p>
+      <div className="field-grid"><button type="button" disabled={!canMoveFakeTerrain(project,selection.id)} onClick={()=>patch(next=>{translateFakeTerrain(next,selection.id,-10,0)})}>← 左移</button><button type="button" disabled={!canMoveFakeTerrain(project,selection.id)} onClick={()=>patch(next=>{translateFakeTerrain(next,selection.id,10,0)})}>右移 →</button></div>
       <button className="danger" onClick={onDelete}>删除原始地形</button>
     </>
   } else if (selection?.type === 'aarcTextTag') {

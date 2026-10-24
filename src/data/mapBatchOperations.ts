@@ -6,7 +6,7 @@ import { deleteLineAndOrphans, deleteStationConsistently } from './operations'
 import { deleteStructureNode, getStructureNodePoint } from './structure'
 import { findSegmentProgressForPoint } from '../geometry/path'
 import { moveAarcTextTags, ownerLineForAarcTag, removeAarcTextTags } from './aarcTextTagLifecycle'
-import { removePointLinks, removeFakeTerrain, modifyAarcFakeStation } from './aarcRetainedObjects'
+import { removePointLinks, removeFakeTerrain, modifyAarcFakeStation, canMoveFakeTerrain, translateFakeTerrain } from './aarcRetainedObjects'
 
 type Result = { project: ActualRouteProject; blocked?: string; changed: boolean }
 const success = (project: ActualRouteProject): Result => ({ project, changed: true })
@@ -40,7 +40,8 @@ function geometryTargets(project: ActualRouteProject, items: readonly MapItemSel
 export function moveSelectedMapObjects(project: ActualRouteProject, items: readonly MapItemSelection[], dx: number, dy: number): Result {
   if (!items.length || !Number.isFinite(dx) || !Number.isFinite(dy) || (!dx && !dy)) return { project, changed: false }
   const target = geometryTargets(project, items)
-  if (items.some(item => item.type === 'aarcPointLink' || item.type === 'aarcFakeTerrain')) return blocked(project, '原始 AARC 连接或地形暂不支持整体平移，请在属性面板编辑或删除')
+  if (items.some(item => item.type === 'aarcPointLink')) return blocked(project, 'AARC 车站连线的位置由连接的原始点决定，请在属性面板更改端点')
+  for (const item of items) if (item.type === 'aarcFakeTerrain' && !canMoveFakeTerrain(project,item.id)) return blocked(project, '该地形与其他线路共用原始点，无法安全整体移动')
   for (const id of target.lineIds) if (ownerLocked(project, id)) return blocked(project, '所选线路包含锁定线路，请先解锁')
   for (const id of target.segmentIds) if (isSegmentGeometryLocked(project, id)) return blocked(project, '所选区间属于锁定线路，请先解锁')
   for (const id of target.stations) if (isStationGeometryLocked(project, id)) return blocked(project, '所选车站关联锁定线路，请先解锁')
@@ -57,6 +58,7 @@ export function moveSelectedMapObjects(project: ActualRouteProject, items: reado
     if (item.type === 'background' && project.background?.locked) return blocked(project, '底图图片已锁定')
   }
   const next = structuredClone(project)
+  for (const id of idsByType(items,'aarcFakeTerrain')) translateFakeTerrain(next,id,dx,dy)
   for (const id of idsByType(items,'aarcFakeStation')) {
     const point = (next.aarc?.raw?.points as Array<Record<string,unknown>>|undefined)?.find(p=>String(p.id)===id)
     if (point && Array.isArray(point.pos)) modifyAarcFakeStation(next,id,{x:Number(point.pos[0])+dx,y:Number(point.pos[1])+dy})

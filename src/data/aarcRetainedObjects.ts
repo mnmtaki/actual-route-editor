@@ -47,6 +47,28 @@ export function modifyAarcFakeStation(project: ActualRouteProject, id:string, ch
 export function fakeTerrainSource(project: ActualRouteProject, id: string): Record<string, unknown> | undefined {
   return (project.aarc?.raw?.lines as Array<Record<string, unknown>> | undefined)?.find(line => String(line.id) === id && line.isFake === true && Number(line.type) === 1)
 }
+export function canMoveFakeTerrain(project:ActualRouteProject,id:string):boolean {
+  const line=fakeTerrainSource(project,id)
+  const rawLines=project.aarc?.raw?.lines
+  const rawPoints=project.aarc?.raw?.points
+  if (!line || !Array.isArray(line.pts) || !Array.isArray(rawLines) || !Array.isArray(rawPoints)) return false
+  const pointIds=new Set(line.pts.map(Number))
+  if (rawLines.some(candidate => candidate && typeof candidate === 'object' &&
+    String((candidate as Record<string,unknown>).id)!==id &&
+    Array.isArray((candidate as Record<string,unknown>).pts) &&
+    ((candidate as Record<string,unknown>).pts as unknown[]).some(point=>pointIds.has(Number(point))))) return false
+  return pointIds.size > 0 && [...pointIds].every(id=>rawPoints.some(point=>point && typeof point==='object' && Number((point as Record<string,unknown>).id)===id && Array.isArray((point as Record<string,unknown>).pos)))
+}
+export function translateFakeTerrain(project:ActualRouteProject,id:string,dx:number,dy:number):boolean {
+  if (!Number.isFinite(dx)||!Number.isFinite(dy)||!canMoveFakeTerrain(project,id)) return false
+  const raw=project.aarc!.raw!
+  const target=fakeTerrainSource(project,id)!
+  const ids=new Set((target.pts as unknown[]).map(Number))
+  for (const point of raw.points as Array<Record<string,unknown>>) if (ids.has(Number(point.id)) && Array.isArray(point.pos)) {
+    point.pos=[Number(point.pos[0])+dx,Number(point.pos[1])+dy]
+  }
+  return true
+}
 export function removeFakeTerrain(project: ActualRouteProject, ids: ReadonlySet<string>): boolean {
   const raw = project.aarc?.raw
   if (!raw || !Array.isArray(raw.lines)) return false

@@ -1,7 +1,7 @@
 import { describe,expect,it } from 'vitest'
 import { convertAarcToActualRouteProject } from '../import-export/aarc'
 import { resolveAarcPointLinksArtwork } from '../import-export/aarcPointLinks'
-import { sourcePointLinks, pointLinkIndex, removePointLinks, changePointLinkType,removeFakeTerrain } from './aarcRetainedObjects'
+import { sourcePointLinks, pointLinkIndex, removePointLinks, changePointLinkType,removeFakeTerrain, canMoveFakeTerrain, translateFakeTerrain, modifyAarcFakeStation } from './aarcRetainedObjects'
 import { hitMapObjects } from './mapMarquee'
 import { deleteSelectedMapObjects,moveSelectedMapObjects } from './mapBatchOperations'
 
@@ -40,6 +40,27 @@ describe('AARC retained object editing',()=>{
     expect(removed.changed).toBe(true)
     expect((removed.project.aarc?.raw?.lines as Array<{id:number}>).some(x=>x.id===11)).toBe(false)
     expect(original.aarc?.raw?.lines).toHaveLength(2)
+  })
+  it('edits a fake-only station marker while leaving its original line control point',()=>{
+    const original=fixture(),next=structuredClone(original)
+    const point=(next.aarc?.raw?.points as Array<Record<string,unknown>>).find(p=>Number(p.id)===3)!
+    point.sta=1
+    expect(modifyAarcFakeStation(next,'3',{name:'临时',x:315})).toBe(true)
+    expect(point.pos).toEqual([315,0])
+    expect(point.name).toBe('临时')
+    expect(modifyAarcFakeStation(next,'3',{remove:true})).toBe(true)
+    expect(point.sta).toBe(0)
+    expect((next.aarc?.raw?.lines as Array<{pts:number[]}>)[1].pts).toEqual([3,4])
+  })
+  it('translates only isolated fake terrain and rejects shared point topology',()=>{
+    const original=fixture(),next=structuredClone(original)
+    expect(canMoveFakeTerrain(next,'11')).toBe(true)
+    expect(translateFakeTerrain(next,'11',20,-10)).toBe(true)
+    expect((next.aarc?.raw?.points as Array<{id:number,pos:number[]}>).find(p=>p.id===3)?.pos).toEqual([320,-10])
+    expect((original.aarc?.raw?.points as Array<{id:number,pos:number[]}>).find(p=>p.id===3)?.pos).toEqual([300,0])
+    ;(next.aarc?.raw?.lines as Array<Record<string,unknown>>)[0].pts=[1,2,3]
+    expect(canMoveFakeTerrain(next,'11')).toBe(false)
+    expect(translateFakeTerrain(next,'11',10,0)).toBe(false)
   })
   it('refuses to translate retained objects without any mutation',()=>{
     const original=fixture()

@@ -12,7 +12,7 @@ import { MapElementsLayer } from './MapElements'
 import { AarcTextTagsLayer } from './AarcTextTags'
 import { AarcPointLinksLayer } from './AarcPointLinks'
 import { getAarcFakeSourceLines, getAarcFakeOnlyStationPoints } from './AarcFakeLines'
-import { modifyAarcFakeStation } from '../data/aarcRetainedObjects'
+import { modifyAarcFakeStation, canMoveFakeTerrain, translateFakeTerrain } from '../data/aarcRetainedObjects'
 import { LineLegendLayer } from './LineLegend'
 import { LineBadgesLayer } from './LineBadges'
 import { VectorBasemapLayer } from './VectorBasemap'
@@ -50,7 +50,7 @@ type Gesture =
   | { kind: 'movingMapSelection'; pointerId: number; start: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
   | { kind: 'calibrationTap'; pointerId: number; startClient: Point; lastClient: Point; moved: boolean }
   | { kind: 'pinchingCanvas'; pointerIds: [number, number]; initialDistance: number; startView: View; startWorld: Point }
-  | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineLabel' | 'draggingMapElement' | 'draggingLineLegend' | 'draggingBackground' | 'draggingAarcFakeStation' | 'draggingBasemapPoint' | 'draggingBasemapPath' | 'draggingRoadPoint'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; ownerRoadId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
+  | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineLabel' | 'draggingMapElement' | 'draggingLineLegend' | 'draggingBackground' | 'draggingAarcFakeStation' | 'draggingAarcFakeTerrain' | 'draggingBasemapPoint' | 'draggingBasemapPath' | 'draggingRoadPoint'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; ownerRoadId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
 
 type LineDraftState = { lineId: string; phaseId?: string; anchorStationId: string | null; points: LineDraftPoint[]; lastCreatedStationId?: string }
 type DrawingPointSelection = { kind: 'draft'; id: string } | { kind: 'station'; id: string } | null
@@ -356,6 +356,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       : kind === 'draggingLineLabel' ? id ? ownerLineId ? { type: 'lineLabel', id, lineId: ownerLineId, source: project.textTags?.some(tag => tag.id === id) ? 'aarc' : 'native' } : project.textTags?.some(tag => tag.id === id) ? { type: 'aarcTextTag', id } : null : null
       : kind === 'draggingMapElement' ? id ? { type: 'mapElement', id } : null
       : kind === 'draggingAarcFakeStation' ? id ? { type:'aarcFakeStation',id } : null
+      : kind === 'draggingAarcFakeTerrain' ? id ? { type:'aarcFakeTerrain',id } : null
       : kind === 'draggingLineLegend' ? id ? { type: 'lineLegend', id } : null
       : kind === 'draggingRoadPoint' ? id && ownerRoadId ? { type: 'roadPoint', id, roadId: ownerRoadId } : null
       : kind === 'draggingBasemapPoint' || kind === 'draggingBasemapPath' ? ownerPathId ? { type: 'basemapPath', id: ownerPathId } : null
@@ -678,6 +679,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       if (badge) { badge.x = current.origin.x + rawDx; badge.y = current.origin.y + rawDy }
       const tag = next.textTags?.find(item => item.id === current.id)
       if (tag) { tag.x = current.origin.x + rawDx; tag.y = current.origin.y + rawDy }
+    } else if (current.kind === 'draggingAarcFakeTerrain') {
+      if (current.id) translateFakeTerrain(next,current.id,rawDx,rawDy)
     } else if (current.kind === 'draggingAarcFakeStation') {
       if (current.id) modifyAarcFakeStation(next,current.id,{x:current.origin.x+rawDx,y:current.origin.y+rawDy})
     } else if (current.kind === 'draggingMapElement') {
@@ -955,7 +958,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   })()
 
   const displayedMapSelections = marqueePreview ? mergeMapSelections(mapSelections, marqueePreview.hits, mapSelectAppend) : mapSelections
-  const mapRenderProject = preview && activeDragKind === 'draggingAarcFakeStation' ? shown : mapMovePreview ?? project
+  const mapRenderProject = preview && (activeDragKind === 'draggingAarcFakeStation' || activeDragKind === 'draggingAarcFakeTerrain') ? shown : mapMovePreview ?? project
   const displayedMapKeys = new Set(displayedMapSelections.map(selectionIdentity))
   const mapSelectionMarker = (x: number, y: number, key: string) => displayedMapKeys.has(key) ? <circle key={key} cx={x} cy={y} r={9} fill="none" stroke="#bd8b19" strokeWidth={2} vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null
 
@@ -1062,7 +1065,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
         return path ? <path key={String(line.id)} data-aarc-fake-terrain-hit={String(line.id)} d={path}
           stroke={selection?.type === 'aarcFakeTerrain' && selection.id === String(line.id) ? '#d39b25' : 'transparent'}
           strokeWidth={Math.max(12,Number(line.width)||1)*2} fill="none" strokeOpacity={selection?.type === 'aarcFakeTerrain' && selection.id === String(line.id) ? .75 : 1}
-          pointerEvents="stroke" onPointerDown={event => { event.stopPropagation(); onSelect({ type:'aarcFakeTerrain',id:String(line.id) }) }} /> : null
+          pointerEvents="stroke" onPointerDown={event => { event.stopPropagation(); const id=String(line.id);if (!canMoveFakeTerrain(project,id)) { onSelect({type:'aarcFakeTerrain',id}); onEditBlocked?.('该地形与其他线路共用控制点，请使用属性面板或删除'); return }; const pos=Array.isArray(line.pts)? (project.aarc?.raw?.points as Array<Record<string,unknown>>|undefined)?.find(point=>Number(point.id)===Number((line.pts as unknown[])[0]))?.pos : undefined;const origin=Array.isArray(pos)? {x:Number(pos[0]),y:Number(pos[1])}:{x:0,y:0};if(startObjectDrag('draggingAarcFakeTerrain',event,origin,id))onSelect({type:'aarcFakeTerrain',id}) }} /> : null
       })}
     </g>}
     {!drawing && <g data-layer="aarc-fake-station-hits" data-editor="true" pointerEvents="none">

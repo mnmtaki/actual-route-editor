@@ -72,16 +72,19 @@ export function deleteStationPreservingNetwork(project: ActualRouteProject, stat
     return { ok: true, project: deleteStationConsistently(project, stationId), reconnected: false }
   }
 
-  if (index <= 0 || index >= line.stationSequence.length - 1)
-    return blocked(project, '该站是环线交接点或复杂端点，无法安全自动重连')
-  const a = line.stationSequence[index - 1], b = line.stationSequence[index + 1]
+  // The stored stationSequence may be stale after branches or ring edits.
+  // The two physical incident segments are authoritative for a degree-two station.
+  // Do not discard an otherwise safe geometry merge merely because the cached
+  // linear sequence does not list both physical neighbors consecutively.
+  const [first, second] = segments
+  const a = first.fromStationId === stationId ? first.toStationId : first.fromStationId
+  const b = second.fromStationId === stationId ? second.toStationId : second.fromStationId
   if (a === b || a === stationId || b === stationId)
     return blocked(project, '相邻站存在重复或闭环关系，无法安全自动重连')
-  const first = segments.find(s => isBetween(s, a, stationId))
-  const second = segments.find(s => isBetween(s, stationId, b))
-  if (!first || !second || first.id === second.id ||
-    project.geometry.segments.some(s => s.lineId === line.id && isBetween(s, a, b)))
-    return blocked(project, '该站附近存在不连续或重复区间，无法安全自动重连')
+  if (project.geometry.segments.some(s => s.lineId === line.id && isBetween(s, a, b)))
+    return blocked(project, '该站附近已存在两邻站的直接区间，无法安全自动重连')
+  // Preserve the original segment orientation while ordering the merged chain
+  // from a -> station -> b.
   if (first.mode !== second.mode || first.structureType !== second.structureType ||
       first.lineStyleId !== second.lineStyleId || first.openedAt !== second.openedAt ||
       first.closedAt !== second.closedAt || first.cornerRadius !== second.cornerRadius)

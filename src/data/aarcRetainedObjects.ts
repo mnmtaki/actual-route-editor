@@ -39,5 +39,5 @@ export function removeFakeTerrain(project: ActualRouteProject, ids: ReadonlySet<
   const before = raw.lines.length
   raw.lines = raw.lines.filter(entry => !(entry && typeof entry === 'object' && ids.has(String((entry as Record<string,unknown>).id)) && (entry as Record<string,unknown>).isFake === true && Number((entry as Record<string,unknown>).type) === 1))
   project.aarc!.fakeLines = project.aarc!.fakeLines?.filter(entry => !(ids.has(String(entry.id)) && Number(entry.type) === 1))
-  return raw.lines.length !== before
+  return (raw.lines as unknown[]).length !== before
 }

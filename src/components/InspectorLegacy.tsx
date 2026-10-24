@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { changePointLinkType, sourcePointLinks, fakeTerrainSource, aarcFakeStationSource, modifyAarcFakeStation, canMoveFakeTerrain, translateFakeTerrain } from '../data/aarcRetainedObjects'
+import { changePointLinkType, retargetPointLink, sourcePointLinks, fakeTerrainSource, aarcFakeStationSource, modifyAarcFakeStation, canMoveFakeTerrain, translateFakeTerrain } from '../data/aarcRetainedObjects'
 import type { ActualRouteProject, BasemapPathCategory, LabelDirection, Line, LineStyleOverrides, Selection, SegmentMode, StationStyleOverrides, StructureType } from '../data/model'
 import { uid } from '../data/model'
 import { clearRelationDateOverride, markRelationDateOverride, markSegmentDateOverride, phaseForRelation, phaseForSegment, type OpeningPhasePath } from '../data/openingPhases'
@@ -96,7 +96,13 @@ export function Inspector({ project, selection, onChange, onDelete, onAddLineBad
     const link = sourcePointLinks(project)[index]
     if (link && [0,1,2,3].includes(Number(link.type))) content = <>
       <h3>AARC 车站连线</h3>
-      <Field label="连接点"><input readOnly value={Array.isArray(link.pts) ? link.pts.join(' → ') : ''}/></Field>
+      {([0,1] as const).map(end=><Field key={end} label={end===0?'起点':'终点'}>
+        <select aria-label={end===0?'车站连线起点':'车站连线终点'} value={Number(Array.isArray(link.pts)?link.pts[end]:-1)}
+          onChange={event=>patch(next=>{retargetPointLink(next,selection.id,end,Number(event.target.value))})}>
+          {(Array.isArray(project.aarc?.raw?.points)?project.aarc.raw.points:[]).filter((point):point is Record<string,unknown>=>Boolean(point && typeof point==='object')).map(point=>
+            <option key={String(point.id)} value={Number(point.id)}>{String(point.name||'原始点')} · #{String(point.id)}</option>)}
+        </select>
+      </Field>)}
       <Field label="连线类型"><select aria-label="车站连线类型" value={Number(link.type)} onChange={event=>patch(next=>{changePointLinkType(next,selection.id,Number(event.target.value) as 0|1|2|3)})}>
         <option value={0}>0 · 三层连接</option><option value={1}>1 · 普通连接</option>
         <option value={2}>2 · 虚线连接</option><option value={3}>3 · 带端点虚线</option>

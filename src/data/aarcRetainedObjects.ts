@@ -44,6 +44,20 @@ export function modifyAarcFakeStation(project: ActualRouteProject, id:string, ch
   }
   return true
 }
+export function retargetPointLink(project: ActualRouteProject, id: string, endpoint: 0 | 1, pointId: number): boolean {
+  const index=pointLinkIndex(id),original=sourcePointLinks(project)
+  if (index===null || !original[index] || ![0,1,2,3].includes(Number(original[index].type))) return false
+  const current=Array.isArray(original[index].pts)?original[index].pts.map(Number):[]
+  if (current.length<2 || current[1-endpoint]===pointId ||
+      !(project.aarc?.raw && Array.isArray(project.aarc.raw.points) &&
+        project.aarc.raw.points.some(p=>p && typeof p==='object' && Number((p as Record<string,unknown>).id)===pointId))) return false
+  const updated=original.map((link,i)=>i===index ? {...link,pts:current.map((p,j)=>j===endpoint?pointId:p)}:link)
+  if(project.aarc){
+    project.aarc.pointLinks=updated
+    if(project.aarc.raw)project.aarc.raw.pointLinks=structuredClone(updated)
+  }
+  return true
+}
 export function fakeTerrainSource(project: ActualRouteProject, id: string): Record<string, unknown> | undefined {
   return (project.aarc?.raw?.lines as Array<Record<string, unknown>> | undefined)?.find(line => String(line.id) === id && line.isFake === true && Number(line.type) === 1)
 }

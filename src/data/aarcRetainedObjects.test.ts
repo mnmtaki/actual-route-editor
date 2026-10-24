@@ -1,7 +1,7 @@
 import { describe,expect,it } from 'vitest'
 import { convertAarcToActualRouteProject } from '../import-export/aarc'
 import { resolveAarcPointLinksArtwork } from '../import-export/aarcPointLinks'
-import { sourcePointLinks, pointLinkIndex, removePointLinks, changePointLinkType,removeFakeTerrain, canMoveFakeTerrain, translateFakeTerrain, modifyAarcFakeStation } from './aarcRetainedObjects'
+import { sourcePointLinks, pointLinkIndex, removePointLinks, changePointLinkType,removeFakeTerrain, canMoveFakeTerrain, translateFakeTerrain, modifyAarcFakeStation, retargetPointLink } from './aarcRetainedObjects'
 import { hitMapObjects } from './mapMarquee'
 import { deleteSelectedMapObjects,moveSelectedMapObjects } from './mapBatchOperations'
 
@@ -31,6 +31,16 @@ describe('AARC retained object editing',()=>{
     expect(Number((next.aarc?.raw?.pointLinks as Array<{type:number}>)[0].type)).toBe(2)
     expect(changePointLinkType(next,'aarc-point-link-2',0)).toBe(false)
     expect(next.stations).toEqual(original.stations)
+  })
+  it('can retarget a visual connector to another existing original point safely',()=>{
+    const original=fixture(),next=structuredClone(original)
+    expect(retargetPointLink(next,'aarc-point-link-0',1,3)).toBe(true)
+    expect(sourcePointLinks(next)[0].pts).toEqual([1,3])
+    expect((next.aarc?.raw?.pointLinks as Array<{pts:number[]}>)[0].pts).toEqual([1,3])
+    expect(retargetPointLink(next,'aarc-point-link-0',1,1)).toBe(false)
+    expect(retargetPointLink(next,'aarc-point-link-0',1,99999)).toBe(false)
+    expect(retargetPointLink(next,'aarc-point-link-2',1,3)).toBe(false)
+    expect(sourcePointLinks(original)[0].pts).toEqual([1,2])
   })
   it('marquee-selects native visual link and retained fake terrain and removes only selected fake terrain',()=>{
     const original=fixture()

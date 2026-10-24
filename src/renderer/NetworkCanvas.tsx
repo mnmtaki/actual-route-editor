@@ -1007,8 +1007,9 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
             selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
             hitRadius={stationHitRadius}
             excludeObjectIds={preview && dragVectorBasemapOverlay.kind === 'road' ? dragVectorBasemapOverlay.objectIds : undefined}
-            selectedAarcTextTagId={selection?.type === 'aarcTextTag' ? selection.id : undefined}
+            selectedAarcTextTagId={selection?.type === 'aarcTextTag' || (selection?.type === 'lineLabel' && selection.source === 'aarc') ? selection.id : undefined}
             onAarcTextTagPointerDown={drawing ? undefined : handleAarcTextTagPointerDown}
+            onAarcLineLabelPointerDown={drawing ? undefined : handleAarcLineLabelPointerDown}
             excludeAarcTextTagIds={dragLineLabelOverlay.source === 'aarc' ? dragLineLabelOverlay.labelIds : undefined}
             onRoadPointerDown={handleRoadPointerDown}
             onRoadPointPointerDown={handleRoadPointPointerDown}
@@ -1039,6 +1040,17 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     {showStationSpacing && !drawing && <StationSpacingLayer project={shown} worldUnitsPerPixel={view.width / Math.max(1, canvasWidth)} />}
     {selectedInterval&&<g data-layer="style-interval-selection" data-editor="true" pointerEvents="none"><path d={selectedInterval.path} fill="none" stroke="#d2a72f" strokeWidth={(shown.lines.find(line=>line.id===selectedInterval.segment.lineId)?.lineWidth??shown.settings.lineWidth)+7} strokeLinecap="round" strokeLinejoin="round" opacity=".24" vectorEffect="non-scaling-stroke"/></g>}
     {phasePreview && <g data-layer="opening-phase-preview" pointerEvents="none">{phasePreview.segmentIds.map(id => { const segment = shown.geometry.segments.find(item => item.id === id); const rawLine = segment ? shown.lines.find(item => item.id === segment.lineId) : null; const line = rawLine ? lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate) : null; return segment && line ? <path key={id} d={getSegmentPath(shown, segment)} className="opening-phase-preview-segment" stroke={line.color} /> : null })}{phasePreview.stationIds.map(id => { const station = shown.stations.find(item => item.id === id); return station && isCompoundStationCanonical(shown, station) ? <circle key={id} cx={station.x} cy={station.y} r={effectiveStationStyle(station, shown.settings).stationSize * .9} className="opening-phase-preview-station" /> : null })}</g>}
+    {!drawing && <g data-layer="aarc-fake-common-line-hits" data-editor="true" pointerEvents="none">
+      {getAarcFakeSourceLines(mapRenderProject).filter(raw=>Number(raw.type)!==1).map(raw=>{
+        const native=mapRenderProject.lines.find(line=>line.isFake && line.source?.format==='aarc' && Number(line.source.sourceLineId??line.source.lineId)===Number(raw.id))
+        const d=buildAarcFakeLinePath(mapRenderProject,raw)
+        return native?.visible!==false && native && d ? <path key={native.id} data-aarc-fake-line-hit={native.id}
+          d={d} stroke={selection?.type==='line'&&selection.id===native.id?'#d39b25':'transparent'}
+          strokeWidth={Math.max(12,mapRenderProject.settings.lineWidth)} fill="none"
+          strokeOpacity={selection?.type==='line'&&selection.id===native.id?.7:1}
+          pointerEvents="stroke" onPointerDown={event=>{event.stopPropagation();onSelect({type:'line',id:native.id})}}/>:null
+      })}
+    </g>}
     <NetworkStationLayer
       project={mapRenderProject}
       selection={selection}
@@ -1068,6 +1080,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
           pointerEvents="stroke" onPointerDown={event => { event.stopPropagation(); const id=String(line.id);if (!canMoveFakeTerrain(project,id)) { onSelect({type:'aarcFakeTerrain',id}); onEditBlocked?.('该地形与其他线路共用控制点，请使用属性面板或删除'); return }; const pos=Array.isArray(line.pts)? (project.aarc?.raw?.points as Array<Record<string,unknown>>|undefined)?.find(point=>Number(point.id)===Number((line.pts as unknown[])[0]))?.pos : undefined;const origin=Array.isArray(pos)? {x:Number(pos[0]),y:Number(pos[1])}:{x:0,y:0};if(startObjectDrag('draggingAarcFakeTerrain',event,origin,id))onSelect({type:'aarcFakeTerrain',id}) }} /> : null
       })}
     </g>}
+    <AarcPointLinksLayer project={mapRenderProject} selectedId={selection?.type === 'aarcPointLink' ? selection.id : undefined} onSelect={drawing ? undefined : id => onSelect({type:'aarcPointLink',id})} />
     {!drawing && <g data-layer="aarc-fake-station-hits" data-editor="true" pointerEvents="none">
       {getAarcFakeOnlyStationPoints(mapRenderProject).map(point=><g key={point.id} data-aarc-fake-station-hit={point.id}>
         <circle cx={point.x} cy={point.y} r={Math.max(7,stationHitRadius*.7)}
@@ -1076,7 +1089,6 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
           pointerEvents="all" onPointerDown={event=>{event.stopPropagation();if(startObjectDrag('draggingAarcFakeStation',event,{x:point.x,y:point.y},point.id))onSelect({type:'aarcFakeStation',id:point.id})}}/>
       </g>)}
     </g>}
-    <AarcPointLinksLayer project={mapRenderProject} selectedId={selection?.type === 'aarcPointLink' ? selection.id : undefined} onSelect={drawing ? undefined : id => onSelect({type:'aarcPointLink',id})} />
     <NetworkStationLayer
       project={mapRenderProject}
       selection={selection}

@@ -11,6 +11,10 @@ export const VectorBasemapLayer = memo(function VectorBasemapLayer({
   presentation = false,
   visibleLineIds,
   selectedId,
+  selectedAarcTextTagId,
+  onAarcTextTagPointerDown,
+  onAarcLineLabelPointerDown,
+  excludeAarcTextTagIds,
   hitRadius = 22,
   draft,
   onPathPointerDown,
@@ -25,6 +29,10 @@ export const VectorBasemapLayer = memo(function VectorBasemapLayer({
   presentation?: boolean
   visibleLineIds?: Set<string>
   selectedId?: string
+  selectedAarcTextTagId?: string
+  onAarcTextTagPointerDown?: React.ComponentProps<typeof AarcTextTagsLayer>['onTextTagPointerDown']
+  onAarcLineLabelPointerDown?: React.ComponentProps<typeof AarcTextTagsLayer>['onLineLabelPointerDown']
+  excludeAarcTextTagIds?: ReadonlySet<string>
   hitRadius?: number
   draft?: Road | null
   onPathPointerDown?: React.ComponentProps<typeof BasemapPathArtwork>['onPathPointerDown']
@@ -50,7 +58,7 @@ export const VectorBasemapLayer = memo(function VectorBasemapLayer({
     })}
     {!overlay && <AarcTerrainTransitionsArtwork project={project} part="body" />}
     {!overlay && <AarcFakeLinesLayer project={project} part="terrain" />}
-    {!overlay && <AarcTextTagsLayer project={project} presentation={presentation} visibleLineIds={visibleLineIds} mode="sunken" />}
+    {!overlay && <AarcTextTagsLayer project={project} presentation={presentation} visibleLineIds={visibleLineIds} mode="sunken" selectedId={selectedAarcTextTagId} onTextTagPointerDown={onAarcTextTagPointerDown} onLineLabelPointerDown={onAarcLineLabelPointerDown} excludeTagIds={excludeAarcTextTagIds} hitRadius={hitRadius} />}
     {!overlay && draft && <RoadArtwork road={draft} project={project} presentation={false} selected hitRadius={hitRadius} onPointerDown={onRoadPointerDown} onPointPointerDown={onRoadPointPointerDown} />}
   </g>
 })

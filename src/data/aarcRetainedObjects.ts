@@ -1,0 +1,93 @@
+import type { ActualRouteProject } from './model'
+
+export const pointLinkIndex = (id: string): number | null => {
+  const match = /^aarc-point-link-(\d+)$/.exec(id)
+  return match ? Number(match[1]) : null
+}
+export function sourcePointLinks(project: ActualRouteProject): Record<string, unknown>[] {
+  const records = project.aarc?.pointLinks ?? project.aarc?.raw?.pointLinks
+  return Array.isArray(records) ? records as Record<string, unknown>[] : []
+}
+export function removePointLinks(project: ActualRouteProject, ids: ReadonlySet<string>): boolean {
+  const indices = new Set([...ids].map(pointLinkIndex).filter((i): i is number => i !== null))
+  if (!indices.size || !sourcePointLinks(project).some((_, i) => indices.has(i))) return false
+  const original = sourcePointLinks(project)
+  const filtered = original.filter((_, i) => !indices.has(i))
+  if (project.aarc) {
+    project.aarc.pointLinks = filtered
+    if (project.aarc.raw) project.aarc.raw.pointLinks = structuredClone(filtered)
+  }
+  return true
+}
+export function changePointLinkType(project: ActualRouteProject, id: string, type: 0 | 1 | 2 | 3): boolean {
+  const index = pointLinkIndex(id)
+  const original = sourcePointLinks(project)
+  if (index === null || !original[index] || ![0,1,2,3].includes(Number(original[index].type))) return false
+  const updated = original.map((record,i) => i === index ? { ...record, type } : record)
+  if (project.aarc) {
+    project.aarc.pointLinks = updated
+    if (project.aarc.raw) project.aarc.raw.pointLinks = structuredClone(updated)
+  }
+  return true
+}
+export function aarcFakeStationSource(project: ActualRouteProject, id: string): Record<string, unknown> | undefined {
+  return (project.aarc?.raw?.points as Array<Record<string, unknown>> | undefined)?.find(point => String(point.id) === id)
+}
+export function modifyAarcFakeStation(project: ActualRouteProject, id:string, change: { x?:number; y?:number; name?:string; remove?:boolean }): boolean {
+  const point=aarcFakeStationSource(project,id)
+  if (!point) return false
+  if (change.remove) { point.sta = 0; return true }
+  if (change.name !== undefined) point.name=change.name
+  if (change.x !== undefined || change.y !== undefined) {
+    const pos = Array.isArray(point.pos) ? point.pos : []
+    point.pos = [change.x ?? Number(pos[0]),change.y ?? Number(pos[1])]
+  }
+  return true
+}
+export function retargetPointLink(project: ActualRouteProject, id: string, endpoint: 0 | 1, pointId: number): boolean {
+  const index=pointLinkIndex(id),original=sourcePointLinks(project)
+  if (index===null || !original[index] || ![0,1,2,3].includes(Number(original[index].type))) return false
+  const current=Array.isArray(original[index].pts)?original[index].pts.map(Number):[]
+  if (current.length<2 || current[1-endpoint]===pointId ||
+      !(project.aarc?.raw && Array.isArray(project.aarc.raw.points) &&
+        project.aarc.raw.points.some(p=>p && typeof p==='object' && Number((p as Record<string,unknown>).id)===pointId))) return false
+  const updated=original.map((link,i)=>i===index ? {...link,pts:current.map((p,j)=>j===endpoint?pointId:p)}:link)
+  if(project.aarc){
+    project.aarc.pointLinks=updated
+    if(project.aarc.raw)project.aarc.raw.pointLinks=structuredClone(updated)
+  }
+  return true
+}
+export function fakeTerrainSource(project: ActualRouteProject, id: string): Record<string, unknown> | undefined {
+  return (project.aarc?.raw?.lines as Array<Record<string, unknown>> | undefined)?.find(line => String(line.id) === id && line.isFake === true && Number(line.type) === 1)
+}
+export function canMoveFakeTerrain(project:ActualRouteProject,id:string):boolean {
+  const line=fakeTerrainSource(project,id)
+  const rawLines=project.aarc?.raw?.lines
+  const rawPoints=project.aarc?.raw?.points
+  if (!line || !Array.isArray(line.pts) || !Array.isArray(rawLines) || !Array.isArray(rawPoints)) return false
+  const pointIds=new Set(line.pts.map(Number))
+  if (rawLines.some(candidate => candidate && typeof candidate === 'object' &&
+    String((candidate as Record<string,unknown>).id)!==id &&
+    Array.isArray((candidate as Record<string,unknown>).pts) &&
+    ((candidate as Record<string,unknown>).pts as unknown[]).some(point=>pointIds.has(Number(point))))) return false
+  return pointIds.size > 0 && [...pointIds].every(id=>rawPoints.some(point=>point && typeof point==='object' && Number((point as Record<string,unknown>).id)===id && Array.isArray((point as Record<string,unknown>).pos)))
+}
+export function translateFakeTerrain(project:ActualRouteProject,id:string,dx:number,dy:number):boolean {
+  if (!Number.isFinite(dx)||!Number.isFinite(dy)||!canMoveFakeTerrain(project,id)) return false
+  const raw=project.aarc!.raw!
+  const target=fakeTerrainSource(project,id)!
+  const ids=new Set((target.pts as unknown[]).map(Number))
+  for (const point of raw.points as Array<Record<string,unknown>>) if (ids.has(Number(point.id)) && Array.isArray(point.pos)) {
+    point.pos=[Number(point.pos[0])+dx,Number(point.pos[1])+dy]
+  }
+  return true
+}
+export function removeFakeTerrain(project: ActualRouteProject, ids: ReadonlySet<string>): boolean {
+  const raw = project.aarc?.raw
+  if (!raw || !Array.isArray(raw.lines)) return false
+  const before = raw.lines.length
+  raw.lines = raw.lines.filter(entry => !(entry && typeof entry === 'object' && ids.has(String((entry as Record<string,unknown>).id)) && (entry as Record<string,unknown>).isFake === true && Number((entry as Record<string,unknown>).type) === 1))
+  project.aarc!.fakeLines = project.aarc!.fakeLines?.filter(entry => !(ids.has(String(entry.id)) && Number(entry.type) === 1))
+  return (raw.lines as unknown[]).length !== before
+}

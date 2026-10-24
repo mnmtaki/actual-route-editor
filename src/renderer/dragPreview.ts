@@ -12,6 +12,8 @@ export type DragPreviewKind =
   | 'draggingBasemapPoint'
   | 'draggingBasemapPath'
   | 'draggingRoadPoint'
+  | 'draggingAarcFakeStation'
+  | 'draggingAarcFakeTerrain'
 
 export interface DragPreviewTarget {
   kind: DragPreviewKind
@@ -70,6 +72,23 @@ export function cloneProjectForDrag(project: ActualRouteProject, target: DragPre
     return next
   }
 
+  if (target.kind === 'draggingAarcFakeTerrain') {
+    next.aarc = project.aarc ? { ...project.aarc, raw: project.aarc.raw ? { ...project.aarc.raw } : undefined } : undefined
+    if (next.aarc?.raw && Array.isArray(project.aarc?.raw?.points)) {
+      next.aarc.raw.points = (project.aarc.raw.points as Array<Record<string,unknown>>).map(point=>({
+        ...point, pos:Array.isArray(point.pos)?[...point.pos]:point.pos,
+      }))
+    }
+    return next
+  }
+  if (target.kind === 'draggingAarcFakeStation') {
+    next.aarc = project.aarc ? { ...project.aarc, raw: project.aarc.raw ? { ...project.aarc.raw } : undefined } : undefined
+    if (next.aarc?.raw && Array.isArray(project.aarc?.raw?.points)) {
+      next.aarc.raw.points = (project.aarc.raw.points as Array<Record<string,unknown>>).map(point =>
+        String(point.id) === target.id ? { ...point, pos:Array.isArray(point.pos)?[...point.pos]:point.pos } : point)
+    }
+    return next
+  }
   if (target.kind === 'draggingMapElement') {
     next.mapElements = project.mapElements?.map(element => element.id === target.id ? { ...element } : element)
     return next

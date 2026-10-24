@@ -11,6 +11,8 @@ import { getSegmentStyleIntervalAtProgress, getStructureNodePoint } from '../dat
 import { MapElementsLayer } from './MapElements'
 import { AarcTextTagsLayer } from './AarcTextTags'
 import { AarcPointLinksLayer } from './AarcPointLinks'
+import { getAarcFakeSourceLines, getAarcFakeOnlyStationPoints } from './AarcFakeLines'
+import { modifyAarcFakeStation, canMoveFakeTerrain, translateFakeTerrain } from '../data/aarcRetainedObjects'
 import { LineLegendLayer } from './LineLegend'
 import { LineBadgesLayer } from './LineBadges'
 import { VectorBasemapLayer } from './VectorBasemap'
@@ -48,7 +50,7 @@ type Gesture =
   | { kind: 'movingMapSelection'; pointerId: number; start: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
   | { kind: 'calibrationTap'; pointerId: number; startClient: Point; lastClient: Point; moved: boolean }
   | { kind: 'pinchingCanvas'; pointerIds: [number, number]; initialDistance: number; startView: View; startWorld: Point }
-  | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineLabel' | 'draggingMapElement' | 'draggingLineLegend' | 'draggingBackground' | 'draggingBasemapPoint' | 'draggingBasemapPath' | 'draggingRoadPoint'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; ownerRoadId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
+  | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineLabel' | 'draggingMapElement' | 'draggingLineLegend' | 'draggingBackground' | 'draggingAarcFakeStation' | 'draggingAarcFakeTerrain' | 'draggingBasemapPoint' | 'draggingBasemapPath' | 'draggingRoadPoint'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; ownerRoadId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
 
 type LineDraftState = { lineId: string; phaseId?: string; anchorStationId: string | null; points: LineDraftPoint[]; lastCreatedStationId?: string }
 type DrawingPointSelection = { kind: 'draft'; id: string } | { kind: 'station'; id: string } | null
@@ -353,6 +355,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       : kind === 'draggingStructureNode' ? id && segmentId ? { type: 'structureNode', id, segmentId } : null
       : kind === 'draggingLineLabel' ? id ? ownerLineId ? { type: 'lineLabel', id, lineId: ownerLineId, source: project.textTags?.some(tag => tag.id === id) ? 'aarc' : 'native' } : project.textTags?.some(tag => tag.id === id) ? { type: 'aarcTextTag', id } : null : null
       : kind === 'draggingMapElement' ? id ? { type: 'mapElement', id } : null
+      : kind === 'draggingAarcFakeStation' ? id ? { type:'aarcFakeStation',id } : null
+      : kind === 'draggingAarcFakeTerrain' ? id ? { type:'aarcFakeTerrain',id } : null
       : kind === 'draggingLineLegend' ? id ? { type: 'lineLegend', id } : null
       : kind === 'draggingRoadPoint' ? id && ownerRoadId ? { type: 'roadPoint', id, roadId: ownerRoadId } : null
       : kind === 'draggingBasemapPoint' || kind === 'draggingBasemapPath' ? ownerPathId ? { type: 'basemapPath', id: ownerPathId } : null
@@ -675,6 +679,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       if (badge) { badge.x = current.origin.x + rawDx; badge.y = current.origin.y + rawDy }
       const tag = next.textTags?.find(item => item.id === current.id)
       if (tag) { tag.x = current.origin.x + rawDx; tag.y = current.origin.y + rawDy }
+    } else if (current.kind === 'draggingAarcFakeTerrain') {
+      if (current.id) translateFakeTerrain(next,current.id,rawDx,rawDy)
+    } else if (current.kind === 'draggingAarcFakeStation') {
+      if (current.id) modifyAarcFakeStation(next,current.id,{x:current.origin.x+rawDx,y:current.origin.y+rawDy})
     } else if (current.kind === 'draggingMapElement') {
       const element = next.mapElements?.find(item => item.id === current.id)
       if (element) { element.x = current.origin.x + rawDx; element.y = current.origin.y + rawDy }
@@ -950,7 +958,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   })()
 
   const displayedMapSelections = marqueePreview ? mergeMapSelections(mapSelections, marqueePreview.hits, mapSelectAppend) : mapSelections
-  const mapRenderProject = mapMovePreview ?? project
+  const mapRenderProject = preview && (activeDragKind === 'draggingAarcFakeStation' || activeDragKind === 'draggingAarcFakeTerrain') ? shown : mapMovePreview ?? project
   const displayedMapKeys = new Set(displayedMapSelections.map(selectionIdentity))
   const mapSelectionMarker = (x: number, y: number, key: string) => displayedMapKeys.has(key) ? <circle key={key} cx={x} cy={y} r={9} fill="none" stroke="#bd8b19" strokeWidth={2} vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null
 
@@ -999,6 +1007,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
             selectedId={selection?.type === 'road' || selection?.type === 'roadPoint' ? (selection.type === 'road' ? selection.id : selection.roadId) : selection?.type === 'basemapPath' ? selection.id : undefined}
             hitRadius={stationHitRadius}
             excludeObjectIds={preview && dragVectorBasemapOverlay.kind === 'road' ? dragVectorBasemapOverlay.objectIds : undefined}
+            selectedAarcTextTagId={selection?.type === 'aarcTextTag' || (selection?.type === 'lineLabel' && selection.source === 'aarc') ? selection.id : undefined}
+            onAarcTextTagPointerDown={drawing ? undefined : handleAarcTextTagPointerDown}
+            onAarcLineLabelPointerDown={drawing ? undefined : handleAarcLineLabelPointerDown}
+            excludeAarcTextTagIds={dragLineLabelOverlay.source === 'aarc' ? dragLineLabelOverlay.labelIds : undefined}
             onRoadPointerDown={handleRoadPointerDown}
             onRoadPointPointerDown={handleRoadPointPointerDown}
             onPathPointerDown={handleBasemapPathPointerDown}
@@ -1028,6 +1040,17 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     {showStationSpacing && !drawing && <StationSpacingLayer project={shown} worldUnitsPerPixel={view.width / Math.max(1, canvasWidth)} />}
     {selectedInterval&&<g data-layer="style-interval-selection" data-editor="true" pointerEvents="none"><path d={selectedInterval.path} fill="none" stroke="#d2a72f" strokeWidth={(shown.lines.find(line=>line.id===selectedInterval.segment.lineId)?.lineWidth??shown.settings.lineWidth)+7} strokeLinecap="round" strokeLinejoin="round" opacity=".24" vectorEffect="non-scaling-stroke"/></g>}
     {phasePreview && <g data-layer="opening-phase-preview" pointerEvents="none">{phasePreview.segmentIds.map(id => { const segment = shown.geometry.segments.find(item => item.id === id); const rawLine = segment ? shown.lines.find(item => item.id === segment.lineId) : null; const line = rawLine ? lineWithEffectiveColor(shown, rawLine, shown.timeline.currentDate) : null; return segment && line ? <path key={id} d={getSegmentPath(shown, segment)} className="opening-phase-preview-segment" stroke={line.color} /> : null })}{phasePreview.stationIds.map(id => { const station = shown.stations.find(item => item.id === id); return station && isCompoundStationCanonical(shown, station) ? <circle key={id} cx={station.x} cy={station.y} r={effectiveStationStyle(station, shown.settings).stationSize * .9} className="opening-phase-preview-station" /> : null })}</g>}
+    {!drawing && <g data-layer="aarc-fake-common-line-hits" data-editor="true" pointerEvents="none">
+      {getAarcFakeSourceLines(mapRenderProject).filter(raw=>Number(raw.type)!==1).map(raw=>{
+        const native=mapRenderProject.lines.find(line=>line.isFake && line.source?.format==='aarc' && Number(line.source.sourceLineId??line.source.lineId)===Number(raw.id))
+        const d=buildAarcFakeLinePath(mapRenderProject,raw)
+        return native?.visible!==false && native && d ? <path key={native.id} data-aarc-fake-line-hit={native.id}
+          d={d} stroke={selection?.type==='line'&&selection.id===native.id?'#d39b25':'transparent'}
+          strokeWidth={Math.max(12,mapRenderProject.settings.lineWidth)} fill="none"
+          strokeOpacity={selection?.type==='line'&&selection.id===native.id ? .7 : 1}
+          pointerEvents="stroke" onPointerDown={event=>{event.stopPropagation();onSelect({type:'line',id:native.id})}}/>:null
+      })}
+    </g>}
     <NetworkStationLayer
       project={mapRenderProject}
       selection={selection}
@@ -1048,7 +1071,24 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       overlay
     />}
     <AarcFakeLinesLayer project={mapRenderProject} part="stations" />
-    <AarcPointLinksLayer project={mapRenderProject} />
+    {!drawing && <g data-layer="aarc-fake-terrain-hits" data-editor="true" pointerEvents="none">
+      {getAarcFakeSourceLines(mapRenderProject).filter(line => Number(line.type) === 1 && line.id !== undefined).map(line => {
+        const path = buildAarcFakeLinePath(mapRenderProject, line)
+        return path ? <path key={String(line.id)} data-aarc-fake-terrain-hit={String(line.id)} d={path}
+          stroke={selection?.type === 'aarcFakeTerrain' && selection.id === String(line.id) ? '#d39b25' : 'transparent'}
+          strokeWidth={Math.max(12,Number(line.width)||1)*2} fill="none" strokeOpacity={selection?.type === 'aarcFakeTerrain' && selection.id === String(line.id) ? .75 : 1}
+          pointerEvents="stroke" onPointerDown={event => { event.stopPropagation(); const id=String(line.id);if (!canMoveFakeTerrain(project,id)) { onSelect({type:'aarcFakeTerrain',id}); onEditBlocked?.('该地形与其他线路共用控制点，请使用属性面板或删除'); return }; const pos=Array.isArray(line.pts)? (project.aarc?.raw?.points as Array<Record<string,unknown>>|undefined)?.find(point=>Number(point.id)===Number((line.pts as unknown[])[0]))?.pos : undefined;const origin=Array.isArray(pos)? {x:Number(pos[0]),y:Number(pos[1])}:{x:0,y:0};if(startObjectDrag('draggingAarcFakeTerrain',event,origin,id))onSelect({type:'aarcFakeTerrain',id}) }} /> : null
+      })}
+    </g>}
+    <AarcPointLinksLayer project={mapRenderProject} selectedId={selection?.type === 'aarcPointLink' ? selection.id : undefined} onSelect={drawing ? undefined : id => onSelect({type:'aarcPointLink',id})} />
+    {!drawing && <g data-layer="aarc-fake-station-hits" data-editor="true" pointerEvents="none">
+      {getAarcFakeOnlyStationPoints(mapRenderProject).map(point=><g key={point.id} data-aarc-fake-station-hit={point.id}>
+        <circle cx={point.x} cy={point.y} r={Math.max(7,stationHitRadius*.7)}
+          fill={selection?.type === 'aarcFakeStation' && selection.id === point.id ? '#edc15455' : 'transparent'}
+          stroke={selection?.type === 'aarcFakeStation' && selection.id === point.id ? '#c3952c' : 'none'}
+          pointerEvents="all" onPointerDown={event=>{event.stopPropagation();if(startObjectDrag('draggingAarcFakeStation',event,{x:point.x,y:point.y},point.id))onSelect({type:'aarcFakeStation',id:point.id})}}/>
+      </g>)}
+    </g>}
     <NetworkStationLayer
       project={mapRenderProject}
       selection={selection}
@@ -1101,6 +1141,14 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       onLineLabelPointerDown={handleAarcLineLabelPointerDown}
       onTextTagPointerDown={handleAarcTextTagPointerDown}
     />
+    {activeLineLabelProject && dragLineLabelOverlay.source === 'aarc' && <AarcTextTagsLayer
+      project={activeLineLabelProject}
+      selectedId={selection?.type === 'aarcTextTag' ? selection.id : undefined}
+      hitRadius={stationHitRadius}
+      includeTagIds={dragLineLabelOverlay.labelIds}
+      mode="sunken"
+      overlay
+    />}
     {activeLineLabelProject && dragLineLabelOverlay.source === 'aarc' && <AarcTextTagsLayer
       project={activeLineLabelProject}
       selectedId={selection?.type === 'aarcTextTag' || (selection?.type === 'lineLabel' && selection.source === 'aarc') ? selection.id : undefined}
@@ -1191,6 +1239,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       ])}
       {mapRenderProject.lines.flatMap(line => (line.lineBadges ?? []).map(badge => mapSelectionMarker(badge.x,badge.y,'lineLabel:'+badge.id+':native')))}
       {(mapRenderProject.textTags ?? []).map(tag => mapSelectionMarker(tag.x,tag.y, displayedMapKeys.has('aarcTextTag:'+tag.id) ? 'aarcTextTag:'+tag.id : 'lineLabel:'+tag.id+':aarc'))}
+      {getAarcFakeSourceLines(mapRenderProject).filter(line => Number(line.type) === 1 && displayedMapKeys.has('aarcFakeTerrain:'+String(line.id))).map(line => <path key={'terrain-'+line.id} d={buildAarcFakeLinePath(mapRenderProject,line)} fill="none" stroke="#ca9b2e" strokeWidth={12} opacity=".6" pointerEvents="none"/>)}
       {(mapRenderProject.mapElements ?? []).map(element => mapSelectionMarker(element.x,element.y,'mapElement:'+element.id))}
       {(mapRenderProject.roads ?? []).filter(road => displayedMapKeys.has('road:'+road.id)).map(road => <polyline key={road.id} points={road.points.map(point => point.x+','+point.y).join(' ')} fill="none" stroke="#ca9b2e" strokeWidth={8} strokeOpacity=".55" pointerEvents="none"/>)}
       {(mapRenderProject.basemapPaths ?? []).filter(path => displayedMapKeys.has('basemapPath:'+path.id)).map(path => <polyline key={path.id} points={path.points.map(point => point.x+','+point.y).join(' ')} fill="none" stroke="#ca9b2e" strokeWidth={8} strokeOpacity=".55" pointerEvents="none"/>)}

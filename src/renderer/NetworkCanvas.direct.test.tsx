@@ -187,6 +187,76 @@ describe('direct manipulation gestures', () => {
     expect(onDragCommit).not.toHaveBeenCalled()
   })
 
+  it('selects and drags an AARC fake-only station marker without deleting its line point', () => {
+    const project=structuredClone(demoProject),onSelect=vi.fn(),onDragCommit=vi.fn()
+    project.aarc={format:'aarc',raw:{
+      lines:[{id:901,isFake:true,type:0,color:'#397b79',pts:[771,772]}],
+      points:[{id:771,pos:[550,380],sta:1,name:'伪线站点'},{id:772,pos:[670,380],sta:0}],
+    }}
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} onSelect={onSelect} onDragCommit={onDragCommit}/>)
+    const svg=container.querySelector('svg')!
+    vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
+    const hit=container.querySelector('[data-aarc-fake-station-hit="771"] circle')!
+    fireEvent.pointerDown(hit,{pointerId:151,clientX:550,clientY:380,bubbles:true})
+    expect(onSelect).toHaveBeenCalledWith({type:'aarcFakeStation',id:'771'})
+    fireEvent.pointerMove(svg,{pointerId:151,clientX:585,clientY:395,bubbles:true})
+    fireEvent.pointerUp(svg,{pointerId:151,clientX:585,clientY:395,bubbles:true})
+    expect(onDragCommit).toHaveBeenCalledTimes(1)
+    const raw=onDragCommit.mock.calls[0][1].aarc.raw
+    expect(raw.points[0].pos).toEqual([585,395])
+    expect(raw.lines[0].pts).toEqual([771,772])
+    expect((project.aarc?.raw?.points as Array<{pos:number[]}>)[0].pos).toEqual([550,380])
+  })
+
+  it('selects, previews and drags sunken AARC text instead of leaving it unclickable', () => {
+    const project=structuredClone(demoProject),onSelect=vi.fn(),onDragCommit=vi.fn()
+    project.textTags=[{id:'sunken-zone',kind:'FreeMapText',x:450,y:260,sunken:true,text:'下沉地名'}]
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} onSelect={onSelect} onDragCommit={onDragCommit}/>)
+    const svg=container.querySelector('svg')!
+    vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
+    const tag=container.querySelector('[data-aarc-text-tag-layer="sunken"] [data-aarc-text-tag-id="sunken-zone"]')!
+    const hit=tag.querySelector('[data-editor="true"]')!
+    fireEvent.pointerDown(hit,{pointerId:152,clientX:450,clientY:260,bubbles:true})
+    expect(onSelect).toHaveBeenCalledWith({type:'aarcTextTag',id:'sunken-zone'})
+    fireEvent.pointerMove(svg,{pointerId:152,clientX:475,clientY:270,bubbles:true})
+    expect(container.querySelectorAll('[data-aarc-text-tag-id="sunken-zone"]')).toHaveLength(1)
+    fireEvent.pointerUp(svg,{pointerId:152,clientX:475,clientY:270,bubbles:true})
+    expect(onDragCommit).toHaveBeenCalledTimes(1)
+    expect(onDragCommit.mock.calls[0][1].textTags[0]).toMatchObject({x:475,y:270})
+  })
+
+  it('selects and moves isolated AARC fake terrain artwork while preserving the raw line record', () => {
+    const project=structuredClone(demoProject),onSelect=vi.fn(),onDragCommit=vi.fn()
+    project.aarc={format:'aarc',raw:{
+      lines:[{id:902,isFake:true,type:1,color:'#81a476',pts:[773,774]}],
+      points:[{id:773,pos:[550,430],sta:0},{id:774,pos:[670,430],sta:0}],
+    }}
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} onSelect={onSelect} onDragCommit={onDragCommit}/>)
+    const svg=container.querySelector('svg')!
+    vi.spyOn(svg,'getBoundingClientRect').mockReturnValue({x:0,y:0,left:0,top:0,right:920,bottom:680,width:920,height:680,toJSON:()=>({})})
+    const hit=container.querySelector('[data-aarc-fake-terrain-hit="902"]')!
+    fireEvent.pointerDown(hit,{pointerId:153,clientX:600,clientY:430,bubbles:true})
+    expect(onSelect).toHaveBeenCalledWith({type:'aarcFakeTerrain',id:'902'})
+    fireEvent.pointerMove(svg,{pointerId:153,clientX:620,clientY:442,bubbles:true})
+    fireEvent.pointerUp(svg,{pointerId:153,clientX:620,clientY:442,bubbles:true})
+    expect(onDragCommit).toHaveBeenCalledTimes(1)
+    const raw=onDragCommit.mock.calls[0][1].aarc.raw
+    expect(raw.points.map((point:{pos:number[]})=>point.pos)).toEqual([[570,442],[690,442]])
+    expect(raw.lines[0].pts).toEqual([773,774])
+  })
+
+  it('clicks a visual AARC point link and exposes the ordinary object inspector selection',()=>{
+    const project=structuredClone(demoProject),onSelect=vi.fn()
+    project.aarc={format:'aarc',pointLinks:[{pts:[981,982],type:1}],raw:{
+      lines:[],points:[{id:981,pos:[600,530],sta:1},{id:982,pos:[700,530],sta:1}],
+      pointLinks:[{pts:[981,982],type:1}],
+    }}
+    const {container}=render(<NetworkCanvas {...baseProps} project={project} onSelect={onSelect}/>)
+    const hit=container.querySelector('[data-aarc-point-link-hit="aarc-point-link-0"]')!
+    fireEvent.pointerDown(hit,{pointerId:154,clientX:650,clientY:530,bubbles:true})
+    expect(onSelect).toHaveBeenCalledWith({type:'aarcPointLink',id:'aarc-point-link-0'})
+  })
+
   it('keeps station markers and labels visible when a native line is switched to fake', () => {
     const project = structuredClone(demoProject)
     project.lines.find(line => line.id === 'line-a')!.isFake = true

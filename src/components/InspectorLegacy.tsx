@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { changePointLinkType, retargetPointLink, sourcePointLinks, fakeTerrainSource, aarcFakeStationSource, modifyAarcFakeStation, canMoveFakeTerrain, translateFakeTerrain } from '../data/aarcRetainedObjects'
 import type { ActualRouteProject, BasemapPathCategory, LabelDirection, Line, LineStyleOverrides, Selection, SegmentMode, StationStyleOverrides, StructureType } from '../data/model'
 import { uid } from '../data/model'
 import { clearRelationDateOverride, markRelationDateOverride, markSegmentDateOverride, phaseForRelation, phaseForSegment, type OpeningPhasePath } from '../data/openingPhases'
@@ -90,6 +91,46 @@ export function Inspector({ project, selection, onChange, onDelete, onAddLineBad
         content = <><h3>线路标签</h3><Field label="线路"><input readOnly value={getLineDisplayName(project, line)} /></Field><Field label="来源"><input readOnly value="AARC 导入（保真）" /></Field><Field label="边距"><input aria-label="AARC线路标签边距" type="number" inputMode="decimal" min="0" step=".25" value={tag.padding??0} onChange={event=>{const value=Number(event.target.value);if(Number.isFinite(value))setTagNumber('padding',value)}} /></Field><Field label="最小宽度"><input aria-label="AARC线路标签最小宽度" type="number" inputMode="decimal" min="0" step="1" value={tag.width??0} onChange={event=>{const value=Number(event.target.value);if(Number.isFinite(value))setTagNumber('width',value)}} /></Field><Field label="横向锚点"><select value={tag.anchorX??''} onChange={event=>patch(next=>{const target=next.textTags?.find(item=>item.id===tag.id);if(target)target.anchorX=event.target.value===''?undefined:Number(event.target.value) as -1|0|1})}><option value="">默认</option><option value="1">左侧</option><option value="0">中心</option><option value="-1">右侧</option></select></Field><Field label="纵向锚点"><select value={tag.anchorY??''} onChange={event=>patch(next=>{const target=next.textTags?.find(item=>item.id===tag.id);if(target)target.anchorY=event.target.value===''?undefined:Number(event.target.value) as -1|0|1})}><option value="">默认</option><option value="1">顶部</option><option value="0">中心</option><option value="-1">底部</option></select></Field><label className="toggle-row">数字放大<input type="checkbox" checked={tag.dropCap??true} onChange={event=>patch(next=>{const target=next.textTags?.find(item=>item.id===tag.id);if(target)target.dropCap=event.target.checked})}/></label><p className="meta-note">这是同一种“线路标签”，但保留 AARC 的原始标签语义；边距会按 AARC 的粗描边 + round join 方式还原原图。</p><button className="danger" onClick={onDelete}>删除线路标签</button></>
       }
     }
+  } else if (selection?.type === 'aarcPointLink') {
+    const index = Number(selection.id.replace('aarc-point-link-',''))
+    const link = sourcePointLinks(project)[index]
+    if (link && [0,1,2,3].includes(Number(link.type))) content = <>
+      <h3>AARC 车站连线</h3>
+      {([0,1] as const).map(end=><Field key={end} label={end===0?'起点':'终点'}>
+        <select aria-label={end===0?'车站连线起点':'车站连线终点'} value={Number(Array.isArray(link.pts)?link.pts[end]:-1)}
+          onChange={event=>patch(next=>{retargetPointLink(next,selection.id,end,Number(event.target.value))})}>
+          {(Array.isArray(project.aarc?.raw?.points)?project.aarc.raw.points:[]).filter((point):point is Record<string,unknown>=>Boolean(point && typeof point==='object')).map(point=>
+            <option key={String(point.id)} value={Number(point.id)}>{String(point.name||'原始点')} · #{String(point.id)}</option>)}
+        </select>
+      </Field>)}
+      <Field label="连线类型"><select aria-label="车站连线类型" value={Number(link.type)} onChange={event=>patch(next=>{changePointLinkType(next,selection.id,Number(event.target.value) as 0|1|2|3)})}>
+        <option value={0}>0 · 三层连接</option><option value={1}>1 · 普通连接</option>
+        <option value={2}>2 · 虚线连接</option><option value={3}>3 · 带端点虚线</option>
+      </select></Field>
+      <p className="meta-note">连接端点仍引用原始 AARC 点。可以更改连接样式或删除，不会连带删除车站。</p>
+      <button className="danger" onClick={onDelete}>删除车站连线</button>
+    </>
+  } else if (selection?.type === 'aarcFakeStation') {
+    const source=aarcFakeStationSource(project,selection.id)
+    if (source && Number(source.sta)===1) content=<><h3>AARC 伪线车站标记</h3>
+      <Field label="名称"><input value={String(source.name??'')} onChange={event=>patch(next=>{modifyAarcFakeStation(next,selection.id,{name:event.target.value})})}/></Field>
+      <div className="field-grid">
+        <Field label="X"><input type="number" value={Number((source.pos as number[])[0])} onChange={event=>{const x=Number(event.target.value);if(Number.isFinite(x))patch(next=>{modifyAarcFakeStation(next,selection.id,{x})})}}/></Field>
+        <Field label="Y"><input type="number" value={Number((source.pos as number[])[1])} onChange={event=>{const y=Number(event.target.value);if(Number.isFinite(y))patch(next=>{modifyAarcFakeStation(next,selection.id,{y})})}}/></Field>
+      </div>
+      <p className="meta-note">删除仅去掉此处的伪线站点标记，保留原始线路路径。</p>
+      <button className="danger" onClick={onDelete}>移除伪线站点标记</button>
+    </>
+  } else if (selection?.type === 'aarcFakeTerrain') {
+    const terrain = fakeTerrainSource(project,selection.id)
+    if (terrain) content = <><h3>AARC 原始伪地形</h3>
+      <Field label="原始 ID"><input readOnly value={selection.id}/></Field>
+      <Field label="颜色"><input type="color" value={typeof terrain.color === 'string' && /^#[0-9a-f]{6}$/i.test(terrain.color) ? terrain.color : '#64748b'} onChange={event=>patch(next=>{const target=fakeTerrainSource(next,selection.id);if(target)target.color=event.target.value})}/></Field>
+      <Field label="宽度比例"><input type="number" min=".01" step=".1" value={Number(terrain.width)||1} onChange={event=>patch(next=>{const target=fakeTerrainSource(next,selection.id);if(target)target.width=Math.max(.01,Number(event.target.value)||1)})}/></Field>
+      <p className="meta-note">{canMoveFakeTerrain(project,selection.id)?'可在画布上拖动整体位置；也可使用下面的微调按钮。':'与其他线路共用原始控制点，暂不允许整体平移，以免破坏线网。'}</p>
+      <div className="field-grid"><button type="button" disabled={!canMoveFakeTerrain(project,selection.id)} onClick={()=>patch(next=>{translateFakeTerrain(next,selection.id,-10,0)})}>← 左移</button><button type="button" disabled={!canMoveFakeTerrain(project,selection.id)} onClick={()=>patch(next=>{translateFakeTerrain(next,selection.id,10,0)})}>右移 →</button></div>
+      <button className="danger" onClick={onDelete}>删除原始地形</button>
+    </>
   } else if (selection?.type === 'aarcTextTag') {
     const tag = project.textTags?.find(item => item.id === selection.id)
     if (tag) content = <>

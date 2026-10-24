@@ -3,6 +3,8 @@ import { getSegmentCurveSamples } from '../geometry/path'
 import { getStructureNodePoint } from '../data/structure'
 import { getLineLegendLayout } from '../data/lineLegend'
 import { ownerLineForAarcTag } from './aarcTextTagLifecycle'
+import { resolveAarcPointLinksArtwork } from '../import-export/aarcPointLinks'
+import { getAarcFakeSourceLines, getAarcFakeOnlyStationPoints } from '../renderer/AarcFakeLines'
 
 export type MapItemSelection = Exclude<Selection, null>
 export type MapRect = { left: number; top: number; right: number; bottom: number }
@@ -76,6 +78,21 @@ export function hitMapObjects(project: ActualRouteProject, rect: MapRect, textTa
     if (!(visualBounds ? intersects(visualBounds, rect) : inside(tag, rect))) continue
     if (ownerLineId) push({ type: 'lineLabel', id: tag.id, lineId: ownerLineId, source: 'aarc' })
     else push({ type: 'aarcTextTag', id: tag.id })
+  }
+  for (const point of getAarcFakeOnlyStationPoints(project)) {
+    if (inside(point,rect)) push({type:'aarcFakeStation',id:point.id})
+  }
+  for (const link of resolveAarcPointLinksArtwork(project).links) {
+    if (segmentTouchesRect(link.start, link.end, rect)) push({ type: 'aarcPointLink', id: link.id })
+  }
+  for (const raw of getAarcFakeSourceLines(project)) if (Number(raw.type) === 1 && raw.id !== undefined) {
+    const points = Array.isArray(raw.pts) ? raw.pts.flatMap(id => {
+      const source = rawPoints.find(point => Number(point.id) === Number(id))
+      const pos = source?.pos
+      return Array.isArray(pos) && Number.isFinite(Number(pos[0])) && Number.isFinite(Number(pos[1]))
+        ? [{ x: Number(pos[0]), y: Number(pos[1]) }] : []
+    }) : []
+    if (polylineTouches(points, rect)) push({ type: 'aarcFakeTerrain', id: String(raw.id) })
   }
   for (const element of project.mapElements ?? []) if (element.visible && inside(element, rect)) push({ type: 'mapElement', id: element.id })
   for (const road of project.roads ?? []) if (road.visible && polylineTouches(road.points, rect)) {

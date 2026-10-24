@@ -16,7 +16,7 @@ function Link({ link, layer, color }: { link: AarcPointLinkArtwork; layer: 'carp
   />
 }
 
-export const AarcPointLinksLayer = memo(function AarcPointLinksLayer({ project }: { project: ActualRouteProject }) {
+export const AarcPointLinksLayer = memo(function AarcPointLinksLayer({ project, selectedId, onSelect }: { project: ActualRouteProject; selectedId?: string; onSelect?: (id: string) => void }) {
   const artwork = useMemo(() => resolveAarcPointLinksArtwork(project), [project])
   if (!artwork.links.length && !artwork.covers.length) return null
   const coverWidth = (layer: 'carpet' | 'body' | 'core', sizeRatio: number) => layer === 'carpet'
@@ -30,5 +30,11 @@ export const AarcPointLinksLayer = memo(function AarcPointLinksLayer({ project }
       {artwork.covers.map(cover => <circle key={`${layer}-${cover.pointId}`} data-aarc-point-link-cover={cover.pointId} data-aarc-point-link-cover-layer={layer} cx={cover.x} cy={cover.y} r={Math.max(0, coverWidth(layer, cover.sizeRatio) / 2)} fill={layerColor(layer)} />)}
       {artwork.links.map(link => <Link key={`${layer}-${link.id}`} link={link} layer={layer} color={layerColor(layer)} />)}
     </g>)}
+    {onSelect && <g data-editor="true" data-layer="aarc-point-links-hits" pointerEvents="none">{artwork.links.map(link =>
+      <line key={link.id} data-aarc-point-link-hit={link.id} x1={link.start.x} y1={link.start.y} x2={link.end.x} y2={link.end.y}
+        stroke={selectedId === link.id ? '#d39b25' : 'transparent'} strokeWidth={Math.max(14, link.bodyWidth+6)}
+        strokeOpacity={selectedId === link.id ? .75 : 1} pointerEvents="stroke"
+        onPointerDown={event => { event.stopPropagation(); onSelect(link.id) }} />
+    )}</g>}
   </g>
 })

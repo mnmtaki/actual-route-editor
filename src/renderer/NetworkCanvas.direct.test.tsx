@@ -205,7 +205,7 @@ describe('direct manipulation gestures', () => {
     const raw=onDragCommit.mock.calls[0][1].aarc.raw
     expect(raw.points[0].pos).toEqual([585,395])
     expect(raw.lines[0].pts).toEqual([771,772])
-    expect(project.aarc.raw.points[0].pos).toEqual([550,380])
+    expect((project.aarc?.raw?.points as Array<{pos:number[]}>)[0].pos).toEqual([550,380])
   })
 
   it('selects, previews and drags sunken AARC text instead of leaving it unclickable', () => {

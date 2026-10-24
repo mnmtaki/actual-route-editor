@@ -1049,6 +1049,15 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       overlay
     />}
     <AarcFakeLinesLayer project={mapRenderProject} part="stations" />
+    {!drawing && <g data-layer="aarc-fake-terrain-hits" data-editor="true" pointerEvents="none">
+      {getAarcFakeSourceLines(mapRenderProject).filter(line => Number(line.type) === 1 && line.id !== undefined).map(line => {
+        const path = buildAarcFakeLinePath(mapRenderProject, line)
+        return path ? <path key={String(line.id)} data-aarc-fake-terrain-hit={String(line.id)} d={path}
+          stroke={selection?.type === 'aarcFakeTerrain' && selection.id === String(line.id) ? '#d39b25' : 'transparent'}
+          strokeWidth={Math.max(12,Number(line.width)||1)*2} fill="none" strokeOpacity={selection?.type === 'aarcFakeTerrain' && selection.id === String(line.id) ? .75 : 1}
+          pointerEvents="stroke" onPointerDown={event => { event.stopPropagation(); onSelect({ type:'aarcFakeTerrain',id:String(line.id) }) }} /> : null
+      })}
+    </g>}
     <AarcPointLinksLayer project={mapRenderProject} selectedId={selection?.type === 'aarcPointLink' ? selection.id : undefined} onSelect={drawing ? undefined : id => onSelect({type:'aarcPointLink',id})} />
     <NetworkStationLayer
       project={mapRenderProject}

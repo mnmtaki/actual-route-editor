@@ -1,7 +1,7 @@
 import type { ActualRouteProject } from './model'
 
 export const pointLinkIndex = (id: string): number | null => {
-  const match = /^aarc-point-link-(\\d+)$/.exec(id)
+  const match = /^aarc-point-link-(\d+)$/.exec(id)
   return match ? Number(match[1]) : null
 }
 export function sourcePointLinks(project: ActualRouteProject): Record<string, unknown>[] {

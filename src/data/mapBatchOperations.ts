@@ -40,6 +40,7 @@ function geometryTargets(project: ActualRouteProject, items: readonly MapItemSel
 export function moveSelectedMapObjects(project: ActualRouteProject, items: readonly MapItemSelection[], dx: number, dy: number): Result {
   if (!items.length || !Number.isFinite(dx) || !Number.isFinite(dy) || (!dx && !dy)) return { project, changed: false }
   const target = geometryTargets(project, items)
+  if (items.some(item => item.type === 'aarcPointLink' || item.type === 'aarcFakeTerrain')) return blocked(project, '原始 AARC 连接或地形暂不支持整体平移，请在属性面板编辑或删除')
   for (const id of target.lineIds) if (ownerLocked(project, id)) return blocked(project, '所选线路包含锁定线路，请先解锁')
   for (const id of target.segmentIds) if (isSegmentGeometryLocked(project, id)) return blocked(project, '所选区间属于锁定线路，请先解锁')
   for (const id of target.stations) if (isStationGeometryLocked(project, id)) return blocked(project, '所选车站关联锁定线路，请先解锁')
@@ -108,7 +109,6 @@ export function moveSelectedMapObjects(project: ActualRouteProject, items: reado
 export function deleteSelectedMapObjects(project: ActualRouteProject, items: readonly MapItemSelection[]): Result {
   if (!items.length) return { project, changed: false }
   const target = geometryTargets(project, items)
-  if (items.some(item => item.type === 'aarcPointLink' || item.type === 'aarcFakeTerrain')) return blocked(project, '原始 AARC 连接或地形暂不支持整体平移，请在属性面板编辑或删除')
   for (const id of target.lineIds) {
     if (ownerLocked(project, id)) return blocked(project, '所选线路包含锁定线路，请先解锁')
     // Native deletion cascades to branches, including ones outside the box.

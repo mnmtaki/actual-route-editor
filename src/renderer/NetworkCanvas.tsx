@@ -351,7 +351,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       ? id ? { type: 'station', id } : null
       : kind === 'draggingWaypoint' ? id && segmentId ? { type: 'waypoint', id, segmentId } : null
       : kind === 'draggingStructureNode' ? id && segmentId ? { type: 'structureNode', id, segmentId } : null
-      : kind === 'draggingLineLabel' ? id && ownerLineId ? { type: 'lineLabel', id, lineId: ownerLineId, source: project.textTags?.some(tag => tag.id === id) ? 'aarc' : 'native' } : null
+      : kind === 'draggingLineLabel' ? id ? ownerLineId ? { type: 'lineLabel', id, lineId: ownerLineId, source: project.textTags?.some(tag => tag.id === id) ? 'aarc' : 'native' } : project.textTags?.some(tag => tag.id === id) ? { type: 'aarcTextTag', id } : null : null
       : kind === 'draggingMapElement' ? id ? { type: 'mapElement', id } : null
       : kind === 'draggingLineLegend' ? id ? { type: 'lineLegend', id } : null
       : kind === 'draggingRoadPoint' ? id && ownerRoadId ? { type: 'roadPoint', id, roadId: ownerRoadId } : null
@@ -845,6 +845,14 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     }
   }, [drawing, onSelect, startObjectDrag])
 
+  const handleAarcTextTagPointerDown = useCallback((event: React.PointerEvent<SVGGElement>, tag: NonNullable<ActualRouteProject['textTags']>[number]) => {
+    if (drawing) return
+    event.stopPropagation()
+    if (startObjectDrag('draggingLineLabel', event, { x: tag.x, y: tag.y }, tag.id)) {
+      onSelect({ type: 'aarcTextTag', id: tag.id })
+    }
+  }, [drawing, onSelect, startObjectDrag])
+
   const handleStationPointerDown = useCallback((event: React.PointerEvent, station: ActualRouteProject['stations'][number]) => {
     event.stopPropagation()
     if (drawing?.kind === 'line') { connectDrawingToStation(station.id); return }
@@ -1087,14 +1095,15 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     />}
     <AarcTextTagsLayer
       project={staticHistoricalIdentityProject}
-      selectedId={selection?.type === 'lineLabel' && selection.source === 'aarc' ? selection.id : undefined}
+      selectedId={selection?.type === 'aarcTextTag' || (selection?.type === 'lineLabel' && selection.source === 'aarc') ? selection.id : undefined}
       hitRadius={stationHitRadius}
       excludeTagIds={dragLineLabelOverlay.source === 'aarc' ? dragLineLabelOverlay.labelIds : undefined}
       onLineLabelPointerDown={handleAarcLineLabelPointerDown}
+      onTextTagPointerDown={handleAarcTextTagPointerDown}
     />
     {activeLineLabelProject && dragLineLabelOverlay.source === 'aarc' && <AarcTextTagsLayer
       project={activeLineLabelProject}
-      selectedId={selection?.type === 'lineLabel' && selection.source === 'aarc' ? selection.id : undefined}
+      selectedId={selection?.type === 'aarcTextTag' || (selection?.type === 'lineLabel' && selection.source === 'aarc') ? selection.id : undefined}
       hitRadius={stationHitRadius}
       includeTagIds={dragLineLabelOverlay.labelIds}
       overlay

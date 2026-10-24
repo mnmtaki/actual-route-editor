@@ -134,6 +134,59 @@ describe('direct manipulation gestures', () => {
     expect(onDragCommit.mock.calls[0][1].textTags[0]).toMatchObject({x:240,y:175})
   })
 
+
+  it.each([
+    { kind: 'FreeMapText' as const, id: 'unbound-text', text: '孤立地图文字' },
+    { kind: 'TerrainNameLabel' as const, id: 'terrain-text', text: '狸岩区' },
+    { kind: 'MapIcon' as const, id: 'map-icon', text: undefined },
+  ])('directly selects and drags imported AARC $kind without changing siblings or original data', ({ kind, id, text }) => {
+    const project = structuredClone(demoProject)
+    project.aarc = {
+      format: 'aarc',
+      raw: { lines: [{ id: 87, type: 1, name: '狸岩区', nameSub: 'Liyan District', color: '#777777' }] },
+    }
+    project.textTags = [
+      {
+        id, kind, x: 600, y: 450,
+        ...(text ? { text, textOverride: text } : {}),
+        ...(kind === 'TerrainNameLabel' ? { source: { format: 'aarc' as const, kind: 'text-tag' as const, forId: 87, targetKind: 'terrain' as const } } : {}),
+        ...(kind === 'MapIcon' ? { iconId: 'sample-icon' } : {}),
+      },
+      { id: 'unchanged', kind: 'FreeMapText', x: 100, y: 90, text: '不应移动' },
+    ]
+    const onSelect = vi.fn(), onDragCommit = vi.fn()
+    const { container } = render(<NetworkCanvas {...baseProps} project={project} onSelect={onSelect} onDragCommit={onDragCommit} />)
+    const svg = container.querySelector('svg')!
+    vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, left: 0, top: 0, right: 920, bottom: 680, width: 920, height: 680, toJSON: () => ({}) })
+    const tag = container.querySelector(`[data-aarc-text-tag-id="${id}"]`)!
+    expect(tag.querySelector('[data-editor="true"]')).not.toBeNull()
+    fireEvent.pointerDown(tag, { pointerId: 77, clientX: 600, clientY: 450, bubbles: true })
+    expect(onSelect).toHaveBeenCalledWith({ type: 'aarcTextTag', id })
+    fireEvent.pointerMove(svg, { pointerId: 77, clientX: 650, clientY: 470, bubbles: true })
+    expect(container.querySelectorAll(`[data-aarc-text-tag-id="${id}"]`)).toHaveLength(1)
+    fireEvent.pointerUp(svg, { pointerId: 77, clientX: 650, clientY: 470, bubbles: true })
+    expect(onDragCommit).toHaveBeenCalledTimes(1)
+    const changed = onDragCommit.mock.calls[0][1]
+    expect(changed.textTags.find((tag: { id: string }) => tag.id === id)).toMatchObject({ x: 650, y: 470 })
+    expect(changed.textTags.find((tag: { id: string }) => tag.id === 'unchanged')).toMatchObject({ x: 100, y: 90 })
+    expect(project.textTags[0]).toMatchObject({ x: 600, y: 450 })
+  })
+
+  it('shows selected marker for imported independent text and does not commit on click only', () => {
+    const project = structuredClone(demoProject)
+    project.textTags = [{ id: 'text-only', kind: 'FreeMapText', x: 300, y: 180, text: '测试文字' }]
+    const onSelect = vi.fn(), onDragCommit = vi.fn()
+    const { container } = render(<NetworkCanvas {...baseProps} project={project} selection={{ type: 'aarcTextTag', id: 'text-only' }} onSelect={onSelect} onDragCommit={onDragCommit} />)
+    const svg = container.querySelector('svg')!
+    const tag = container.querySelector('[data-aarc-text-tag-id="text-only"]')!
+    expect(tag.classList.contains('selected')).toBe(true)
+    expect(tag.querySelector('circle[data-editor="true"]')).not.toBeNull()
+    fireEvent.pointerDown(tag, { pointerId: 81, clientX: 300, clientY: 180, bubbles: true })
+    fireEvent.pointerUp(svg, { pointerId: 81, clientX: 300, clientY: 180, bubbles: true })
+    expect(onSelect).toHaveBeenCalledWith({ type: 'aarcTextTag', id: 'text-only' })
+    expect(onDragCommit).not.toHaveBeenCalled()
+  })
+
   it('keeps station markers and labels visible when a native line is switched to fake', () => {
     const project = structuredClone(demoProject)
     project.lines.find(line => line.id === 'line-a')!.isFake = true

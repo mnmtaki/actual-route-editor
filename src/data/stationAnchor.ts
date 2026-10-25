@@ -25,9 +25,20 @@ export function getStationRelation(project: ActualRouteProject, stationId: strin
   return project.stationLineRelations.find(relation => relation.stationId === stationId && (lineId === undefined || relation.lineId === lineId))
 }
 
+/** A station may own independent track anchors only if it belongs to a real interchange. */
+export function canUseIndependentStationAnchor(project: ActualRouteProject, stationId: string): boolean {
+  const station = project.stations.find(item => item.id === stationId)
+  if (!station) return false
+  if (project.stationLineRelations.filter(relation => relation.stationId === stationId).length > 1) return true
+  if (!station.compoundGroupId) return false
+  const members = project.stations.filter(item => item.compoundGroupId === station.compoundGroupId)
+  return members.length > 1 && new Set(project.stationLineRelations.filter(relation => members.some(member => member.id === relation.stationId)).map(relation => relation.lineId)).size > 1
+}
+
 export function getStationAnchorForLine(project: ActualRouteProject, stationId: string, lineId?: string): StationAnchor | undefined {
   const station = project.stations.find(item => item.id === stationId)
   if (!station) return undefined
+  if (!canUseIndependentStationAnchor(project, stationId)) return { x: station.x, y: station.y }
   const relation = getStationRelation(project, stationId, lineId)
   return normalizeStationAnchor(relation?.anchor, station) ?? { x: station.x, y: station.y }
 }
@@ -36,10 +47,12 @@ export function getStationAnchorForLine(project: ActualRouteProject, stationId: 
 export function translateStationWithAnchors(project: ActualRouteProject, stationId: string, dx: number, dy: number): void {
   const station = project.stations.find(item => item.id === stationId)
   if (!station || !Number.isFinite(dx) || !Number.isFinite(dy)) return
+  const independent = canUseIndependentStationAnchor(project, stationId)
   station.x += dx
   station.y += dy
   for (const relation of project.stationLineRelations) {
     if (relation.stationId !== stationId || !relation.anchor) continue
+    if (!independent) { delete relation.anchor; continue }
     relation.anchor = { x: relation.anchor.x + dx, y: relation.anchor.y + dy }
   }
 }

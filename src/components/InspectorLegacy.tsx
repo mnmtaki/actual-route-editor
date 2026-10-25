@@ -40,6 +40,8 @@ function ParallelTransferControls({ project, stationId, lineIds, onChange }: { p
   }
   return <section className="station-label-layout" data-testid="parallel-transfer-controls">
     <span className="eyebrow">换乘线路锚点</span>
+    <Field label="换乘站方向（°）"><input aria-label="换乘站方向" type="number" min="-180" max="180" step="1" value={project.stations.find(item => item.id === stationId)?.transferRotation ?? ''} placeholder="自动" onChange={event => { const value = event.target.value; const next = structuredClone(project); const members = getCompoundStationMembers(next, stationId); for (const member of members) { if (!value) delete member.transferRotation; else member.transferRotation = Number(value) } onChange(next) }}/></Field>
+    <button type="button" onClick={() => { const next = structuredClone(project); for (const member of getCompoundStationMembers(next, stationId)) delete member.transferRotation; onChange(next) }}>方向跟随锚点（自动）</button>
     <p className="meta-note">每条线路可连接到换乘站的不同位置。选中车站后可在画布上拖动线路锚点；也可在此精确调整。外框根据锚点自动布局。</p>
     {services.map(({ line, relation, station }) => {
       const anchor = relation.anchor ?? station

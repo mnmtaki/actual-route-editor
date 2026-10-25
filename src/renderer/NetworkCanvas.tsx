@@ -1,3 +1,5 @@
+import { getCompoundStationRelations } from '../data/compoundStation'
+import { getStationAnchorForLine } from '../data/stationAnchor'
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react'
 import type { ActualRouteProject, Road, Selection } from '../data/model'
 import { uid } from '../data/model'
@@ -50,7 +52,7 @@ type Gesture =
   | { kind: 'movingMapSelection'; pointerId: number; start: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
   | { kind: 'calibrationTap'; pointerId: number; startClient: Point; lastClient: Point; moved: boolean }
   | { kind: 'pinchingCanvas'; pointerIds: [number, number]; initialDistance: number; startView: View; startWorld: Point }
-  | { kind: 'draggingStation' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineLabel' | 'draggingMapElement' | 'draggingLineLegend' | 'draggingBackground' | 'draggingAarcFakeStation' | 'draggingAarcFakeTerrain' | 'draggingBasemapPoint' | 'draggingBasemapPath' | 'draggingRoadPoint'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; ownerRoadId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
+  | { kind: 'draggingStation' | 'draggingAnchor' | 'draggingWaypoint' | 'draggingStructureNode' | 'draggingLabel' | 'draggingLineLabel' | 'draggingMapElement' | 'draggingLineLegend' | 'draggingBackground' | 'draggingAarcFakeStation' | 'draggingAarcFakeTerrain' | 'draggingBasemapPoint' | 'draggingBasemapPath' | 'draggingRoadPoint'; pointerId: number; id?: string; segmentId?: string; ownerLineId?: string; ownerPathId?: string; ownerRoadId?: string; startWorld: Point; origin: Point; before: ActualRouteProject; latest: ActualRouteProject; moved: boolean }
 
 type LineDraftState = { lineId: string; phaseId?: string; anchorStationId: string | null; points: LineDraftPoint[]; lastCreatedStationId?: string }
 type DrawingPointSelection = { kind: 'draft'; id: string } | { kind: 'station'; id: string } | null
@@ -645,7 +647,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     const rawDx = point.x - current.startWorld.x, rawDy = point.y - current.startWorld.y
     current.moved ||= Math.hypot(rawDx, rawDy) > 1
     const next = cloneProjectForDrag(current.before, current)
-    if (current.kind === 'draggingStation') {
+    if (current.kind === 'draggingAnchor') {
+      const relation = next.stationLineRelations.find(item => item.id === current.id)
+      if (relation) relation.anchor = { x: current.origin.x + rawDx, y: current.origin.y + rawDy }
+    } else if (current.kind === 'draggingStation') {
       const station = next.stations.find(item => item.id === current.id)
       if (station) {
         const target = resolveSnap({ x: current.origin.x + rawDx, y: current.origin.y + rawDy }, {
@@ -1071,6 +1076,21 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       overlay
     />}
     <AarcFakeLinesLayer project={mapRenderProject} part="stations" />
+    {!drawing && selection?.type === 'station' && <g data-layer="transfer-anchor-handles" data-editor="true">
+      {getCompoundStationRelations(shown, selection.id).filter(relation => shown.lines.some(line => line.id === relation.lineId)).map(relation => {
+        const point = getStationAnchorForLine(shown, relation.stationId, relation.lineId)
+        const line = shown.lines.find(item => item.id === relation.lineId)
+        if (!point || !line) return null
+        return <g key={relation.id} data-transfer-anchor={relation.id} onPointerDown={event => {
+          if (isStationGeometryLocked(project, relation.stationId)) { onEditBlocked?.('换乘站坐标已锁定'); return }
+          startObjectDrag('draggingAnchor', event, point, relation.id, undefined, relation.lineId)
+        }} style={{ cursor: 'move' }}>
+          <circle cx={point.x} cy={point.y} r={11} fill="transparent" stroke="transparent" strokeWidth={3} />
+          <circle cx={point.x} cy={point.y} r={6} fill={line.color} stroke="#ffffff" strokeWidth={2.3} pointerEvents="all" />
+        </g>
+      })}
+    </g>}
+
     {!drawing && <g data-layer="aarc-fake-terrain-hits" data-editor="true" pointerEvents="none">
       {getAarcFakeSourceLines(mapRenderProject).filter(line => Number(line.type) === 1 && line.id !== undefined).map(line => {
         const path = buildAarcFakeLinePath(mapRenderProject, line)

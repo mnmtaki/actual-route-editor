@@ -22,28 +22,43 @@ import { getTransferStyles, resolveTransferStyle } from '../data/transferStyles'
 function ParallelTransferControls({ project, stationId, lineIds, onChange }: { project: ActualRouteProject; stationId: string; lineIds: string[]; onChange: (next: ActualRouteProject) => void }) {
   const [selected, setSelected] = useState<string[]>([])
   const [spacing, setSpacing] = useState(18)
-  const [centerDx, setCenterDx] = useState(0)
-  const [centerDy, setCenterDy] = useState(0)
   const [error, setError] = useState('')
+  const members = getCompoundStationMembers(project, stationId)
+  const memberIds = new Set(members.map(member => member.id))
+  const services = lineIds.flatMap(lineId => {
+    const relation = project.stationLineRelations.find(item => memberIds.has(item.stationId) && item.lineId === lineId)
+    const station = relation && project.stations.find(item => item.id === relation.stationId)
+    const line = project.lines.find(item => item.id === lineId)
+    return relation && station && line ? [{ line, relation, station }] : []
+  })
   const enabled = selected.filter(id => lineIds.includes(id))
+  const setAnchor = (relationId: string, x: number, y: number) => {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return
+    const next = structuredClone(project)
+    const relation = next.stationLineRelations.find(item => item.id === relationId)
+    if (relation) { relation.anchor = { x, y }; onChange(next) }
+  }
   return <section className="station-label-layout" data-testid="parallel-transfer-controls">
-    <span className="eyebrow">平行换乘适配</span>
-    <p className="meta-note">按实际区间连接调整各线路的接入坐标，不强制对准彩色圆点；不修改原有控制点。</p>
-    {lineIds.map(id => <label key={id} className="toggle-row">
-      {getLineDisplayName(project, project.lines.find(line => line.id === id)!) || project.lines.find(line => line.id === id)?.name || id}
-      <input type="checkbox" checked={enabled.includes(id)} onChange={event => setSelected(previous => event.target.checked ? [...previous.filter(item => item !== id), id] : previous.filter(item => item !== id))}/>
-    </label>)}
-    <Field label="平行间距"><input type="number" min="0" max="200" step="1" value={spacing} onChange={event => setSpacing(Number(event.target.value))}/></Field>
-    <div className="field-grid">
-      <Field label="中心偏移 X"><input type="number" step="1" value={centerDx} onChange={event => setCenterDx(Number(event.target.value))}/></Field>
-      <Field label="中心偏移 Y"><input type="number" step="1" value={centerDy} onChange={event => setCenterDy(Number(event.target.value))}/></Field>
-    </div>
+    <span className="eyebrow">换乘线路锚点</span>
+    <p className="meta-note">每条线路可连接到换乘站的不同位置。选中车站后可在画布上拖动线路锚点；也可在此精确调整。外框根据锚点自动布局。</p>
+    {services.map(({ line, relation, station }) => {
+      const anchor = relation.anchor ?? station
+      return <div key={relation.id} className="station-label-layout">
+        <label className="toggle-row">{getLineDisplayName(project, line) || line.name || line.id}<input type="checkbox" checked={enabled.includes(line.id)} onChange={event => setSelected(previous => event.target.checked ? [...previous.filter(id => id !== line.id), line.id] : previous.filter(id => id !== line.id))}/></label>
+        <div className="field-grid">
+          <Field label="锚点 X"><input aria-label={`${line.name}锚点 X`} type="number" step="1" value={Math.round(anchor.x * 100) / 100} onChange={event => setAnchor(relation.id, Number(event.target.value), anchor.y)}/></Field>
+          <Field label="锚点 Y"><input aria-label={`${line.name}锚点 Y`} type="number" step="1" value={Math.round(anchor.y * 100) / 100} onChange={event => setAnchor(relation.id, anchor.x, Number(event.target.value))}/></Field>
+        </div>
+        <button type="button" onClick={() => { const next = structuredClone(project); const target = next.stationLineRelations.find(item => item.id === relation.id); if (target) delete target.anchor; onChange(next) }}>恢复到车站中心</button>
+      </div>
+    })}
+    <Field label="自动分布间距"><input type="number" min="0" max="200" step="1" value={spacing} onChange={event => setSpacing(Number(event.target.value))}/></Field>
     <button type="button" disabled={enabled.length < 2} onClick={() => {
       try {
-        onChange(adaptParallelTransfer(project, stationId, { lineIds: enabled, spacing, centerDx, centerDy }))
-        setCenterDx(0); setCenterDy(0); setError('')
-      } catch (err) { setError(err instanceof Error ? err.message : '平行适配失败') }
-    }}>应用平行换乘适配</button>
+        onChange(adaptParallelTransfer(project, stationId, { lineIds: enabled, spacing, centerDx: 0, centerDy: 0 }))
+        setError('')
+      } catch (err) { setError(err instanceof Error ? err.message : '锚点分布失败') }
+    }}>将选中线路锚点分布到两侧</button>
     {error && <p role="alert" className="meta-note">{error}</p>}
   </section>
 }

@@ -1,6 +1,7 @@
 import type { ActualRouteProject } from './model'
 import { getCompoundStationMembers } from './compoundStation'
 import { isStationGeometryLocked } from './lineLock'
+import { canUseIndependentStationAnchor } from './stationAnchor'
 
 export interface ParallelTransferOptions {
   lineIds: string[]
@@ -15,6 +16,7 @@ export interface ParallelTransferOptions {
  * move; existing segments and waypoints remain untouched.
  */
 export function adaptParallelTransfer(project: ActualRouteProject, stationId: string, options: ParallelTransferOptions): ActualRouteProject {
+  if (!canUseIndependentStationAnchor(project, stationId)) throw new Error('普通站不允许设置独立线路锚点')
   const members = getCompoundStationMembers(project, stationId)
   const memberIds = new Set(members.map(member => member.id))
   const selected = [...new Set(options.lineIds)]

@@ -317,7 +317,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   }, [drawing?.kind, drawing?.kind === 'line' ? drawing.lineId : undefined, drawing?.kind === 'line' ? drawing.phaseId : undefined, drawing?.kind === 'line' ? drawing.anchorStationId : undefined])
 
   const pointerToWorld = useCallback((clientX: number, clientY: number): Point => screenPointToWorld(svgRef.current!, clientX, clientY, liveViewRef.current), [])
-  const capture = useCallback((event: React.PointerEvent) => event.currentTarget.setPointerCapture?.(event.pointerId), [])
+  const capture = useCallback((event: React.PointerEvent) => {
+    // Capture on the stable root SVG, never on a label/handle that drag previews can replace.
+    try { svgRef.current?.setPointerCapture(event.pointerId) } catch { /* pointer already released */ }
+  }, [])
   // Mobile touch only. A first touch selects the object on release; a swipe pans
   // the map instead of accidentally editing the map's densely packed objects.
   // Mouse and pen handling remain unchanged.
@@ -969,7 +972,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const mapSelectionMarker = (x: number, y: number, key: string) => displayedMapKeys.has(key) ? <circle key={key} cx={x} cy={y} r={9} fill="none" stroke="#bd8b19" strokeWidth={2} vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null
 
   return <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''} ${mapSelectMode ? 'is-map-selecting' : ''}`} tabIndex={0} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
-    onPointerDown={handleCanvasPointerDown} onPointerMove={handlePointerMove} onPointerUp={endGesture} onPointerCancel={endGesture} onContextMenu={event=>event.preventDefault()}
+    onPointerDown={handleCanvasPointerDown} onPointerMove={handlePointerMove} onPointerUp={endGesture} onPointerCancel={endGesture} onLostPointerCapture={event => {\n      const active = gesture.current\n      if (active.kind !== 'idle' && 'pointerId' in active && active.pointerId === event.pointerId) endGesture(event)\n    }} onContextMenu={event=>event.preventDefault()}
     onDoubleClick={event => { if (drawing && drawing.kind !== 'line') { event.preventDefault(); drawingClick.current = null; if (pointerDoubleFinish.current) { pointerDoubleFinish.current = false; return } onFinishDrawing?.() } }}
     onWheel={event => {
       event.preventDefault()

@@ -142,6 +142,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   }
   const [drawingPointSelection, setDrawingPointSelection] = useState<DrawingPointSelection>(null)
   const [alignmentGuides, setAlignmentGuides] = useState<SnapGuide[]>([])
+  const [editingTransferAnchors, setEditingTransferAnchors] = useState(false)
   const shown = mapMovePreview ?? preview ?? project
   const staticHistoricalIdentityProject = useMemo(() => projectWithLineColorsAt(projectWithLineParentsAt(project, project.timeline.currentDate), project.timeline.currentDate), [project])
   const activeLineLabelProject = useMemo(() => {
@@ -1076,7 +1077,14 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       overlay
     />}
     <AarcFakeLinesLayer project={mapRenderProject} part="stations" />
-    {!drawing && selection?.type === 'station' && <g data-layer="transfer-anchor-handles" data-editor="true">
+    {!drawing && selection?.type === 'station' && getCompoundStationRelations(shown, selection.id).length > 1 && <g data-layer="transfer-anchor-edit-toggle">
+      <g transform={`translate(${(shown.stations.find(item => item.id === selection.id)?.x ?? 0) + 35} ${(shown.stations.find(item => item.id === selection.id)?.y ?? 0) - 35})`} onPointerDown={event => { event.stopPropagation(); setEditingTransferAnchors(value => !value) }} style={{ cursor: 'pointer' }}>
+        <circle r="13" fill={editingTransferAnchors ? '#276a45' : '#faf8f2'} stroke="#666" strokeWidth="1.5" />
+        <text textAnchor="middle" dominantBaseline="central" fontSize="15" fill={editingTransferAnchors ? '#fff' : '#333'} pointerEvents="none">{editingTransferAnchors ? '✓' : '✥'}</text>
+        <title>{editingTransferAnchors ? '结束锚点编辑' : '编辑换乘锚点'}</title>
+      </g>
+    </g>}
+    {!drawing && editingTransferAnchors && selection?.type === 'station' && <g data-layer="transfer-anchor-handles" data-editor="true">
       {getCompoundStationRelations(shown, selection.id).filter(relation => shown.lines.some(line => line.id === relation.lineId)).map(relation => {
         const point = getStationAnchorForLine(shown, relation.stationId, relation.lineId)
         const line = shown.lines.find(item => item.id === relation.lineId)
@@ -1085,8 +1093,8 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
           if (isStationGeometryLocked(project, relation.stationId)) { onEditBlocked?.('换乘站坐标已锁定'); return }
           startObjectDrag('draggingAnchor', event, point, relation.id, undefined, relation.lineId)
         }} style={{ cursor: 'move' }}>
-          <circle cx={point.x} cy={point.y} r={11} fill="transparent" stroke="transparent" strokeWidth={3} />
-          <circle cx={point.x} cy={point.y} r={6} fill={line.color} stroke="#ffffff" strokeWidth={2.3} pointerEvents="all" />
+          <circle cx={point.x} cy={point.y} r={9} fill="transparent" stroke="transparent" strokeWidth={3} />
+          <circle cx={point.x} cy={point.y} r={4.5} fill={line.color} stroke="#ffffff" strokeWidth={1.5} pointerEvents="all" />
         </g>
       })}
     </g>}

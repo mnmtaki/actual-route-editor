@@ -2,6 +2,7 @@ import type { ActualRouteProject } from '../data/model'
 
 export type DragPreviewKind =
   | 'draggingStation'
+  | 'draggingAnchor'
   | 'draggingWaypoint'
   | 'draggingStructureNode'
   | 'draggingLabel'
@@ -34,6 +35,10 @@ export interface DragPreviewTarget {
 export function cloneProjectForDrag(project: ActualRouteProject, target: DragPreviewTarget): ActualRouteProject {
   const next: ActualRouteProject = { ...project }
 
+  if (target.kind === 'draggingAnchor' && target.id) {
+    next.stationLineRelations = project.stationLineRelations.map(relation => relation.id === target.id ? { ...relation, anchor: relation.anchor ? { ...relation.anchor } : undefined } : relation)
+    return next
+  }
   if (target.kind === 'draggingStation' || target.kind === 'draggingLabel') {
     next.stations = project.stations.map(station => station.id === target.id ? { ...station } : station)
     if (target.kind === 'draggingStation') {
@@ -125,6 +130,11 @@ export function cloneProjectForDrag(project: ActualRouteProject, target: DragPre
 export function getDragAffectedLineIds(project: ActualRouteProject, target: DragPreviewTarget | null): Set<string> {
   const ids = new Set<string>()
   if (!target) return ids
+  if (target.kind === 'draggingAnchor' && target.id) {
+    const relation = project.stationLineRelations.find(item => item.id === target.id)
+    if (relation) ids.add(relation.lineId)
+    return ids
+  }
   if (target.kind === 'draggingStation' && target.id) {
     for (const relation of project.stationLineRelations) if (relation.stationId === target.id) ids.add(relation.lineId)
     for (const line of project.lines) if (line.stationSequence.includes(target.id)) ids.add(line.id)

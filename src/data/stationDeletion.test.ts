@@ -13,6 +13,20 @@ function threeStations() {
 }
 
 describe('safe station removal', () => {
+  it('deletes an ordinary middle station with a stale independent anchor', () => {
+    const { project, one, two, three } = threeStations()
+    const relation = project.stationLineRelations.find(item => item.stationId === two)!
+    relation.anchor = { x: 900, y: 900 }
+    const result = deleteStationPreservingNetwork(project, two)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.reconnected).toBe(true)
+    expect(result.project.stations.some(item => item.id === two)).toBe(false)
+    expect(result.project.geometry.segments.some(item =>
+      [item.fromStationId, item.toStationId].includes(one) &&
+      [item.fromStationId, item.toStationId].includes(three))).toBe(true)
+  })
+
   it('removes only middle Station 2 and reconnects Stations 1 and 3 while preserving track geometry', () => {
     const { project, lineId, one, two, three } = threeStations()
     const result = deleteStationPreservingNetwork(project, two)

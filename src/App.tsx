@@ -1,3 +1,4 @@
+import { formatStationSpacingText } from './data/stationSpacingText';
 import { useEffect, useRef, useState } from "react";
 import { Toolbar } from "./components/Toolbar";
 import { RasterExportDialog } from "./components/RasterExportDialog";
@@ -1372,6 +1373,7 @@ export default function App() {
           exportProject={() => void saveProjectFile()}
           exportSvg={() => void saveSvgFile()}
           exportImage={() => setRasterSvg(svgFile())}
+          copyStationSpacing={() => { void navigator.clipboard.writeText(formatStationSpacingText(history.project)).then(() => setNotice("站距已复制到剪贴板")).catch(() => setNotice("复制失败，请检查剪贴板权限")); }}
           shareProject={() => void shareProjectFile()}
           shareSvg={() => void shareSvgFile()}
           nativeFiles={isAndroidApp()}

@@ -1,3 +1,4 @@
+import { canUseIndependentStationAnchor } from '../data/stationAnchor'
 import { useState } from 'react'
 import { adaptParallelTransfer } from '../data/parallelTransfer'
 import { changePointLinkType, retargetPointLink, sourcePointLinks, fakeTerrainSource, aarcFakeStationSource, modifyAarcFakeStation, canMoveFakeTerrain, translateFakeTerrain } from '../data/aarcRetainedObjects'
@@ -33,7 +34,7 @@ function ParallelTransferControls({ project, stationId, lineIds, onChange }: { p
   })
   const enabled = selected.filter(id => lineIds.includes(id))
   const setAnchor = (relationId: string, x: number, y: number) => {
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return
+    if (!canUseIndependentStationAnchor(project, stationId) || !Number.isFinite(x) || !Number.isFinite(y)) return
     const next = structuredClone(project)
     const relation = next.stationLineRelations.find(item => item.id === relationId)
     if (relation) { relation.anchor = { x, y }; onChange(next) }

@@ -1,5 +1,5 @@
 import { getCompoundStationRelations } from '../data/compoundStation'
-import { getStationAnchorForLine } from '../data/stationAnchor'
+import { canUseIndependentStationAnchor, getStationAnchorForLine } from '../data/stationAnchor'
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react'
 import type { ActualRouteProject, Road, Selection } from '../data/model'
 import { uid } from '../data/model'
@@ -650,7 +650,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
     const next = cloneProjectForDrag(current.before, current)
     if (current.kind === 'draggingAnchor') {
       const relation = next.stationLineRelations.find(item => item.id === current.id)
-      if (relation) relation.anchor = { x: current.origin.x + rawDx, y: current.origin.y + rawDy }
+      if (relation && canUseIndependentStationAnchor(next, relation.stationId)) relation.anchor = { x: current.origin.x + rawDx, y: current.origin.y + rawDy }
     } else if (current.kind === 'draggingStation') {
       const station = next.stations.find(item => item.id === current.id)
       if (station) {
@@ -1077,7 +1077,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       overlay
     />}
     <AarcFakeLinesLayer project={mapRenderProject} part="stations" />
-    {!drawing && selection?.type === 'station' && getCompoundStationRelations(shown, selection.id).length > 1 && <g data-layer="transfer-anchor-edit-toggle">
+    {!drawing && selection?.type === 'station' && getCompoundStationRelations(shown, selection.id).length > 1 && canUseIndependentStationAnchor(shown, selection.id) && <g data-layer="transfer-anchor-edit-toggle">
       <g transform={`translate(${(shown.stations.find(item => item.id === selection.id)?.x ?? 0) + 35} ${(shown.stations.find(item => item.id === selection.id)?.y ?? 0) - 35})`} onPointerDown={event => { event.stopPropagation(); setEditingTransferAnchors(value => !value) }} style={{ cursor: 'pointer' }}>
         <circle r="13" fill={editingTransferAnchors ? '#276a45' : '#faf8f2'} stroke="#666" strokeWidth="1.5" />
         <text textAnchor="middle" dominantBaseline="central" fontSize="15" fill={editingTransferAnchors ? '#fff' : '#333'} pointerEvents="none">{editingTransferAnchors ? '✓' : '✥'}</text>
@@ -1085,7 +1085,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
       </g>
     </g>}
     {!drawing && editingTransferAnchors && selection?.type === 'station' && <g data-layer="transfer-anchor-handles" data-editor="true">
-      {getCompoundStationRelations(shown, selection.id).filter(relation => shown.lines.some(line => line.id === relation.lineId)).map(relation => {
+      {getCompoundStationRelations(shown, selection.id).filter(relation => canUseIndependentStationAnchor(shown, relation.stationId) && shown.lines.some(line => line.id === relation.lineId)).map(relation => {
         const point = getStationAnchorForLine(shown, relation.stationId, relation.lineId)
         const line = shown.lines.find(item => item.id === relation.lineId)
         if (!point || !line) return null

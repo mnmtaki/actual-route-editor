@@ -43,8 +43,8 @@ export function StationMarker({ project, station, time, selected, hitRadius = 24
   const transferLayout = lines.length > 1 ? getTransferMarkerLayout(project, renderStation.id, time, visibleRelationIds, transferEndPadding) : null
   const marker = lines.length > 1
     ? transferStyle.id === 'transfer.actualroute.default'
-      ? getStationStyle('default').renderTransfer({ station: renderStation, lines: renderLines, size: stationSize, minorAxis: transferMinorAxis, dotGap: transferDotGap, endPadding: transferEndPadding, rotation: transferLayout?.rotation ?? 0, centerX: transferLayout?.centerX, centerY: transferLayout?.centerY, minMajorAxis: transferLayout?.anchorSpan })
-      : renderTransferArtwork({ project, station: renderStation, lines: renderLines, style: transferStyle, size: stationSize, minorAxis: transferMinorAxis, dotGap: transferDotGap, endPadding: transferEndPadding, rotation: transferLayout?.rotation ?? 0, centerX: transferLayout?.centerX, centerY: transferLayout?.centerY, minMajorAxis: transferLayout?.anchorSpan })
+      ? getStationStyle('default').renderTransfer({ station: renderStation, lines: renderLines, size: stationSize, minorAxis: transferMinorAxis, dotGap: transferDotGap, endPadding: transferEndPadding, rotation: renderStation.transferRotation ?? transferLayout?.rotation ?? 0, centerX: transferLayout?.centerX, centerY: transferLayout?.centerY, minMajorAxis: transferLayout?.anchorSpan })
+      : renderTransferArtwork({ project, station: renderStation, lines: renderLines, style: transferStyle, size: stationSize, minorAxis: transferMinorAxis, dotGap: transferDotGap, endPadding: transferEndPadding, rotation: renderStation.transferRotation ?? transferLayout?.rotation ?? 0, centerX: transferLayout?.centerX, centerY: transferLayout?.centerY, minMajorAxis: transferLayout?.anchorSpan })
     : (() => {
       const line = renderLines[0]
       const side = stationStyle.template === 'sideMarker' || stationStyle.placement === 'side'

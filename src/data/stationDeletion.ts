@@ -2,6 +2,7 @@ import type { ActualRouteProject, Segment, Station, Waypoint } from './model'
 import { uid } from './model'
 import { deleteStationConsistently } from './operationsLegacy'
 import { isStationGeometryLocked } from './lineLock'
+import { canUseIndependentStationAnchor } from './stationAnchor'
 
 export type StationDeletionResult =
   | { ok: true; project: ActualRouteProject; reconnected: boolean }
@@ -17,7 +18,7 @@ function unsafeMetadata(project: ActualRouteProject, station: Station, relations
   if (project.stations.some(other => other.id !== station.id && station.compoundGroupId && other.compoundGroupId === station.compoundGroupId)) return true
   const segIds = new Set(segments.map(segment => segment.id))
   const relationIds = new Set(relations.map(relation => relation.id))
-  if (relations.some(r => (r.operationHistory?.length ?? 0) > 0 || r.anchor)) return true
+  if (relations.some(r => (r.operationHistory?.length ?? 0) > 0 || (r.anchor && canUseIndependentStationAnchor(project, station.id)))) return true
   if (segments.some(s => s.source || s.mode === 'rounded' || (s.structureNodes?.length ?? 0) > 0 || (s.lineHistory?.length ?? 0) > 0 || (s.operationHistory?.length ?? 0) > 0 || s.waypoints.some(w => w.source))) return true
   if (project.openingPhases.some(phase =>
     phase.revealStartStationId === station.id || phase.revealEndStationId === station.id ||

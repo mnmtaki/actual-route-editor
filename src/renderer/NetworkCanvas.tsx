@@ -972,7 +972,10 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const mapSelectionMarker = (x: number, y: number, key: string) => displayedMapKeys.has(key) ? <circle key={key} cx={x} cy={y} r={9} fill="none" stroke="#bd8b19" strokeWidth={2} vectorEffect="non-scaling-stroke" pointerEvents="none" /> : null
 
   return <svg id="network-canvas" ref={svgRef} className={`network-canvas ${drawing ? 'is-drawing' : ''} ${mapSelectMode ? 'is-map-selecting' : ''}`} tabIndex={0} viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
-    onPointerDown={handleCanvasPointerDown} onPointerMove={handlePointerMove} onPointerUp={endGesture} onPointerCancel={endGesture} onLostPointerCapture={event => {\n      const active = gesture.current\n      if (active.kind !== 'idle' && 'pointerId' in active && active.pointerId === event.pointerId) endGesture(event)\n    }} onContextMenu={event=>event.preventDefault()}
+    onPointerDown={handleCanvasPointerDown} onPointerMove={handlePointerMove} onPointerUp={endGesture} onPointerCancel={endGesture} onLostPointerCapture={event => { 
+      const active = gesture.current
+      if (active.kind !== 'idle' && 'pointerId' in active && active.pointerId === event.pointerId) endGesture(event)
+    }} onContextMenu={event=>event.preventDefault()}
     onDoubleClick={event => { if (drawing && drawing.kind !== 'line') { event.preventDefault(); drawingClick.current = null; if (pointerDoubleFinish.current) { pointerDoubleFinish.current = false; return } onFinishDrawing?.() } }}
     onWheel={event => {
       event.preventDefault()

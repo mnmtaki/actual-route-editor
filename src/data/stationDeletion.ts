@@ -49,11 +49,14 @@ export function deleteStationPreservingNetwork(project: ActualRouteProject, stat
   if (isStationGeometryLocked(project, stationId)) return blocked(project, '该车站关联了锁定线路，请先解锁')
   const relations = project.stationLineRelations.filter(r => r.stationId === stationId)
   const segments = project.geometry.segments.filter(s => s.fromStationId === stationId || s.toStationId === stationId)
-  if (relations.length > 1 || segments.some(s => relations.length && s.lineId !== relations[0].lineId))
-    return blocked(project, '该站属于多条线路或复杂连接，请分别处理线路关系后再删除')
-  if (segments.length > 2) return blocked(project, '分叉站连接超过两个区间，无法安全判断该连接哪两个方向')
+  // A junction/transfer has no unique pair of surviving tracks. Allow explicit
+  // disconnection rather than making the station impossible to remove.
+  if (relations.length > 1 || segments.length > 2 ||
+      (relations.length === 1 && segments.some(s => s.lineId !== relations[0].lineId))) {
+    return blocked(project, '此站连接多条线路或分叉区间。可选择“删除并断开连接”，仅移除此站和关联区间')
+  }
   if (unsafeMetadata(project, station, relations, segments))
-    return blocked(project, '该站关联导入数据、运营历史、开通阶段或特殊样式，不能安全自动重连，请先检查区间')
+    return blocked(project, '此站含运营历史或特殊区间信息。可选择“删除并断开连接”；默认不合并，避免丢失历史')
 
   if (!segments.length) {
     // Keep the global database consistent; other independent stations survive.
@@ -62,16 +65,9 @@ export function deleteStationPreservingNetwork(project: ActualRouteProject, stat
   if (relations.length !== 1 || segments.some(s => s.lineId !== relations[0].lineId))
     return blocked(project, '站点和区间的线路归属不一致，已取消删除以避免丢失数据')
   const line = project.lines.find(l => l.id === relations[0].lineId)
-  if (!line || line.stationSequence.filter(id => id === stationId).length !== 1)
-    return blocked(project, '线路站点顺序不明确，无法安全删除该车站')
+  if (!line) return blocked(project, '线路不存在，无法自动合并；可选择删除并断开连接')
 
-  const index = line.stationSequence.indexOf(stationId)
-  if (segments.length === 1) {
-    const neighbor = index === 0 ? line.stationSequence[1] : index === line.stationSequence.length - 1 ? line.stationSequence[index - 1] : null
-    if (!neighbor || !isBetween(segments[0], stationId, neighbor))
-      return blocked(project, '该站连接方式与站点顺序不一致，请先检查线路')
-    return { ok: true, project: deleteStationConsistently(project, stationId), reconnected: false }
-  }
+  if (segments.length === 1) return { ok: true, project: deleteStationConsistently(project, stationId), reconnected: false }
 
   // The stored stationSequence may be stale after branches or ring edits.
   // The two physical incident segments are authoritative for a degree-two station.
@@ -81,15 +77,15 @@ export function deleteStationPreservingNetwork(project: ActualRouteProject, stat
   const a = first.fromStationId === stationId ? first.toStationId : first.fromStationId
   const b = second.fromStationId === stationId ? second.toStationId : second.fromStationId
   if (a === b || a === stationId || b === stationId)
-    return blocked(project, '相邻站存在重复或闭环关系，无法安全自动重连')
+    return blocked(project, '存在闭环或重复连接；可选择删除并断开连接')
   if (project.geometry.segments.some(s => s.lineId === line.id && isBetween(s, a, b)))
-    return blocked(project, '该站附近已存在两邻站的直接区间，无法安全自动重连')
+    return blocked(project, '两邻站已有直接区间；可选择删除并断开连接')
   // Preserve the original segment orientation while ordering the merged chain
   // from a -> station -> b.
   if (first.mode !== second.mode || first.structureType !== second.structureType ||
       first.lineStyleId !== second.lineStyleId || first.openedAt !== second.openedAt ||
       first.closedAt !== second.closedAt || first.cornerRadius !== second.cornerRadius)
-    return blocked(project, '两侧区间的样式、结构或时间不同，不能直接合并，否则会丢失信息')
+    return blocked(project, '两侧区间属性不同；可选择删除并断开连接')
 
   const straight = first.mode === 'straight'
   const asWaypoints = (segment: Segment, start: string) =>
@@ -111,4 +107,11 @@ export function deleteStationPreservingNetwork(project: ActualRouteProject, stat
   const next = deleteStationConsistently(project, stationId)
   next.geometry.segments.push(merged)
   return { ok: true, project: next, reconnected: true }
+}
+
+/** Explicit destructive alternative for ambiguous stations. Never guesses which branch to join. */
+export function deleteStationAndDisconnect(project: ActualRouteProject, stationId: string): StationDeletionResult {
+  if (!project.stations.some(station => station.id === stationId)) return blocked(project, '找不到要删除的车站')
+  if (isStationGeometryLocked(project, stationId)) return blocked(project, '该车站关联了锁定线路，请先解锁')
+  return { ok: true, project: deleteStationConsistently(project, stationId), reconnected: false }
 }

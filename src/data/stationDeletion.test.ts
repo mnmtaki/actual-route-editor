@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createEmptyProject } from './storage'
 import { appendStationToLineWithWaypoints, createLine } from './operations'
-import { deleteStationPreservingNetwork } from './stationDeletion'
+import { deleteStationAndDisconnect, deleteStationPreservingNetwork } from './stationDeletion'
 import { getEditorVisibleStationsAtTime } from '../timeline/active'
 
 function threeStations() {
@@ -13,6 +13,27 @@ function threeStations() {
 }
 
 describe('safe station removal', () => {
+  it('allows explicit disconnection of a branching station and preserves all other stations', () => {
+    const { project, lineId, one, two, three } = threeStations()
+    const branched = appendStationToLineWithWaypoints(project, lineId, { x: 230, y: 75 }, [], two).project
+    const automatic = deleteStationPreservingNetwork(branched, two)
+    expect(automatic.ok).toBe(false)
+    const forced = deleteStationAndDisconnect(branched, two)
+    expect(forced.ok).toBe(true)
+    if (!forced.ok) return
+    expect(forced.project.stations.some(station => station.id === two)).toBe(false)
+    expect(forced.project.stations.some(station => station.id === one)).toBe(true)
+    expect(forced.project.stations.some(station => station.id === three)).toBe(true)
+    expect(forced.project.geometry.segments.some(segment => segment.fromStationId === two || segment.toStationId === two)).toBe(false)
+  })
+
+  it('allows deleting a single-ended station regardless of stale stored station order', () => {
+    const { project, lineId, three } = threeStations()
+    project.lines.find(line => line.id === lineId)!.stationSequence.reverse()
+    const result = deleteStationPreservingNetwork(project, three)
+    expect(result.ok).toBe(true)
+  })
+
   it('deletes an ordinary middle station with a stale independent anchor', () => {
     const { project, one, two, three } = threeStations()
     const relation = project.stationLineRelations.find(item => item.stationId === two)!

@@ -11,6 +11,9 @@ const project = (): ActualRouteProject => ({
   stationLineRelations: [{ id: 'r-a', stationId: 'shared', lineId: 'line-a' }, { id: 'r-b', stationId: 'shared', lineId: 'line-b', anchor: { x: 100, y: 120 } }, { id: 'r-end-a', stationId: 'end', lineId: 'line-a' }, { id: 'r-end-b', stationId: 'end', lineId: 'line-b' }],
   openingPhases: [], geometry: { segments: [{ id: 'seg', lineId: 'line-b', fromStationId: 'shared', toStationId: 'end', mode: 'straight', structureType: 'underground', waypoints: [] }] }, mapElements: [], background: null,
   timeline: { currentDate: '2020-01-01', startDate: '2020-01-01', endDate: '2020-01-01', playing: false }, presentation: { ...DEFAULT_PRESENTATION_SETTINGS, startDate: '2020-01-01', endDate: '2020-01-01' }, settings: { ...DEFAULT_SETTINGS },
+})
+
+describe('station line anchors', () => {
   it('ignores and removes a stray anchor from a single-line ordinary station', () => {
     const value = project()
     const ordinary = value.stationLineRelations.find(relation => relation.id === 'r-end-a')!
@@ -22,9 +25,6 @@ const project = (): ActualRouteProject => ({
     expect(ordinary.anchor).toBeUndefined()
   })
 
-})
-
-describe('station line anchors', () => {
   it('resolves a relation anchor per line and falls back to the shared Station position', () => {
     const value = project()
     expect(getStationAnchorForLine(value, 'shared', 'line-a')).toEqual({ x: 100, y: 100 })

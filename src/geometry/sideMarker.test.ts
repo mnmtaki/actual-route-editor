@@ -61,6 +61,7 @@ describe('side marker placement', () => {
 
   it('uses relation anchor and remains deterministic when rendered repeatedly', () => {
     const project = routeProject()
+    project.stationLineRelations.push({ id: 'side-other-line', stationId: 'side-a', lineId: 'interchange-line', openedAt: '2000-01-01' })
     project.stationLineRelations[0].anchor = { x: 8, y: 12 }
     const first = resolveSideMarkerPlacement(project, 'side-a', 'side-line', { placementMode: 'outward', depthRatio: 1, thicknessRatio: .5 })
     const second = resolveSideMarkerPlacement(project, 'side-a', 'side-line', { placementMode: 'outward', depthRatio: 1, thicknessRatio: .5 })

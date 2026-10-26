@@ -34,7 +34,7 @@ import {
   stationLineIds,
 } from "./data/operations";
 import { selectLineInList, selectLinesByMarquee } from "./data/lineSelection";
-import { deleteStationPreservingNetwork } from "./data/stationDeletion";
+import { deleteStationAndDisconnect, deleteStationPreservingNetwork } from "./data/stationDeletion";
 import { convertWaypointToStation, convertStationToWaypoint } from "./data/pointConversion";
 import { LineMultiInspector } from "./components/LineMultiInspector";
 import { StationMultiInspector } from "./components/StationMultiInspector";
@@ -743,7 +743,13 @@ export default function App() {
         setNotice("该站是当前绘制起点，仍有未保存控制点；请先完成绘制或撤销草稿");
         return;
       }
-      const result = deleteStationPreservingNetwork(n, selection.id);
+      let result = deleteStationPreservingNetwork(n, selection.id);
+      if (!result.ok && !isStationGeometryLocked(n, selection.id)) {
+        const reason = result.reason;
+        const accepted = window.confirm(`${reason}\n\n是否改为删除该车站和全部相连区间（不自动连接两侧）？此操作可撤销。`);
+        if (!accepted) return;
+        result = deleteStationAndDisconnect(n, selection.id);
+      }
       if (!result.ok) { setNotice(result.reason); return; }
       n = result.project;
       if (drawing?.kind === "line" && lineDrawingCanvasRef.current?.getDrawingAnchorStationId() === selection.id) {

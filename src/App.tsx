@@ -1326,7 +1326,7 @@ export default function App() {
         onToggleMapSelectMode={() => { setMapSelectMode(value => !value); setMapSelectAppend(false); setMapMoveMode(false); setMapSelections([]); }}
         onToggleMapSelectAppend={() => setMapSelectAppend(value => !value)}
         onClearMapSelection={() => { setMapSelections([]); setMapMoveMode(false); }}
-        onCopyStationSpacing={copyStationSpacing}
+        onCopyStationSpacing={() => { void navigator.clipboard.writeText(formatStationSpacingText(history.project)).then(() => setNotice("站距已复制到剪贴板")).catch(() => setNotice("复制失败，请检查剪贴板权限")); }}
       />
       {libraryOpen && <div className="project-library-backdrop" role="presentation" onClick={event => { if (event.target === event.currentTarget && !libraryBusy) setLibraryOpen(false) }}>
         <section className="project-library-dialog" role="dialog" aria-modal="true" aria-label="本地工程库">

@@ -810,3 +810,72 @@ summary:focus-visible,
   .mobile-topbar .mobile-project-controls .mobile-project-entry { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mobile-topbar .mobile-project-controls > button[aria-label="重命名当前工程"] { flex: 0 0 32px; width: 32px; height: 32px; font-size: 16px; }
 }
+
+/* Mobile UI refresh: reachable bottom navigation, stable header and spacious drawers. */
+@media (max-width: 699px) {
+  .mobile-topbar {
+    min-height: calc(56px + env(safe-area-inset-top));
+    padding-left: calc(10px + env(safe-area-inset-left));
+    padding-right: calc(10px + env(safe-area-inset-right));
+    gap: 6px;
+    background: linear-gradient(to bottom, var(--ui-surface) 75%, transparent);
+  }
+  .mobile-topbar > div:last-child { display: flex; flex: 0 0 auto; gap: 4px; }
+  .mobile-topbar .mobile-project-controls { flex: 1 1 auto; max-width: none; }
+  .mobile-topbar .mobile-project-controls .mobile-project-entry { max-width: 100%; }
+  .mobile-topbar button { min-width: 36px; min-height: 40px; }
+  .mobile-primary-nav {
+    position: absolute;
+    top: auto;
+    left: calc(8px + env(safe-area-inset-left));
+    right: calc(8px + env(safe-area-inset-right));
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    width: auto;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 4px;
+    padding: 6px;
+    background: color-mix(in srgb, var(--ui-surface) 95%, transparent);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-xl);
+    box-shadow: var(--ui-shadow-float);
+    backdrop-filter: blur(16px);
+    pointer-events: auto;
+  }
+  .mobile-primary-nav button {
+    min-width: 0;
+    min-height: 48px;
+    padding: 7px 2px;
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 1.2;
+    border: 0;
+    border-radius: var(--ui-radius-md);
+    box-shadow: none;
+    white-space: nowrap;
+    overflow-wrap: normal;
+  }
+  .mobile-primary-nav button.active { background: var(--ui-accent-soft); }
+  .mobile-drawer { width: min(92vw, 420px); }
+  .mobile-drawer-header { position: sticky; top: 0; z-index: 2; background: var(--ui-surface); }
+  .mobile-drawer-body { scrollbar-gutter: stable; -webkit-overflow-scrolling: touch; }
+  .mobile-drawer-section { gap: 9px; padding: 14px; }
+  .mobile-drawer-section > strong:not(:first-child) {
+    margin-top: 10px;
+    padding-top: 12px;
+    border-top: 1px solid var(--ui-divider);
+  }
+  .mobile-drawer-section > button[aria-pressed="true"] {
+    background: var(--ui-accent-soft);
+    border-color: var(--ui-accent);
+    color: var(--ui-accent-text);
+  }
+  .mobile-drawer .context-sheet { box-shadow: none; border-radius: var(--ui-radius-md); }
+  .mobile-drawer :is(button, input, select, textarea) { font-size: max(14px, 1em); }
+}
+@media (max-width: 390px) {
+  .mobile-topbar .mobile-project-controls > button[aria-label="重命名当前工程"] { flex-basis: 28px; width: 28px; }
+  .mobile-topbar button { min-width: 32px; width: 34px; }
+  .mobile-primary-nav { gap: 2px; padding: 5px; }
+  .mobile-primary-nav button { font-size: 10px; }
+}

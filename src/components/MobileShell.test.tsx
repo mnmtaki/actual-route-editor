@@ -17,10 +17,10 @@ describe('MobileShell', () => {
     expect(onSnap).toHaveBeenCalledWith('node')
   })
 
-  it('provides the six fixed first-level entry points including history', () => {
+  it('provides seven separate first-level entry points including import and export', () => {
     renderShell()
     expect(screen.getByTestId('mobile-shell')).toBeTruthy()
-    for (const label of ['线路', '发展史', '样式', '地图元素', '设置', '导出']) expect(screen.getByRole('button', { name: label })).toBeTruthy()
+    for (const label of ['线路', '发展史', '样式', '地图元素', '设置', '导入', '导出']) expect(screen.getByRole('button', { name: label })).toBeTruthy()
   })
 
   it('opens, switches and closes the shared right-side drawer', () => {
@@ -42,11 +42,14 @@ describe('MobileShell', () => {
 
   it('keeps project, AARC, background import and image export in the mobile export drawer', () => {
     renderShell()
-    fireEvent.click(screen.getByRole('button', { name: '导出' }))
+    fireEvent.click(screen.getByRole('button', { name: '导入' }))
     expect(screen.getByRole('button', { name: '导入工程 / AARC' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '导入拓扑' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '导入底图' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '导出图片…' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '导出' }))
     expect(screen.getByRole('button', { name: '导出图片…' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '导入工程 / AARC' })).toBeNull()
   })
 
   it('does not expose the temporary JSON or SVG share actions', () => {

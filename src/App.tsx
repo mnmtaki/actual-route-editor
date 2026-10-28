@@ -1316,6 +1316,17 @@ export default function App() {
         nativeFiles={isAndroidApp()}
         showStationSpacing={showStationSpacing}
         onToggleStationSpacing={toggleStationSpacing}
+        snapOptions={snapOptions}
+        onToggleSnapOption={(key) => setSnapOptions(current => ({ ...current, [key]: !current[key] }))}
+        stationLabelMode={stationLabelMode}
+        onStationLabelModeChange={setStationLabelMode}
+        mapSelectMode={mapSelectMode}
+        mapSelectAppend={mapSelectAppend}
+        mapSelectCount={mapSelections.length}
+        onToggleMapSelectMode={() => { setMapSelectMode(value => !value); setMapSelectAppend(false); setMapMoveMode(false); setMapSelections([]); }}
+        onToggleMapSelectAppend={() => setMapSelectAppend(value => !value)}
+        onClearMapSelection={() => { setMapSelections([]); setMapMoveMode(false); }}
+        onCopyStationSpacing={copyStationSpacing}
       />
       {libraryOpen && <div className="project-library-backdrop" role="presentation" onClick={event => { if (event.target === event.currentTarget && !libraryBusy) setLibraryOpen(false) }}>
         <section className="project-library-dialog" role="dialog" aria-modal="true" aria-label="本地工程库">

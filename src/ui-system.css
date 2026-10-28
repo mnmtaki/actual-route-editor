@@ -803,3 +803,10 @@ summary:focus-visible,
 .map-selection-summary span { border: 1px solid var(--ui-border); border-radius: 4px; padding: 4px 7px; font-size: 11px; }
 .map-selection-items { display: grid; gap: 4px; max-height: 50vh; overflow-y: auto; margin-top: 10px; }
 .map-selection-items button { padding: 7px 9px; min-height: 31px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Mobile header project controls must share the remaining space with history buttons. */
+@media (max-width: 699px) {
+  .mobile-topbar .mobile-project-controls { display: flex; align-items: center; min-width: 0; max-width: calc(100vw - 155px); gap: 2px; pointer-events: auto; }
+  .mobile-topbar .mobile-project-controls .mobile-project-entry { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-topbar .mobile-project-controls > button[aria-label="重命名当前工程"] { flex: 0 0 32px; width: 32px; height: 32px; font-size: 16px; }
+}

@@ -15,7 +15,7 @@ import { ProjectSettingsPanel } from './ProjectSettingsPanel'
 import { getProjectName, normalizeProjectName } from '../data/projectMetadata'
 import { StationMultiInspector } from './StationMultiInspector'
 
-export type MobileDrawerId = 'lines' | 'history' | 'style' | 'elements' | 'settings' | 'export' | 'inspector'
+export type MobileDrawerId = 'lines' | 'history' | 'style' | 'elements' | 'settings' | 'import' | 'export' | 'inspector'
 
 const entries: Array<{ id: MobileDrawerId; label: string }> = [
   { id: 'lines', label: '线路' },
@@ -23,6 +23,7 @@ const entries: Array<{ id: MobileDrawerId; label: string }> = [
   { id: 'style', label: '样式' },
   { id: 'elements', label: '地图元素' },
   { id: 'settings', label: '设置' },
+  { id: 'import', label: '导入' },
   { id: 'export', label: '导出' },
 ]
 
@@ -75,8 +76,21 @@ export function MobileShell({ project, selection, activeLineId, selectedLineIds 
           <button type="button" aria-pressed={mapSelectMode} disabled={drawing} onClick={onToggleMapSelectMode}>框选地图对象 {mapSelectMode ? '已启用' : '已关闭'}</button>
           {mapSelectMode && <><button type="button" aria-pressed={mapSelectAppend} onClick={onToggleMapSelectAppend}>追加选择 {mapSelectAppend ? '已启用' : '已关闭'}</button><button type="button" onClick={onClearMapSelection}>清空选择（{mapSelectCount}）</button></>}
           <strong>显示</strong><button type="button" aria-pressed={showStationSpacing} onClick={onToggleStationSpacing}>站距标注：{showStationSpacing ? '显示中' : '已隐藏'}</button>
-        </section><ProjectSettingsPanel embedded project={project} onChange={onChange} onStartCalibration={onStartCalibration ? () => { onStartCalibration(); close() } : undefined}/><section className="mobile-drawer-section"><button onClick={() => { onFitAll(); close() }}>适应全部</button><button onClick={() => { onZoomSelection(); close() }}>缩放到选择</button><button onClick={() => { onImportBackground(); close() }}>导入底图</button>{project.background && <button className="danger" onClick={() => { if (removeBackground()) close() }}>删除底图</button>}</section></>}
-        {active === 'export' && <section className="mobile-drawer-section"><button onClick={() => { onImportProject(); close() }}>导入工程 / AARC</button>{onImportTopology && <button onClick={() => { onImportTopology(); close() }}>导入拓扑</button>}<button onClick={() => { onImportBackground(); close() }}>导入底图</button>{project.background && <button className="danger" onClick={() => { if (removeBackground()) close() }}>删除底图</button>}<button onClick={() => { onExportProject(); close() }}>{nativeFiles ? '保存 JSON 到手机' : '导出 JSON'}</button><button onClick={() => { onExportSvg(); close() }}>{nativeFiles ? '保存 SVG 到手机' : '导出 SVG'}</button><button onClick={() => { onExportImage(); close() }}>导出图片…</button><button onClick={() => { onCopyStationSpacing(); close() }}>复制站距</button><button onClick={() => setAboutOpen(true)}>关于 / 版本信息</button></section>}
+        </section><ProjectSettingsPanel embedded project={project} onChange={onChange} onStartCalibration={onStartCalibration ? () => { onStartCalibration(); close() } : undefined}/><section className="mobile-drawer-section"><button onClick={() => { onFitAll(); close() }}>适应全部</button><button onClick={() => { onZoomSelection(); close() }}>缩放到选择</button><button onClick={() => setAboutOpen(true)}>关于 / 版本信息</button></section></>}
+        {active === 'import' && <section className="mobile-drawer-section" aria-label="导入文件">
+          <strong>导入文件</strong>
+          <button onClick={() => { onImportProject(); close() }}>导入工程 / AARC</button>
+          {onImportTopology && <button onClick={() => { onImportTopology(); close() }}>导入拓扑</button>}
+          <button onClick={() => { onImportBackground(); close() }}>导入底图</button>
+          {project.background && <button className="danger" onClick={() => { if (removeBackground()) close() }}>删除当前底图</button>}
+        </section>}
+        {active === 'export' && <section className="mobile-drawer-section" aria-label="导出文件">
+          <strong>导出文件</strong>
+          <button onClick={() => { onExportProject(); close() }}>{nativeFiles ? '保存 JSON 到手机' : '导出工程 JSON'}</button>
+          <button onClick={() => { onExportSvg(); close() }}>{nativeFiles ? '保存 SVG 到手机' : '导出矢量图 SVG'}</button>
+          <button onClick={() => { onExportImage(); close() }}>导出图片…</button>
+          <button onClick={() => { onCopyStationSpacing(); close() }}>复制站距</button>
+        </section>}
       </div>
     </aside></>}
     {nameEditing && <div className="about-dialog" role="dialog" aria-label="重命名工程"><form className="about-dialog-card" onSubmit={event => { event.preventDefault(); submitProjectName() }}><strong>重命名工程</strong><input autoFocus aria-label="新的工程名称" value={nameDraft} onChange={event => setNameDraft(event.currentTarget.value)}/><button type="submit">保存名称</button><button type="button" onClick={() => setNameEditing(false)}>取消</button></form></div>}

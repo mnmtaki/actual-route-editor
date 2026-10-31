@@ -1,3 +1,4 @@
+import { CloudProjects } from "./components/CloudProjects";
 import { formatStationSpacingText } from './data/stationSpacingText';
 import { useEffect, useRef, useState } from "react";
 import { Toolbar } from "./components/Toolbar";
@@ -1338,6 +1339,7 @@ export default function App() {
             <div><strong>{item.name}</strong><small>{item.lines} 条线路 · {item.stations} 座车站 · {new Date(item.updatedAt).toLocaleString()}</small></div>
             <div className="project-library-item-actions"><button type="button" disabled={libraryBusy || item.id === currentProjectId.current} onClick={() => void activateProject(item.id)}>{item.id === currentProjectId.current ? "正在编辑" : "打开"}</button><button type="button" disabled={libraryBusy} onClick={() => void renameLibraryProject(item)}>重命名</button><button type="button" disabled={libraryBusy} onClick={() => void removeLibraryProject(item)}>删除</button></div>
           </article>)}</div>
+          <CloudProjects currentProject={history.project} importAsLocalCopy={openImportedProject} />
           <footer>切换前会保存当前工程。重要数据仍建议定期导出 JSON 备份。</footer>
         </section>
       </div>}

@@ -35,29 +35,47 @@ public class AuthService {
         }
     }
 
-    public String login(String username, String password) {
+    public record IssuedSession(String token, String csrf) {}
+
+    public IssuedSession login(String username, String password) {
         var users = jdbc.query("SELECT id,password_hash FROM app_users WHERE username=?",
                 (rs, i) -> new Credential(rs.getObject("id", UUID.class), rs.getString("password_hash")), username);
         if (users.size() != 1 || !encoder.matches(password, users.get(0).hash()))
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "用户名或密码错误");
-        byte[] raw = new byte[32];
-        random.nextBytes(raw);
-        String token = HexFormat.of().formatHex(raw);
-        jdbc.update("INSERT INTO auth_tokens(token_hash,user_id,expires_at) VALUES (?,?,?)",
-                sha256(token), users.get(0).id(), OffsetDateTime.now(ZoneOffset.UTC).plusDays(7));
-        return token;
+        String token = randomToken();
+        String csrf = randomToken();
+        jdbc.update("INSERT INTO auth_tokens(token_hash,user_id,csrf_hash,expires_at) VALUES (?,?,?,?)",
+                sha256(token), users.get(0).id(), sha256(csrf),
+                OffsetDateTime.now(ZoneOffset.UTC).plusDays(7));
+        return new IssuedSession(token, csrf);
     }
 
     public UUID resolve(String token) {
-        if (token == null || token.length() != 64 || !token.matches("[0-9a-f]{64}")) return null;
-        var users = jdbc.query("SELECT user_id FROM auth_tokens WHERE token_hash=? AND expires_at>now()",
+        if (token == null || !token.matches("[0-9a-f]{64}")) return null;
+        var users = jdbc.query("SELECT user_id FROM auth_tokens WHERE token_hash=? AND expires_at>now() AND csrf_hash IS NOT NULL",
                 (rs, i) -> rs.getObject("user_id", UUID.class), sha256(token));
         return users.isEmpty() ? null : users.get(0);
+    }
+
+    public boolean verifyCsrf(String token, String csrfHeader, String csrfCookie) {
+        if (resolve(token) == null || csrfHeader == null || !csrfHeader.matches("[0-9a-f]{64}")
+                || !csrfHeader.equals(csrfCookie)) return false;
+        var hashes = jdbc.query("SELECT csrf_hash FROM auth_tokens WHERE token_hash=? AND expires_at>now()",
+                (rs, i) -> rs.getString("csrf_hash"), sha256(token));
+        return hashes.size() == 1 && MessageDigest.isEqual(
+                sha256(csrfHeader).getBytes(StandardCharsets.US_ASCII),
+                hashes.get(0).getBytes(StandardCharsets.US_ASCII));
     }
 
     public void logout(String token) {
         if (token != null && token.matches("[0-9a-f]{64}"))
             jdbc.update("DELETE FROM auth_tokens WHERE token_hash=?", sha256(token));
+    }
+
+    private String randomToken() {
+        byte[] raw = new byte[32];
+        random.nextBytes(raw);
+        return HexFormat.of().formatHex(raw);
     }
 
     private static String sha256(String input) {

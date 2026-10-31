@@ -9,18 +9,27 @@ export interface CloudProjectSummary {
 export interface CloudProject extends CloudProjectSummary {
   document: ActualRouteProject;
 }
-type AuthResult = { accessToken: string; tokenType: string };
+export interface CloudIdentity { userId: string }
 
 export class CloudApiError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
 }
 
-async function api<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
+function csrfToken(): string | undefined {
+  const cookie = document.cookie.split('; ').find(value => value.startsWith('ara_csrf='));
+  return cookie ? decodeURIComponent(cookie.slice('ara_csrf='.length)) : undefined;
+}
+
+async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const method = (init.method || 'GET').toUpperCase();
+  const csrf = !['GET', 'HEAD', 'OPTIONS'].includes(method) && path !== '/api/auth/login' && path !== '/api/auth/register'
+    ? csrfToken() : undefined;
   const response = await fetch(API_BASE + path, {
     ...init,
+    credentials: 'include',
     headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: 'Bearer ' + token } : {}),
+      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(csrf ? { 'X-ARA-CSRF': csrf } : {}),
       ...init.headers,
     },
   });
@@ -39,24 +48,24 @@ export const cloudApi = {
       method: 'POST', body: JSON.stringify({ username, password }),
     }),
   login: (username: string, password: string) =>
-    api<AuthResult>('/api/auth/login', {
+    api<{ status: string }>('/api/auth/login', {
       method: 'POST', body: JSON.stringify({ username, password }),
     }),
-  logout: (token: string) =>
-    api<{ status: string }>('/api/auth/logout', { method: 'POST' }, token),
-  list: (token: string) => api<CloudProjectSummary[]>('/api/projects', {}, token),
-  get: async (token: string, id: string) => {
+  me: () => api<CloudIdentity>('/api/auth/me'),
+  logout: () => api<{ status: string }>('/api/auth/logout', { method: 'POST' }),
+  list: () => api<CloudProjectSummary[]>('/api/projects'),
+  get: async (id: string) => {
     const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; document: unknown }>(
-      `/api/projects/${encodeURIComponent(id)}`, {}, token,
+      `/api/projects/${encodeURIComponent(id)}`,
     );
     return { ...raw, document: parseProjectJson(JSON.stringify(raw.document)) } as CloudProject;
   },
-  create: (token: string, project: ActualRouteProject) =>
+  create: (project: ActualRouteProject) =>
     api<CloudProjectSummary>('/api/projects', {
       method: 'POST',
       body: JSON.stringify({ name: project.projectName || project.name, document: JSON.parse(serializeProject(project)) }),
-    }, token),
-  update: (token: string, id: string, revision: number, project: ActualRouteProject) =>
+    }),
+  update: (id: string, revision: number, project: ActualRouteProject) =>
     api<CloudProjectSummary>(`/api/projects/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify({
@@ -64,7 +73,7 @@ export const cloudApi = {
         document: JSON.parse(serializeProject(project)),
         expectedRevision: revision,
       }),
-    }, token),
-  delete: (token: string, id: string) =>
-    api<void>(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }, token),
+    }),
+  delete: (id: string) =>
+    api<void>(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };

@@ -1,0 +1,36 @@
+name: Java accounts and cloud saves CI
+on:
+  push:
+    branches:
+      - feat/java-accounts-cloud-saves-20261101
+  pull_request:
+    paths:
+      - 'server/**'
+      - 'src/**'
+      - 'package.json'
+jobs:
+  java:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: server/pom.xml
+      - run: mvn -B -ntp test package
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test -- --run

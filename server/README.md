@@ -26,6 +26,9 @@ GET /api/projects — user's projects
 POST /api/projects — create project
 GET /api/projects/{uuid} — load
 PUT /api/projects/{uuid} — require expectedRevision for atomic CAS save
+GET /api/projects/{uuid}/revisions — list ten most recent snapshots
+GET /api/projects/{uuid}/revisions/{revision} — download a retained snapshot
+POST /api/projects/{uuid}/restore — sourceRevision + expectedRevision, restores as a NEW revision
 DELETE /api/projects/{uuid} — delete
 
 ## Safeguards
@@ -44,8 +47,22 @@ DELETE /api/projects/{uuid} — delete
 ## Boundaries
 - Cloud saves remain opt-in and do not replace browser IndexedDB saves.
 - This version does not include password recovery, multi-device management,
-  email verification, saved revision history, collaboration or automatic syncing.
+  email verification, collaboration or automatic syncing.
 - CSRF cookie is JS-readable by design; its session binding in PostgreSQL
   prevents arbitrary cookie spoofing. XSS prevention still matters.
 - Configure a trusted proxy, API request size limits and cleanup for expired
   session/rate-limit rows before a public deployment.
+
+## History retention
+- Every successful cloud save and restore creates a full immutable JSONB snapshot.
+- Each project keeps the latest **10** snapshots; older ones are automatically
+  deleted in the same transaction as the save/restore.
+- Revision numbers are NEVER reused or renumbered. Saving v13 yields v14
+  even after pruning v1–v4. Fetching a pruned revision returns 404.
+- Restoring a retained snapshot appends a new latest revision, then prunes
+  the oldest snapshot. `expectedRevision` continues to enforce concurrency.
+- Flyway migration V4 prunes existing histories above ten snapshots per project.
+  This removal is irreversible; export any important older revisions before upgrading.
+- There is no pinned/milestone version support yet: **all** versions, including
+  manually saved and restored versions, count toward the ten-snapshot limit.
+- Local IndexedDB saves and downloaded JSON backups are unaffected.

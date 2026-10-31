@@ -163,6 +163,18 @@ public class ProjectController {
             INSERT INTO cloud_project_revisions(project_id,revision,name,document)
             VALUES (?,?,?,CAST(? AS jsonb))
             """, id, expected + 1, name, document);
+        // Keep only the ten newest snapshots after a successful CAS write.
+        // This runs in the SAME transaction as the current document update and
+        // revision insert: rollback preserves consistency if pruning fails.
+        jdbc.update("""
+            DELETE FROM cloud_project_revisions
+            WHERE project_id = ? AND revision NOT IN (
+                SELECT revision FROM cloud_project_revisions
+                WHERE project_id = ?
+                ORDER BY revision DESC
+                LIMIT 10
+            )
+            """, id, id);
         return get(user, id);
     }
 

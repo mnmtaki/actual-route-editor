@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { CloudRevisionHistory } from './CloudRevisionHistory';
 import type { ActualRouteProject } from '../data/model';
 import { cloudApi, CloudApiError, type CloudProjectSummary } from '../data/cloudProjectApi';
 
@@ -14,6 +15,7 @@ export function CloudProjects({ currentProject, importAsLocalCopy }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [historyId, setHistoryId] = useState<string | null>(null);
 
   // The dialog is remounted when reopened. Its session is recovered from
   // the HttpOnly cookie; no credential is written to JavaScript storage.
@@ -80,7 +82,7 @@ export function CloudProjects({ currentProject, importAsLocalCopy }: {
           <div className="project-library-list">
             {items.length === 0 && <p>还没有云端存档。</p>}
             {items.map(item => (
-              <article className="project-library-item" key={item.id}>
+              <div key={item.id}><article className="project-library-item">
                 <div><strong>{item.name}</strong><small>云端版本 v{item.revision} · {new Date(item.updatedAt).toLocaleString()}</small></div>
                 <div className="project-library-item-actions">
                   <button type="button" disabled={busy} onClick={() => void action(async () => {
@@ -94,6 +96,7 @@ export function CloudProjects({ currentProject, importAsLocalCopy }: {
                     await refresh();
                     setNotice('云存档已更新');
                   })}>用当前工程覆盖</button>
+                  <button type="button" disabled={busy} onClick={() => setHistoryId(current => current === item.id ? null : item.id)}>{historyId === item.id ? '收起历史' : '历史版本'}</button>
                   <button type="button" disabled={busy} onClick={() => void action(async () => {
                     if (!window.confirm(`永久删除云端存档「${item.name}」？`)) return;
                     await cloudApi.delete(item.id);
@@ -101,6 +104,8 @@ export function CloudProjects({ currentProject, importAsLocalCopy }: {
                   })}>删除云存档</button>
                 </div>
               </article>
+              {historyId === item.id && <CloudRevisionHistory id={item.id} latestRevision={item.revision} onRestored={refresh} />}
+              </div>
             ))}
           </div>
         </div>

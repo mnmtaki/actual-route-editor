@@ -10,6 +10,8 @@ export interface CloudProject extends CloudProjectSummary {
   document: ActualRouteProject;
 }
 export interface CloudIdentity { userId: string }
+export interface CloudRevisionSummary { revision: number; name: string; createdAt: string }
+export interface CloudRevision extends CloudRevisionSummary { document: ActualRouteProject }
 
 export class CloudApiError extends Error {
   constructor(public readonly status: number, message: string) { super(message); }
@@ -73,6 +75,18 @@ export const cloudApi = {
         document: JSON.parse(serializeProject(project)),
         expectedRevision: revision,
       }),
+    }),
+  revisions: (id: string) =>
+    api<CloudRevisionSummary[]>(`/api/projects/${encodeURIComponent(id)}/revisions`),
+  getRevision: async (id: string, revision: number) => {
+    const raw = await api<{ revision: number; name: string; createdAt: string; document: unknown }>(
+      `/api/projects/${encodeURIComponent(id)}/revisions/${revision}`,
+    );
+    return { ...raw, document: parseProjectJson(JSON.stringify(raw.document)) } as CloudRevision;
+  },
+  restoreRevision: (id: string, sourceRevision: number, expectedRevision: number) =>
+    api<CloudProjectSummary>(`/api/projects/${encodeURIComponent(id)}/restore`, {
+      method: 'POST', body: JSON.stringify({ sourceRevision, expectedRevision }),
     }),
   delete: (id: string) =>
     api<void>(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }),

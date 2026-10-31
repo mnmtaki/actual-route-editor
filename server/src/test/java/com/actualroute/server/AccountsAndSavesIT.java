@@ -196,6 +196,68 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void historyKeepsOnlyTenNewestVersionsAndNeverReusesRevisionNumbers() throws Exception {
+        Session owner = account("limit");
+        Session outsider = account("outsider");
+        String id = createProject(owner);
+        // v1 exists. Write through v12; each successful save appends a snapshot.
+        for (int revision = 1; revision <= 11; revision++) {
+            mvc.perform(authorized(put("/api/projects/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of(
+                    "name", "City-v" + (revision + 1),
+                    "document", document(), "expectedRevision", revision))), owner))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(revision + 1));
+        }
+
+        mvc.perform(get("/api/projects/" + id + "/revisions").cookie(owner.cookies()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(10))
+            .andExpect(jsonPath("$[0].revision").value(12))
+            .andExpect(jsonPath("$[9].revision").value(3));
+        mvc.perform(get("/api/projects/" + id + "/revisions/1").cookie(owner.cookies()))
+            .andExpect(status().isNotFound());
+        mvc.perform(get("/api/projects/" + id + "/revisions/2").cookie(owner.cookies()))
+            .andExpect(status().isNotFound());
+        mvc.perform(get("/api/projects/" + id + "/revisions/3").cookie(owner.cookies()))
+            .andExpect(status().isOk());
+
+        // Failed writes must neither increment revision nor prune a snapshot.
+        mvc.perform(authorized(put("/api/projects/" + id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name", "Stale", "document", document(), "expectedRevision", 11))), owner))
+            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/" + id + "/revisions").cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(10));
+
+        mvc.perform(authorized(post("/api/projects/" + id + "/restore")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "sourceRevision", 3, "expectedRevision", 12))), outsider))
+            .andExpect(status().isNotFound());
+
+        // Restoring v3 creates v13 and prunes v3, with no renumbering.
+        mvc.perform(authorized(post("/api/projects/" + id + "/restore")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "sourceRevision", 3, "expectedRevision", 12))), owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(13))
+            .andExpect(jsonPath("$.name").value("City-v3"));
+        mvc.perform(get("/api/projects/" + id + "/revisions").cookie(owner.cookies()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(10))
+            .andExpect(jsonPath("$[0].revision").value(13))
+            .andExpect(jsonPath("$[9].revision").value(4));
+        mvc.perform(get("/api/projects/" + id + "/revisions/3").cookie(owner.cookies()))
+            .andExpect(status().isNotFound());
+        mvc.perform(get("/api/projects/" + id).cookie(owner.cookies()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(13))
+            .andExpect(jsonPath("$.name").value("City-v3"));
+    }
+
+    @Test
     void rateLimitBlocksRepeatedFailedLogins() throws Exception {
         String user = "wrong" + UUID.randomUUID().toString().replace("-", "").substring(0, 15);
         String ip = "198.51.100.77";

@@ -128,6 +128,74 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void versionHistoryIsImmutableAndRestoreAppendsWithoutOverwriting() throws Exception {
+        Session owner = account("history");
+        Session other = account("otherhistory");
+        String id = createProject(owner);
+
+        // Creation already has v1, which is the baseline immutable snapshot.
+        mvc.perform(get("/api/projects/" + id + "/revisions").cookie(owner.cookies()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].revision").value(1));
+
+        var changedDocument = mapper.readTree("""
+                {"version":1,"name":"Changed","stations":[{"id":"station-1"}],
+                "lines":[],"geometry":{"segments":[]}}
+                """);
+        mvc.perform(authorized(put("/api/projects/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of("name","Changed","document",changedDocument,"expectedRevision",1))), owner))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+
+        mvc.perform(get("/api/projects/" + id + "/revisions").cookie(owner.cookies()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].revision").value(2))
+                .andExpect(jsonPath("$[1].revision").value(1));
+
+        mvc.perform(get("/api/projects/" + id + "/revisions/1").cookie(owner.cookies()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("City"))
+                .andExpect(jsonPath("$.document.stations.length()").value(0));
+        mvc.perform(get("/api/projects/" + id + "/revisions/2").cookie(owner.cookies()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.document.stations.length()").value(1));
+
+        String restoreOld = mapper.writeValueAsString(Map.of("sourceRevision",1,"expectedRevision",1));
+        mvc.perform(authorized(post("/api/projects/" + id + "/restore")
+                .contentType(MediaType.APPLICATION_JSON).content(restoreOld), owner))
+                .andExpect(status().isConflict());
+
+        var restore = mapper.writeValueAsString(Map.of("sourceRevision",1,"expectedRevision",2));
+        mvc.perform(post("/api/projects/" + id + "/restore").cookie(owner.cookies())
+                .contentType(MediaType.APPLICATION_JSON).content(restore))
+                .andExpect(status().isForbidden());
+        mvc.perform(authorized(post("/api/projects/" + id + "/restore")
+                .contentType(MediaType.APPLICATION_JSON).content(restore), other))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/projects/" + id + "/revisions").cookie(other.cookies()))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/projects/" + id + "/revisions/1").cookie(other.cookies()))
+                .andExpect(status().isNotFound());
+
+        mvc.perform(authorized(post("/api/projects/" + id + "/restore")
+                .contentType(MediaType.APPLICATION_JSON).content(restore), owner))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3))
+                .andExpect(jsonPath("$.document.stations.length()").value(0));
+        mvc.perform(get("/api/projects/" + id + "/revisions").cookie(owner.cookies()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(3));
+        // The pre-restore v2 is still available even after restoring v1 as v3.
+        mvc.perform(get("/api/projects/" + id + "/revisions/2").cookie(owner.cookies()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.document.stations.length()").value(1));
+        mvc.perform(get("/api/projects/" + id + "/revisions/3").cookie(owner.cookies()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.document.stations.length()").value(0));
+
+        mvc.perform(authorized(post("/api/projects/" + id + "/restore")
+                .contentType(MediaType.APPLICATION_JSON).content(restore), owner))
+                .andExpect(status().isConflict());
+        mvc.perform(authorized(delete("/api/projects/" + id), owner)).andExpect(status().isNoContent());
+        mvc.perform(get("/api/projects/" + id + "/revisions").cookie(owner.cookies()))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     void rateLimitBlocksRepeatedFailedLogins() throws Exception {
         String user = "wrong" + UUID.randomUUID().toString().replace("-", "").substring(0, 15);
         String ip = "198.51.100.77";

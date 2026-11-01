@@ -48,7 +48,7 @@ public class SecurityConfig {
             .build();
     }
 
-    @Bean CorsConfigurationSource cors(@Value("${ara.cors-origin}") String origin) {
+    @Bean CorsConfigurationSource corsConfigurationSource(@Value("${ara.cors-origin}") String origin) {
         var config = new CorsConfiguration();
         config.setAllowedOrigins(List.of(origin));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));

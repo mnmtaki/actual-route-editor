@@ -33,11 +33,10 @@ public class ProjectController {
     public record ProjectView(UUID id, String name, long revision, JsonNode document,
                               OffsetDateTime updatedAt) {}
 
-    public record Summary(UUID id, String name, long revision, OffsetDateTime updatedAt, String role) {}
+    public record Summary(UUID id, String name, long revision, OffsetDateTime updatedAt, String role, String visibility) {}
+    public record VisibilityRequest(@NotNull String visibility) {}
     public record RevisionSummary(long revision, String name, OffsetDateTime createdAt) {}
     public record RevisionView(long revision, String name, JsonNode document, OffsetDateTime createdAt) {}
-    public record InviteRequest(@NotBlank @Size(min=3,max=40) String username) {}
-    public record Collaborator(UUID userId, String username, String role) {}
 
     private String json(JsonNode value) {
         if (!value.isObject() || !value.has("stations") || !value.get("stations").isArray()
@@ -75,70 +74,58 @@ public class ProjectController {
 
     private void requireReadable(UUID user, UUID id) {
         Integer count = jdbc.queryForObject("""
-            SELECT count(*) FROM cloud_projects p
-            WHERE p.id=? AND (p.owner_id=? OR EXISTS (
-                SELECT 1 FROM cloud_project_members m WHERE m.project_id=p.id AND m.user_id=?))
+            SELECT count(*) FROM cloud_projects
+             WHERE id=? AND (owner_id=? OR visibility IN ('public_view','public_edit'))
+            """, Integer.class, id, user);
+        if (count == null || count == 0)
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工程不存在");
+    }
+
+    private void requireWritable(UUID user, UUID id) {
+        Integer count = jdbc.queryForObject("""
+            SELECT count(*) FROM cloud_projects
+             WHERE id=? AND (owner_id=? OR (visibility='public_edit' AND ? IS NOT NULL))
             """, Integer.class, id, user, user);
         if (count == null || count == 0)
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工程不存在");
     }
 
-    @GetMapping("/{id}/members")
-    public List<Collaborator> members(@AuthenticationPrincipal UUID user, @PathVariable UUID id) {
-        requireReadable(user, id);
+    @PutMapping("/{id}/visibility")
+    @Transactional
+    public Summary setVisibility(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
+                                  @Valid @RequestBody VisibilityRequest input) {
+        if (!List.of("private", "public_view", "public_edit").contains(input.visibility()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效的工程访问权限");
+        int changed = jdbc.update(
+            "UPDATE cloud_projects SET visibility=? WHERE id=? AND owner_id=?",
+            input.visibility(), id, user);
+        if (changed == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
+        return jdbc.queryForObject("""
+            SELECT id,name,revision,updated_at,visibility FROM cloud_projects WHERE id=?
+            """, (rs,n) -> new Summary(rs.getObject("id",UUID.class),rs.getString("name"),
+                rs.getLong("revision"),rs.getObject("updated_at",OffsetDateTime.class),
+                "owner",rs.getString("visibility")), id);
+    }
+
+    @GetMapping("/public")
+    public List<Summary> publicProjects() {
         return jdbc.query("""
-            SELECT u.id, u.username, 'owner' AS role FROM cloud_projects p
-                JOIN app_users u ON u.id=p.owner_id WHERE p.id=?
-            UNION ALL
-            SELECT u.id, u.username, 'editor' AS role FROM cloud_project_members m
-                JOIN app_users u ON u.id=m.user_id WHERE m.project_id=?
-            ORDER BY role DESC, username
-            """, (rs, n) -> new Collaborator(rs.getObject("id",UUID.class),
-                 rs.getString("username"), rs.getString("role")), id, id);
-    }
-
-    @PostMapping("/{id}/members")
-    @ResponseStatus(HttpStatus.CREATED)
-    @Transactional
-    public Collaborator invite(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
-                               @Valid @RequestBody InviteRequest input) {
-        requireOwned(user, id);
-        var target = jdbc.query("SELECT id,username FROM app_users WHERE username=?",
-            (rs,n) -> new Collaborator(rs.getObject("id",UUID.class),rs.getString("username"),"editor"),
-            input.username());
-        if (target.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "用户名不存在");
-        Collaborator member=target.get(0);
-        if (member.userId().equals(user))
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"不能邀请自己");
-        int added=jdbc.update("""
-            INSERT INTO cloud_project_members(project_id,user_id) VALUES (?,?)
-            ON CONFLICT DO NOTHING
-            """,id,member.userId());
-        if(added==0) throw new ResponseStatusException(HttpStatus.CONFLICT,"成员已经存在");
-        return member;
-    }
-
-    @DeleteMapping("/{id}/members/{memberId}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    @Transactional
-    public void removeMember(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
-                             @PathVariable UUID memberId) {
-        requireOwned(user, id);
-        if (jdbc.update("DELETE FROM cloud_project_members WHERE project_id=? AND user_id=?",
-                 id,memberId)==0)
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"成员不存在");
+            SELECT id,name,revision,updated_at,visibility FROM cloud_projects
+            WHERE visibility IN ('public_view','public_edit')
+            ORDER BY updated_at DESC LIMIT 100
+            """, (rs,n) -> new Summary(rs.getObject("id",UUID.class),rs.getString("name"),
+                rs.getLong("revision"),rs.getObject("updated_at",OffsetDateTime.class),
+                "viewer",rs.getString("visibility")));
     }
 
     @GetMapping
     public List<Summary> list(@AuthenticationPrincipal UUID user) {
         return jdbc.query("""
-            SELECT p.id,p.name,p.revision,p.updated_at, CASE WHEN p.owner_id=? THEN 'owner' ELSE 'editor' END AS role FROM cloud_projects p
-            WHERE p.owner_id=? OR EXISTS (
-                SELECT 1 FROM cloud_project_members m
-                WHERE m.project_id=p.id AND m.user_id=?)
-            ORDER BY p.updated_at DESC
-            """, (rs, i) -> new Summary(rs.getObject("id", UUID.class), rs.getString("name"),
-                        rs.getLong("revision"), rs.getObject("updated_at", OffsetDateTime.class), rs.getString("role")), user, user, user);
+            SELECT id,name,revision,updated_at,visibility FROM cloud_projects
+            WHERE owner_id=? ORDER BY updated_at DESC
+            """, (rs,n) -> new Summary(rs.getObject("id",UUID.class),rs.getString("name"),
+                rs.getLong("revision"),rs.getObject("updated_at",OffsetDateTime.class),
+                "owner",rs.getString("visibility")), user);
     }
 
     @PostMapping
@@ -161,9 +148,8 @@ public class ProjectController {
         var records = jdbc.query("""
             SELECT p.id,p.name,p.revision,p.document,p.updated_at
             FROM cloud_projects p WHERE p.id=? AND
-              (p.owner_id=? OR EXISTS (
-                SELECT 1 FROM cloud_project_members m WHERE m.project_id=p.id AND m.user_id=?))
-            """, this::view, id, user, user);
+              (p.owner_id=? OR p.visibility IN ('public_view','public_edit'))
+            """, this::view, id, user);
         if (records.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工程不存在");
         return records.get(0);
     }
@@ -175,11 +161,10 @@ public class ProjectController {
             SELECT r.revision,r.name,r.created_at
               FROM cloud_project_revisions r
               JOIN cloud_projects p ON p.id=r.project_id
-             WHERE r.project_id=? AND (p.owner_id=? OR EXISTS (
-                 SELECT 1 FROM cloud_project_members m WHERE m.project_id=p.id AND m.user_id=?))
+             WHERE r.project_id=? AND (p.owner_id=? OR p.visibility IN ('public_view','public_edit'))
              ORDER BY r.revision DESC
             """, (rs, i) -> new RevisionSummary(rs.getLong("revision"),rs.getString("name"),
-                    rs.getObject("created_at", OffsetDateTime.class)), id, user, user);
+                    rs.getObject("created_at", OffsetDateTime.class)), id, user);
     }
 
     @GetMapping("/{id}/revisions/{revision}")
@@ -190,9 +175,9 @@ public class ProjectController {
             SELECT r.revision,r.name,r.document,r.created_at
               FROM cloud_project_revisions r
               JOIN cloud_projects p ON p.id=r.project_id
-             WHERE r.project_id=? AND r.revision=? AND (p.owner_id=? OR EXISTS (
-                 SELECT 1 FROM cloud_project_members m WHERE m.project_id=p.id AND m.user_id=?))
-            """, this::revisionView, id, revision, user, user);
+             WHERE r.project_id=? AND r.revision=? AND
+                 (p.owner_id=? OR p.visibility IN ('public_view','public_edit'))
+            """, this::revisionView, id, revision, user);
         if (records.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "版本不存在");
         return records.get(0);
     }
@@ -222,12 +207,11 @@ public class ProjectController {
         int changed = jdbc.update("""
             UPDATE cloud_projects SET name=?, document=CAST(? AS jsonb), revision=revision+1,
                 updated_at=now()
-            WHERE id=? AND revision=? AND (owner_id=? OR EXISTS (
-                SELECT 1 FROM cloud_project_members m
-                WHERE m.project_id=cloud_projects.id AND m.user_id=?))
+            WHERE id=? AND revision=? AND
+                (owner_id=? OR (visibility='public_edit' AND ? IS NOT NULL))
             """, name, document, id, expected, user, user);
         if (changed != 1) {
-            requireReadable(user, id);
+            requireWritable(user, id);
             throw new ResponseStatusException(HttpStatus.CONFLICT, "工程版本冲突，请刷新或另存后重试");
         }
         // Same database transaction as the CAS update. Any failure rolls back both writes.

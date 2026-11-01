@@ -601,6 +601,101 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void twoEditorsMergeDisjointStationEditsButRejectOverlappingOrFullSaves() throws Exception {
+        Session owner=account("mergeOwner");
+        Session peer=account("mergePeer");
+        String id=createProject(owner);
+        String endpoint="/api/projects/" + id + "/operations";
+        UUID peerId=auth.resolve(peer.sessionCookie().getValue());
+        String peerName=jdbc.queryForObject(
+            "SELECT username FROM app_users WHERE id=?",String.class,peerId);
+        mvc.perform(authorized(post("/api/projects/" + id + "/access-rules")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",peerName,"action","edit","allowed",true))),owner))
+            .andExpect(status().isOk());
+
+        // Both editors begin from exactly the same v1 document.
+        String makeA=mapper.writeValueAsString(Map.of(
+            "operationId",UUID.randomUUID(),"expectedRevision",1,"type","station.create",
+            "station",Map.of("id","a","name","A","x",10,"y",20)));
+        String makeB=mapper.writeValueAsString(Map.of(
+            "operationId",UUID.randomUUID(),"expectedRevision",1,"type","station.create",
+            "station",Map.of("id","b","name","B","x",30,"y",40)));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(makeA),owner)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(2));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(makeB),peer)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(3));
+        mvc.perform(get("/api/projects/" + id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.document.stations.length()").value(2))
+            .andExpect(jsonPath("$.document.stations[0].name").value("A"))
+            .andExpect(jsonPath("$.document.stations[1].name").value("B"));
+
+        // Two editors concurrently work on different existing stations from v3.
+        // Server-side row locking determines v4 and v5, both changes survive.
+        var ready=new java.util.concurrent.CountDownLatch(2);
+        var go=new java.util.concurrent.CountDownLatch(1);
+        var pool=java.util.concurrent.Executors.newFixedThreadPool(2);
+        java.util.concurrent.Future<Integer> first=null,second=null;
+        try {
+            String moveA=mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",3,"type","station.move",
+                "station",Map.of("id","a","x",111,"y",222)));
+            String renameB=mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",3,"type","station.rename",
+                "station",Map.of("id","b","name","B renamed")));
+            first=pool.submit(() -> {
+                ready.countDown();go.await();
+                return mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+                    .content(moveA),owner)).andReturn().getResponse().getStatus();
+            });
+            second=pool.submit(() -> {
+                ready.countDown();go.await();
+                return mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+                    .content(renameB),peer)).andReturn().getResponse().getStatus();
+            });
+            assertTrue(ready.await(10,java.util.concurrent.TimeUnit.SECONDS));
+            go.countDown();
+            assertEquals(200,first.get(20,java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(200,second.get(20,java.util.concurrent.TimeUnit.SECONDS));
+        } finally {
+            go.countDown();
+            pool.shutdownNow();
+        }
+        mvc.perform(get("/api/projects/" + id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(5))
+            .andExpect(jsonPath("$.document.stations[0].x").value(111))
+            .andExpect(jsonPath("$.document.stations[1].name").value("B renamed"));
+
+        // Same-station collision must still fail even with otherwise valid v3 base.
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",3,"type","station.move",
+                "station",Map.of("id","a","x",999,"y",999)))),peer))
+            .andExpect(status().isConflict());
+
+        // Full-project save is a hard merge boundary even for unrelated stations.
+        JsonNode saved=mapper.readTree(mvc.perform(get("/api/projects/" + id)
+            .cookie(owner.cookies())).andReturn().getResponse().getContentAsString());
+        mvc.perform(authorized(put("/api/projects/" + id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Changed whole document","document",saved.get("document"),
+                "expectedRevision",5))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(6));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",5,"type","station.create",
+                "station",Map.of("id","c","name","C","x",50,"y",60)))),peer))
+            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/" + id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(6))
+            .andExpect(jsonPath("$.document.stations.length()").value(2));
+    }
+
+    @Test
     void rateLimitBlocksRepeatedFailedLogins() throws Exception {
         String user = "wrong" + UUID.randomUUID().toString().replace("-", "").substring(0, 15);
         String ip = "198.51.100.77";

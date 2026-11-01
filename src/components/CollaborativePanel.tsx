@@ -41,6 +41,7 @@ export function CollaborativePanel({ session, project, onUpdate, onLoad, onExit 
     let retryTimer: number | undefined;
     let pingTimer: number | undefined;
     let retryMs = 1000;
+    const permissionLostRef = { current: false };
     setRemoteRevision(session.revision);
     setConnected(false);
     setPermissionLost(false);
@@ -87,6 +88,7 @@ export function CollaborativePanel({ session, project, onUpdate, onLoad, onExit 
         const status = await cloudApi.status(session.id);
         if (!alive) return;
         if (!status.canEdit) {
+          permissionLostRef.current = true;
           setPermissionLost(true);
           setError('当前账号已失去协作编辑权限；本地副本仍保留');
           socket?.close(1000, 'Permission changed');
@@ -135,7 +137,7 @@ export function CollaborativePanel({ session, project, onUpdate, onLoad, onExit 
         if (!alive) return;
         setConnected(false);
         if (pingTimer !== undefined) window.clearInterval(pingTimer);
-        if (event.code === 1008) {
+        if (event.code === 1008 || permissionLostRef.current) {
           permissionLostRef.current = true;
           setPermissionLost(true);
           setError('协作权限或登录会话已失效，已停止实时连接');
@@ -149,7 +151,6 @@ export function CollaborativePanel({ session, project, onUpdate, onLoad, onExit 
     // A lightweight, infrequent fallback catches missed events, server
     // restarts and permission changes. It does not fetch full map JSON unless
     // an unseen newer revision exists.
-    const permissionLostRef = { current: false };
     void checkRemote();
     connect();
     const poll = window.setInterval(() => { void checkRemote(); }, 30000);

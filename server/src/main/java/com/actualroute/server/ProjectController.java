@@ -31,7 +31,7 @@ public class ProjectController {
     public record RestoreRequest(@NotNull Long sourceRevision, @NotNull Long expectedRevision) {}
 
     public record ProjectView(UUID id, String name, long revision, JsonNode document,
-                              OffsetDateTime updatedAt) {}
+                              OffsetDateTime updatedAt, String visibility) {}
 
     public record Summary(UUID id, String name, long revision, OffsetDateTime updatedAt, String role, String visibility) {}
     public record VisibilityRequest(@NotNull String visibility) {}
@@ -53,7 +53,7 @@ public class ProjectController {
         try {
             return new ProjectView(rs.getObject("id", UUID.class), rs.getString("name"),
                     rs.getLong("revision"), mapper.readTree(rs.getString("document")),
-                    rs.getObject("updated_at", OffsetDateTime.class));
+                    rs.getObject("updated_at", OffsetDateTime.class), rs.getString("visibility"));
         } catch (java.io.IOException e) { throw new SQLException(e); }
     }
 
@@ -146,7 +146,7 @@ public class ProjectController {
     @GetMapping("/{id}")
     public ProjectView get(@AuthenticationPrincipal UUID user, @PathVariable UUID id) {
         var records = jdbc.query("""
-            SELECT p.id,p.name,p.revision,p.document,p.updated_at
+            SELECT p.id,p.name,p.revision,p.document,p.updated_at,p.visibility
             FROM cloud_projects p WHERE p.id=? AND
               (p.owner_id=? OR p.visibility IN ('public_view','public_edit'))
             """, this::view, id, user);

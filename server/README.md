@@ -28,6 +28,9 @@ GET /api/projects/{uuid} — load by owner or if public
 PUT /api/projects/{uuid} — require expectedRevision for atomic CAS save (owner or public_edit logged-in user)
 GET /api/projects/public — discover publicly shared projects
 PUT /api/projects/{uuid}/visibility — owner sets private / public_view / public_edit
+GET /api/projects/{uuid}/access-rules — owner lists specific user permissions
+POST /api/projects/{uuid}/access-rules — owner sets an allow/deny rule by registered username
+DELETE /api/projects/{uuid}/access-rules/{ruleId} — owner deletes a rule
 GET /api/projects/{uuid}/revisions — list ten most recent snapshots
 GET /api/projects/{uuid}/revisions/{revision} — download a retained snapshot
 POST /api/projects/{uuid}/restore — sourceRevision + expectedRevision, restores as a NEW revision
@@ -89,3 +92,32 @@ browser. Opening a shared project in the editor creates a distinct local
 IndexedDB working copy. In collaborative mode, publishing uses expectedRevision
 to reject stale writes; the editor polls for new cloud versions about every
 four seconds. No mouse/operation-level real-time merge is implemented yet.
+
+## Per-user project access grants (Flyway V7)
+
+The visibility selector remains a *default policy*; the owner can now add a
+specific account's **allow** or **deny** rule for `view` or `edit`, without an
+invitation acceptance flow or a secret token. Existing registered usernames
+must be used. Rules are stored on the server and checked for project loading,
+listing, history reads, and CAS cloud saves.
+
+Precedence is:
+1. The owner always has full access and alone controls visibility, access
+   rules, restoration, and deletion.
+2. An explicit per-user **view deny** blocks both viewing and editing.
+3. An explicit per-user **edit allow** also permits viewing unless view was
+   explicitly denied. An explicit edit deny blocks editing but may still
+   allow viewing.
+4. If no per-user rule applies, project visibility supplies defaults:
+   private (owner only), public_view (anyone sees), public_edit
+   (anyone sees, logged-in accounts may write).
+
+A typical private collaboration uses `private` visibility plus an explicit
+`edit allow` for each collaborator. Those users find the project in their
+cloud project list once logged in, without invitations. Access can be revoked
+by removing the explicit allow. Conversely, `public_edit` plus a user's
+`edit deny` excludes that user while keeping public access for others.
+
+Per-user rules are not an approval mechanism and do not provide true
+operation-level real-time merge. CAS revisions still protect against
+overwriting a newer version. V7 does not modify the ten-snapshot cap.

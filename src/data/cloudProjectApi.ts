@@ -10,6 +10,12 @@ export interface CloudProject extends CloudProjectSummary {
   document: ActualRouteProject;
 }
 export interface CloudIdentity { userId: string }
+export type CloudStationOperation = {
+  operationId: string;
+  expectedRevision: number;
+  type: 'station.create' | 'station.rename' | 'station.move';
+  station: { id: string; name?: string; x?: number; y?: number; nameS?: string; nameHistory?: unknown };
+};
 export interface CloudProjectStatus { id: string; name: string; revision: number; visibility: CloudProjectSummary['visibility']; canEdit: boolean }
 export function cloudSocketUrl(id: string): string {
   return API_BASE.replace(/^http/i, 'ws') + '/ws/projects/' + encodeURIComponent(id);
@@ -103,6 +109,10 @@ export const cloudApi = {
     }),
   deleteAccessRule: (id: string, ruleId: string) =>
     api<void>(`/api/projects/${encodeURIComponent(id)}/access-rules/${encodeURIComponent(ruleId)}`, { method: 'DELETE' }),
+  stationOperation: (id: string, operation: CloudStationOperation) =>
+    api<CloudProject>(`/api/projects/${encodeURIComponent(id)}/operations`, {
+      method: 'POST', body: JSON.stringify(operation),
+    }),
   status: (id: string) =>
     api<CloudProjectStatus>(`/api/projects/${encodeURIComponent(id)}/status`),
   publicProjects: () => api<CloudProjectSummary[]>('/api/projects/public'),

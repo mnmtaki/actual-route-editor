@@ -24,6 +24,7 @@ class AccountsAndSavesIT {
     @Autowired ObjectMapper mapper;
     @Autowired AuthService auth;
     @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+    @Autowired ProjectSocketHub projectSocketHub;
 
     record Session(Cookie sessionCookie, Cookie csrfCookie) {
         Cookie[] cookies() { return new Cookie[]{sessionCookie, csrfCookie}; }
@@ -427,6 +428,92 @@ class AccountsAndSavesIT {
             .andExpect(status().isNoContent());
         mvc.perform(get(root).cookie(friend.cookies()))
             .andExpect(status().isOk()).andExpect(jsonPath("$.canEdit").value(true));
+    }
+
+    @Test
+    void socketRequiresTrustedOriginSessionAndEditPermissionAndOnlyNotifiesAfterCommit() throws Exception {
+        Session owner = account("socketOwner");
+        Session collaborator = account("socketPeer");
+        String id = createProject(owner);
+        UUID projectId = UUID.fromString(id);
+
+        var request = new org.springframework.mock.web.MockHttpServletRequest("GET", "/ws/projects/" + id);
+        request.addHeader("Origin", "http://localhost:5173");
+        request.setCookies(collaborator.sessionCookie());
+        var handler = org.mockito.Mockito.mock(org.springframework.web.socket.WebSocketHandler.class);
+        var response = org.mockito.Mockito.mock(org.springframework.http.server.ServerHttpResponse.class);
+        var attrs = new java.util.HashMap<String, Object>();
+        var servletRequest = new org.springframework.http.server.ServletServerHttpRequest(request);
+
+        // A private project does not allow arbitrary WebSocket subscriptions.
+        assertFalse(projectSocketHub.beforeHandshake(servletRequest, response, handler, attrs));
+        mvc.perform(authorized(put("/api/projects/" + id + "/visibility")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("visibility", "public_view"))), owner))
+            .andExpect(status().isOk());
+        assertFalse(projectSocketHub.beforeHandshake(servletRequest, response, handler, attrs));
+
+        mvc.perform(authorized(put("/api/projects/" + id + "/visibility")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("visibility", "public_edit"))), owner))
+            .andExpect(status().isOk());
+        var wrongOrigin = new org.springframework.mock.web.MockHttpServletRequest("GET", "/ws/projects/" + id);
+        wrongOrigin.addHeader("Origin", "https://untrusted.example");
+        wrongOrigin.setCookies(collaborator.sessionCookie());
+        assertFalse(projectSocketHub.beforeHandshake(
+            new org.springframework.http.server.ServletServerHttpRequest(wrongOrigin),
+            response, handler, new java.util.HashMap<>()));
+        var noCookie = new org.springframework.mock.web.MockHttpServletRequest("GET", "/ws/projects/" + id);
+        noCookie.addHeader("Origin", "http://localhost:5173");
+        assertFalse(projectSocketHub.beforeHandshake(
+            new org.springframework.http.server.ServletServerHttpRequest(noCookie),
+            response, handler, new java.util.HashMap<>()));
+        assertTrue(projectSocketHub.beforeHandshake(servletRequest, response, handler, attrs));
+        assertEquals(projectId, attrs.get("project"));
+
+        var ws = org.mockito.Mockito.mock(org.springframework.web.socket.WebSocketSession.class);
+        org.mockito.Mockito.when(ws.getId()).thenReturn("test-socket-" + id);
+        org.mockito.Mockito.when(ws.getAttributes()).thenReturn(attrs);
+        org.mockito.Mockito.when(ws.isOpen()).thenReturn(true);
+        projectSocketHub.afterConnectionEstablished(ws); // sends ready
+
+        String write = mapper.writeValueAsString(Map.of(
+            "name","SocketChanged","document",document(),"expectedRevision",1));
+        mvc.perform(authorized(put("/api/projects/" + id).contentType(MediaType.APPLICATION_JSON)
+            .content(write), owner)).andExpect(status().isOk());
+        var captured = org.mockito.ArgumentCaptor.forClass(org.springframework.web.socket.TextMessage.class);
+        org.mockito.Mockito.verify(ws, org.mockito.Mockito.atLeast(2)).sendMessage(captured.capture());
+        assertTrue(captured.getAllValues().stream().anyMatch(
+            msg -> msg.getPayload().contains("\\"revision\\":2")
+                && msg.getPayload().contains("\\"type\\":\\"revision\\"")));
+
+        // Stale write conflicts never emit revision 3.
+        mvc.perform(authorized(put("/api/projects/" + id).contentType(MediaType.APPLICATION_JSON)
+            .content(write), owner)).andExpect(status().isConflict());
+        captured = org.mockito.ArgumentCaptor.forClass(org.springframework.web.socket.TextMessage.class);
+        org.mockito.Mockito.verify(ws, org.mockito.Mockito.atLeast(2)).sendMessage(captured.capture());
+        assertFalse(captured.getAllValues().stream().anyMatch(
+            msg -> msg.getPayload().contains("\\"revision\\":3")));
+
+        UUID peerId = auth.resolve(collaborator.sessionCookie().getValue());
+        String peerName = jdbc.queryForObject(
+            "SELECT username FROM app_users WHERE id=?", String.class, peerId);
+        mvc.perform(authorized(post("/api/projects/" + id + "/access-rules")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",peerName,"action","edit","allowed",false))),owner))
+            .andExpect(status().isOk());
+        assertFalse(projectSocketHub.beforeHandshake(servletRequest, response, handler,
+            new java.util.HashMap<>()));
+        // Revoked subscribers are no longer notified, even if already connected.
+        mvc.perform(authorized(put("/api/projects/" + id).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","AfterRevocation","document",document(),"expectedRevision",2))),owner))
+            .andExpect(status().isOk());
+        org.mockito.Mockito.verify(ws, org.mockito.Mockito.atLeastOnce())
+            .close(org.springframework.web.socket.CloseStatus.POLICY_VIOLATION);
+        projectSocketHub.afterConnectionClosed(ws,
+            org.springframework.web.socket.CloseStatus.NORMAL);
     }
 
     @Test

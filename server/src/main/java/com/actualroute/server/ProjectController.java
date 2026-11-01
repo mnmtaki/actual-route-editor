@@ -33,8 +33,10 @@ public class ProjectController {
     public record ProjectView(UUID id, String name, long revision, JsonNode document,
                               OffsetDateTime updatedAt, String visibility) {}
 
-    public record Summary(UUID id, String name, long revision, OffsetDateTime updatedAt, String role, String visibility) {}
+    public record Summary(UUID id, String name, long revision, OffsetDateTime updatedAt, String role, String visibility, boolean canEdit) {}
     public record VisibilityRequest(@NotNull String visibility) {}
+    public record RuleRequest(@NotBlank String username, @NotBlank String action, @NotNull Boolean allowed) {}
+    public record AccessRule(UUID id, UUID userId, String username, String action, boolean allowed) {}
     public record RevisionSummary(long revision, String name, OffsetDateTime createdAt) {}
     public record RevisionView(long revision, String name, JsonNode document, OffsetDateTime createdAt) {}
 
@@ -72,22 +74,72 @@ public class ProjectController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工程不存在");
     }
 
+    private boolean hasAccess(UUID user, UUID project, String action) {
+        return Boolean.TRUE.equals(jdbc.queryForObject(
+            "SELECT COALESCE(project_can_access(?, ?, ?), false)", Boolean.class,
+            project, user, action));
+    }
+
     private void requireReadable(UUID user, UUID id) {
-        Integer count = jdbc.queryForObject("""
-            SELECT count(*) FROM cloud_projects
-             WHERE id=? AND (owner_id=? OR visibility IN ('public_view','public_edit'))
-            """, Integer.class, id, user);
-        if (count == null || count == 0)
+        if (!hasAccess(user, id, "view"))
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工程不存在");
     }
 
     private void requireWritable(UUID user, UUID id) {
-        Integer count = jdbc.queryForObject("""
-            SELECT count(*) FROM cloud_projects
-             WHERE id=? AND (owner_id=? OR (visibility='public_edit' AND ? IS NOT NULL))
-            """, Integer.class, id, user, user);
-        if (count == null || count == 0)
+        if (!hasAccess(user, id, "edit"))
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工程不存在");
+    }
+
+    @GetMapping("/{id}/access-rules")
+    public List<AccessRule> rules(@AuthenticationPrincipal UUID user, @PathVariable UUID id) {
+        requireOwned(user, id);
+        return jdbc.query("""
+            SELECT r.id,r.user_id,u.username,r.action,r.allowed
+            FROM cloud_project_access_rules r
+            JOIN app_users u ON u.id=r.user_id
+            WHERE r.project_id=?
+            ORDER BY u.username,r.action
+            """, (rs,n) -> new AccessRule(rs.getObject("id",UUID.class),
+                rs.getObject("user_id",UUID.class),rs.getString("username"),
+                rs.getString("action"),rs.getBoolean("allowed")), id);
+    }
+
+    @PostMapping("/{id}/access-rules")
+    @Transactional
+    public AccessRule setRule(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
+                              @Valid @RequestBody RuleRequest input) {
+        requireOwned(user, id);
+        if (!List.of("view","edit").contains(input.action()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效的授权类型");
+        var targets = jdbc.query("SELECT id,username FROM app_users WHERE username=?",
+            (rs,n) -> new java.util.AbstractMap.SimpleEntry<>(
+                rs.getObject("id",UUID.class),rs.getString("username")),input.username());
+        if (targets.isEmpty())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"用户不存在");
+        var target=targets.get(0);
+        if (target.getKey().equals(user))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"所有者始终拥有工程权限");
+        UUID ruleId=UUID.randomUUID();
+        return jdbc.queryForObject("""
+            INSERT INTO cloud_project_access_rules(id,project_id,user_id,action,allowed)
+            VALUES(?,?,?,?,?)
+            ON CONFLICT(project_id,user_id,action) DO UPDATE SET allowed=EXCLUDED.allowed
+            RETURNING id,user_id,action,allowed
+            """, (rs,n) -> new AccessRule(rs.getObject("id",UUID.class),
+                rs.getObject("user_id",UUID.class),target.getValue(),
+                rs.getString("action"),rs.getBoolean("allowed")),
+                ruleId,id,target.getKey(),input.action(),input.allowed());
+    }
+
+    @DeleteMapping("/{id}/access-rules/{ruleId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Transactional
+    public void deleteRule(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
+                           @PathVariable UUID ruleId) {
+        requireOwned(user,id);
+        if (jdbc.update("DELETE FROM cloud_project_access_rules WHERE project_id=? AND id=?",
+            id,ruleId)==0)
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"授权规则不存在");
     }
 
     @PutMapping("/{id}/visibility")
@@ -104,7 +156,7 @@ public class ProjectController {
             SELECT id,name,revision,updated_at,visibility FROM cloud_projects WHERE id=?
             """, (rs,n) -> new Summary(rs.getObject("id",UUID.class),rs.getString("name"),
                 rs.getLong("revision"),rs.getObject("updated_at",OffsetDateTime.class),
-                "owner",rs.getString("visibility")), id);
+                "owner",rs.getString("visibility"),true), id);
     }
 
     @GetMapping("/public")
@@ -115,17 +167,19 @@ public class ProjectController {
             ORDER BY updated_at DESC LIMIT 100
             """, (rs,n) -> new Summary(rs.getObject("id",UUID.class),rs.getString("name"),
                 rs.getLong("revision"),rs.getObject("updated_at",OffsetDateTime.class),
-                "viewer",rs.getString("visibility")));
+                "viewer",rs.getString("visibility"),false));
     }
 
     @GetMapping
     public List<Summary> list(@AuthenticationPrincipal UUID user) {
         return jdbc.query("""
-            SELECT id,name,revision,updated_at,visibility FROM cloud_projects
-            WHERE owner_id=? ORDER BY updated_at DESC
+            SELECT id,name,revision,updated_at,visibility,owner_id FROM cloud_projects
+            WHERE project_can_access(id, ?, 'view') ORDER BY updated_at DESC
             """, (rs,n) -> new Summary(rs.getObject("id",UUID.class),rs.getString("name"),
                 rs.getLong("revision"),rs.getObject("updated_at",OffsetDateTime.class),
-                "owner",rs.getString("visibility")), user);
+                user.equals(rs.getObject("owner_id",UUID.class)) ? "owner" : "viewer",
+                rs.getString("visibility"),
+                hasAccess(user,rs.getObject("id",UUID.class),"edit")), user);
     }
 
     @PostMapping
@@ -147,8 +201,7 @@ public class ProjectController {
     public ProjectView get(@AuthenticationPrincipal UUID user, @PathVariable UUID id) {
         var records = jdbc.query("""
             SELECT p.id,p.name,p.revision,p.document,p.updated_at,p.visibility
-            FROM cloud_projects p WHERE p.id=? AND
-              (p.owner_id=? OR p.visibility IN ('public_view','public_edit'))
+            FROM cloud_projects p WHERE p.id=? AND project_can_access(p.id,?,'view')
             """, this::view, id, user);
         if (records.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工程不存在");
         return records.get(0);
@@ -161,7 +214,7 @@ public class ProjectController {
             SELECT r.revision,r.name,r.created_at
               FROM cloud_project_revisions r
               JOIN cloud_projects p ON p.id=r.project_id
-             WHERE r.project_id=? AND (p.owner_id=? OR p.visibility IN ('public_view','public_edit'))
+             WHERE r.project_id=? AND project_can_access(p.id,?,'view')
              ORDER BY r.revision DESC
             """, (rs, i) -> new RevisionSummary(rs.getLong("revision"),rs.getString("name"),
                     rs.getObject("created_at", OffsetDateTime.class)), id, user);
@@ -176,7 +229,7 @@ public class ProjectController {
               FROM cloud_project_revisions r
               JOIN cloud_projects p ON p.id=r.project_id
              WHERE r.project_id=? AND r.revision=? AND
-                 (p.owner_id=? OR p.visibility IN ('public_view','public_edit'))
+                 project_can_access(p.id,?,'view')
             """, this::revisionView, id, revision, user);
         if (records.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "版本不存在");
         return records.get(0);
@@ -207,9 +260,8 @@ public class ProjectController {
         int changed = jdbc.update("""
             UPDATE cloud_projects SET name=?, document=CAST(? AS jsonb), revision=revision+1,
                 updated_at=now()
-            WHERE id=? AND revision=? AND
-                (owner_id=? OR (visibility='public_edit' AND ? IS NOT NULL))
-            """, name, document, id, expected, user, user);
+            WHERE id=? AND revision=? AND project_can_access(id,?,'edit')
+            """, name, document, id, expected, user);
         if (changed != 1) {
             requireWritable(user, id);
             throw new ResponseStatusException(HttpStatus.CONFLICT, "工程版本冲突，请刷新或另存后重试");

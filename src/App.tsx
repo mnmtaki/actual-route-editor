@@ -240,6 +240,21 @@ export default function App() {
       setNotice("已进入协同编辑，修改仅在点击「发布当前画布」后共享");
     });
   };
+  const openedShareLink = useRef(false);
+  useEffect(() => {
+    if (!libraryReady || openedShareLink.current) return;
+    const id = new URLSearchParams(window.location.search).get('cloudProject');
+    if (!id) return;
+    openedShareLink.current = true;
+    void cloudApi.get(id).then(remote => {
+      if (remote.visibility === 'public_view') {
+        openImportedProject(remote.document);
+      } else {
+        void cloudApi.me().then(() => openCollaborativeProject(id))
+          .catch(() => openImportedProject(remote.document));
+      }
+    }).catch(error => setNotice(error instanceof Error ? error.message : '无法打开共享工程'));
+  }, [libraryReady]);
   const [presentationOpen, setPresentationOpen] = useState(false);
   const [snapOptions, setSnapOptions] = useState({ node: false, neighbor: false, grid: false });
   const [stationLabelMode, setStationLabelMode] = useState<'direction' | 'free'>('direction');

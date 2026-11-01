@@ -19,29 +19,29 @@ describe('basemap removal UI',()=>{
   it('keeps raster basemap management outside the global style center',()=>{
     const project=withBackground()
     render(<StyleDrawer project={project} onChange={vi.fn()} onClose={vi.fn()}/>)
-    expect(screen.queryByRole('button',{name:'删除底图'})).toBeNull()
+    expect(screen.queryByRole('button',{name:'删除当前底图'})).toBeNull()
     expect(screen.getByTestId('style-center-overview')).toBeTruthy()
   })
 
-  it('offers the same action in the mobile settings drawer only when a basemap exists',()=>{
+  it('offers the same action in the mobile import drawer only when a basemap exists',()=>{
     const onRemoveBackground=vi.fn(()=>true)
     render(<MobileShell {...mobileProps(withBackground(),vi.fn(),onRemoveBackground)}/>)
-    fireEvent.click(screen.getByRole('button',{name:'设置'}))
-    fireEvent.click(screen.getByRole('button',{name:'删除底图'}))
+    fireEvent.click(screen.getByRole('button',{name:'导入'}))
+    fireEvent.click(screen.getByRole('button',{name:'删除当前底图'}))
     expect(onRemoveBackground).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('dialog',{name:'设置'})).toBeNull()
   })
 
   it('hides the mobile delete action without a basemap and removes it through the fallback path',()=>{
     const noBackground=render(<MobileShell {...mobileProps(structuredClone(demoProject))}/>)
-    fireEvent.click(screen.getByRole('button',{name:'设置'}))
-    expect(screen.queryByRole('button',{name:'删除底图'})).toBeNull()
+    fireEvent.click(screen.getByRole('button',{name:'导入'}))
+    expect(screen.queryByRole('button',{name:'删除当前底图'})).toBeNull()
     noBackground.unmount()
     vi.stubGlobal('confirm',vi.fn(()=>true))
     const project=withBackground(),onChange=vi.fn()
     render(<MobileShell {...mobileProps(project,onChange)} onRemoveBackground={undefined}/>)
-    fireEvent.click(screen.getByRole('button',{name:'设置'}))
-    fireEvent.click(screen.getByRole('button',{name:'删除底图'}))
+    fireEvent.click(screen.getByRole('button',{name:'导入'}))
+    fireEvent.click(screen.getByRole('button',{name:'删除当前底图'}))
     expect((onChange.mock.calls.at(-1)?.[0] as ActualRouteProject).background).toBeNull()
   })
 })

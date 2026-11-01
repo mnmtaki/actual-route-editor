@@ -4,12 +4,13 @@ import { parseProjectJson, serializeProject } from '../import-export/projectJson
 const API_BASE = (import.meta.env.VITE_ARA_API_URL || 'http://localhost:8080').replace(/\/$/, '');
 
 export interface CloudProjectSummary {
-  id: string; name: string; revision: number; updatedAt: string;
+  id: string; name: string; revision: number; updatedAt: string; role: 'owner' | 'editor';
 }
 export interface CloudProject extends CloudProjectSummary {
   document: ActualRouteProject;
 }
 export interface CloudIdentity { userId: string }
+export interface CloudCollaborator { userId: string; username: string; role: 'owner' | 'editor' }
 export interface CloudRevisionSummary { revision: number; name: string; createdAt: string }
 export interface CloudRevision extends CloudRevisionSummary { document: ActualRouteProject }
 
@@ -88,6 +89,15 @@ export const cloudApi = {
     api<CloudProjectSummary>(`/api/projects/${encodeURIComponent(id)}/restore`, {
       method: 'POST', body: JSON.stringify({ sourceRevision, expectedRevision }),
     }),
+  members: (id: string) => api<CloudCollaborator[]>(`/api/projects/${encodeURIComponent(id)}/members`),
+  invite: (id: string, username: string) => api<CloudCollaborator>(
+    `/api/projects/${encodeURIComponent(id)}/members`, {
+      method: 'POST', body: JSON.stringify({ username }),
+    }),
+  removeMember: (id: string, userId: string) => api<void>(
+    `/api/projects/${encodeURIComponent(id)}/members/${encodeURIComponent(userId)}`,
+    { method: 'DELETE' },
+  ),
   delete: (id: string) =>
     api<void>(`/api/projects/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 };

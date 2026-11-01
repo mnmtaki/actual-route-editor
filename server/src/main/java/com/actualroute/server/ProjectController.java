@@ -33,7 +33,7 @@ public class ProjectController {
     public record ProjectView(UUID id, String name, long revision, JsonNode document,
                               OffsetDateTime updatedAt) {}
 
-    public record Summary(UUID id, String name, long revision, OffsetDateTime updatedAt) {}
+    public record Summary(UUID id, String name, long revision, OffsetDateTime updatedAt, String role) {}
     public record RevisionSummary(long revision, String name, OffsetDateTime createdAt) {}
     public record RevisionView(long revision, String name, JsonNode document, OffsetDateTime createdAt) {}
     public record InviteRequest(@NotBlank @Size(min=3,max=40) String username) {}
@@ -132,13 +132,13 @@ public class ProjectController {
     @GetMapping
     public List<Summary> list(@AuthenticationPrincipal UUID user) {
         return jdbc.query("""
-            SELECT p.id,p.name,p.revision,p.updated_at FROM cloud_projects p
+            SELECT p.id,p.name,p.revision,p.updated_at, CASE WHEN p.owner_id=? THEN 'owner' ELSE 'editor' END AS role FROM cloud_projects p
             WHERE p.owner_id=? OR EXISTS (
                 SELECT 1 FROM cloud_project_members m
                 WHERE m.project_id=p.id AND m.user_id=?)
             ORDER BY p.updated_at DESC
             """, (rs, i) -> new Summary(rs.getObject("id", UUID.class), rs.getString("name"),
-                        rs.getLong("revision"), rs.getObject("updated_at", OffsetDateTime.class)), user, user);
+                        rs.getLong("revision"), rs.getObject("updated_at", OffsetDateTime.class), rs.getString("role")), user, user, user);
     }
 
     @PostMapping

@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { CloudRevisionHistory } from './CloudRevisionHistory';
+import { CloudMembers } from './CloudMembers';
 import type { ActualRouteProject } from '../data/model';
 import { cloudApi, CloudApiError, type CloudProjectSummary } from '../data/cloudProjectApi';
 
-export function CloudProjects({ currentProject, importAsLocalCopy }: {
+export function CloudProjects({ currentProject, importAsLocalCopy, onOpenCollaborative }: {
   currentProject: ActualRouteProject;
   importAsLocalCopy: (project: ActualRouteProject) => void;
+  onOpenCollaborative: (id: string) => void;
 }) {
   const [loggedIn, setLoggedIn] = useState(false);
   const [checking, setChecking] = useState(true);
@@ -16,6 +18,7 @@ export function CloudProjects({ currentProject, importAsLocalCopy }: {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [historyId, setHistoryId] = useState<string | null>(null);
+  const [membersId, setMembersId] = useState<string | null>(null);
 
   // The dialog is remounted when reopened. Its session is recovered from
   // the HttpOnly cookie; no credential is written to JavaScript storage.
@@ -83,27 +86,30 @@ export function CloudProjects({ currentProject, importAsLocalCopy }: {
             {items.length === 0 && <p>还没有云端存档。</p>}
             {items.map(item => (
               <div key={item.id}><article className="project-library-item">
-                <div><strong>{item.name}</strong><small>云端版本 v{item.revision} · {new Date(item.updatedAt).toLocaleString()}</small></div>
+                <div><strong>{item.name}</strong><small>{item.role === 'owner' ? '我的工程' : '受邀协作'} · 云端版本 v{item.revision} · {new Date(item.updatedAt).toLocaleString()}</small></div>
                 <div className="project-library-item-actions">
                   <button type="button" disabled={busy} onClick={() => void action(async () => {
                     const loaded = await cloudApi.get(item.id);
                     importAsLocalCopy(loaded.document);
                     setNotice('云端存档已导入为新的本地工程');
                   })}>导入为本地副本</button>
-                  <button type="button" disabled={busy} onClick={() => void action(async () => {
+                  <button type="button" disabled={busy} onClick={() => onOpenCollaborative(item.id)}>进入协同编辑</button>
+                  {item.role === 'owner' && <button type="button" disabled={busy} onClick={() => void action(async () => {
                     if (!window.confirm('将当前编辑器工程覆盖此云端存档？本地工程不会改变。')) return;
                     await cloudApi.update(item.id, item.revision, currentProject);
                     await refresh();
                     setNotice('云存档已更新');
-                  })}>用当前工程覆盖</button>
+                  })}>用当前工程覆盖</button>}
                   <button type="button" disabled={busy} onClick={() => setHistoryId(current => current === item.id ? null : item.id)}>{historyId === item.id ? '收起历史' : '历史版本'}</button>
-                  <button type="button" disabled={busy} onClick={() => void action(async () => {
+                  {item.role === 'owner' && <button type="button" disabled={busy} onClick={() => setMembersId(current => current === item.id ? null : item.id)}>{membersId === item.id ? '收起成员' : '共享成员'}</button>}
+                  {item.role === 'owner' && <button type="button" disabled={busy} onClick={() => void action(async () => {
                     if (!window.confirm(`永久删除云端存档「${item.name}」？`)) return;
                     await cloudApi.delete(item.id);
                     await refresh();
-                  })}>删除云存档</button>
+                  })}>删除云存档</button>}
                 </div>
               </article>
+              {membersId === item.id && item.role === 'owner' && <CloudMembers projectId={item.id} />}
               {historyId === item.id && <CloudRevisionHistory id={item.id} latestRevision={item.revision} onRestored={refresh} />}
               </div>
             ))}

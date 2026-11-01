@@ -10,9 +10,10 @@ export interface CollaborativeSession {
   baseJson: string;
 }
 
-export function CollaborativePanel({ session, project, onUpdate, onLoad, onExit }: {
+export function CollaborativePanel({ session, project, draftActive, onUpdate, onLoad, onExit }: {
   session: CollaborativeSession;
   project: ActualRouteProject;
+  draftActive: boolean;
   onUpdate: (next: CollaborativeSession) => void;
   onLoad: (project: ActualRouteProject, next: CollaborativeSession) => void;
   onExit: () => void;
@@ -24,11 +25,13 @@ export function CollaborativePanel({ session, project, onUpdate, onLoad, onExit 
   const [connected, setConnected] = useState(false);
   const [permissionLost, setPermissionLost] = useState(false);
 
+  const draftInProgress = useRef(draftActive);
   const latest = useRef(project);
   const activeSession = useRef(session);
   const onLoadRef = useRef(onLoad);
   const working = useRef(false);
   const fetching = useRef(false);
+  draftInProgress.current = draftActive;
   latest.current = project;
   activeSession.current = session;
   onLoadRef.current = onLoad;
@@ -52,7 +55,7 @@ export function CollaborativePanel({ session, project, onUpdate, onLoad, onExit 
       const current = activeSession.current;
       if (revision <= current.revision || working.current || fetching.current) return;
       // Never replace local unsaved drawings, even for disjoint changes.
-      if (serializeProject(latest.current) !== current.baseJson) {
+      if (draftInProgress.current || serializeProject(latest.current) !== current.baseJson) {
         setMessage('云端有新版本；当前画布有未发布修改，已保留，请手动处理冲突');
         return;
       }
@@ -64,7 +67,7 @@ export function CollaborativePanel({ session, project, onUpdate, onLoad, onExit 
         const newest = activeSession.current;
         if (remote.revision <= newest.revision) return;
         // Recheck after the async request: the user may have started drawing.
-        if (working.current || serializeProject(latest.current) !== newest.baseJson) {
+        if (working.current || draftInProgress.current || serializeProject(latest.current) !== newest.baseJson) {
           setMessage('云端有新版本；加载期间画布发生变化，未覆盖本地');
           return;
         }
@@ -218,7 +221,7 @@ export function CollaborativePanel({ session, project, onUpdate, onLoad, onExit 
     style={{ position: 'relative', margin: '8px', padding: '10px', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
     <strong>协同编辑 · {session.name}</strong>
     <span>本地基线 v{session.revision} · 远端 v{remoteRevision}</span>
-    <span>{dirty ? '● 未发布修改' : '✓ 与已加载版本一致'}</span>
+    <span>{dirty ? '● 未发布修改' : draftActive ? '绘制操作进行中' : '✓ 与已加载版本一致'}</span>
     <span>{permissionLost ? '协作权限已失效' : connected ? 'WebSocket 已连接' : '实时连接中断 · 30 秒兜底检查'}</span>
     <button type="button" disabled={busy || permissionLost || !dirty || remoteRevision > session.revision} onClick={() => void publish()}>发布当前画布</button>
     <button type="button" disabled={busy} onClick={() => void pull()}>加载云端最新版</button>

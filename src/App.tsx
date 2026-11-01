@@ -1,4 +1,6 @@
 import { CloudProjects } from "./components/CloudProjects";
+import { CollaborativePanel, type CollaborativeSession } from "./components/CollaborativePanel";
+import { cloudApi } from "./data/cloudProjectApi";
 import { formatStationSpacingText } from './data/stationSpacingText';
 import { useEffect, useRef, useState } from "react";
 import { Toolbar } from "./components/Toolbar";
@@ -99,6 +101,7 @@ export default function App() {
   const toggleStationSpacing = () => setShowStationSpacing(value => !value);
   const [libraryReady, setLibraryReady] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [collab, setCollab] = useState<CollaborativeSession | null>(null);
   const [libraryItems, setLibraryItems] = useState<LocalProjectSummary[]>([]);
   const [libraryBusy, setLibraryBusy] = useState(false);
   const [libraryError, setLibraryError] = useState("");
@@ -162,6 +165,7 @@ export default function App() {
       // Finish all scheduled/queued saves before changing the active project.
       await savingQueue.current;
       if (currentProjectId.current) await persistProject(latestProject.current);
+      setCollab(null);
       await action();
       await refreshLibrary();
     } catch (error) {
@@ -218,6 +222,22 @@ export default function App() {
       rememberActiveLocalProject(created.id);
       resetEditorForProject(created.project);
       setNotice("已导入为独立工程：" + getProjectName(project));
+    });
+  };
+  const openCollaborativeProject = (id: string) => {
+    void runLibraryAction(async () => {
+      // Each collaborator gets an isolated local working copy; a cloud update
+      // is published only by explicit action in the collaborative toolbar.
+      const remote = await cloudApi.get(id);
+      const local = await createLocalProject(remote.document);
+      currentProjectId.current = local.id;
+      currentRevision.current = local.revision;
+      rememberActiveLocalProject(local.id);
+      resetEditorForProject(local.project);
+      setCollab({ id, name: remote.name, revision: remote.revision,
+        baseJson: serializeProject(remote.document) });
+      setLibraryOpen(false);
+      setNotice("已进入协同编辑，修改仅在点击「发布当前画布」后共享");
     });
   };
   const [presentationOpen, setPresentationOpen] = useState(false);
@@ -1339,7 +1359,7 @@ export default function App() {
             <div><strong>{item.name}</strong><small>{item.lines} 条线路 · {item.stations} 座车站 · {new Date(item.updatedAt).toLocaleString()}</small></div>
             <div className="project-library-item-actions"><button type="button" disabled={libraryBusy || item.id === currentProjectId.current} onClick={() => void activateProject(item.id)}>{item.id === currentProjectId.current ? "正在编辑" : "打开"}</button><button type="button" disabled={libraryBusy} onClick={() => void renameLibraryProject(item)}>重命名</button><button type="button" disabled={libraryBusy} onClick={() => void removeLibraryProject(item)}>删除</button></div>
           </article>)}</div>
-          <CloudProjects currentProject={history.project} importAsLocalCopy={openImportedProject} />
+          <CloudProjects currentProject={history.project} importAsLocalCopy={openImportedProject} onOpenCollaborative={openCollaborativeProject} />
           <footer>切换前会保存当前工程。重要数据仍建议定期导出 JSON 备份。</footer>
         </section>
       </div>}
@@ -1419,6 +1439,11 @@ export default function App() {
           hidden
           onChange={(e) => importBg(e.currentTarget)}
         />
+        {collab && <CollaborativePanel session={collab} project={history.project}
+          onUpdate={setCollab}
+          onLoad={(project, next) => { resetEditorForProject(project); setCollab(next); }}
+          onExit={() => { setCollab(null); setNotice("已退出协同模式，当前本地工作副本保留"); }}
+        />}
         <main className="workspace">
           <LinePanel
             project={history.project}

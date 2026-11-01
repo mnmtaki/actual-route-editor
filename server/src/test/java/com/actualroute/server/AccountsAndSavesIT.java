@@ -757,6 +757,106 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void waypointOperationsMergeSeparateSegmentsButRejectOverlapAndFullSave() throws Exception {
+        Session owner=account("wayOwner");
+        Session guest=account("wayGuest");
+        String id=createProject(owner);
+        UUID userId=auth.resolve(guest.sessionCookie().getValue());
+        String username=jdbc.queryForObject("SELECT username FROM app_users WHERE id=?",
+            String.class,userId);
+        mvc.perform(authorized(post("/api/projects/" + id + "/access-rules")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",username,"action","edit","allowed",true))),owner))
+            .andExpect(status().isOk());
+        JsonNode document=mapper.readTree("""
+            {"version":1,"name":"City","stations":[],"lines":[],
+             "geometry":{"segments":[
+               {"id":"s1","lineId":"line","fromStationId":"a","toStationId":"b",
+                "mode":"smooth","structureType":"underground",
+                "waypoints":[{"id":"w1","x":1,"y":2,"type":"corner"}]},
+               {"id":"s2","lineId":"line","fromStationId":"c","toStationId":"d",
+                "mode":"smooth","structureType":"underground",
+                "waypoints":[{"id":"w2","x":3,"y":4,"type":"smooth"}]}
+             ]}}
+            """);
+        mvc.perform(authorized(put("/api/projects/" + id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("name","City",
+                "document",document,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+
+        String endpoint="/api/projects/"+id+"/operations/waypoint";
+        UUID opId=UUID.randomUUID();
+        String first=mapper.writeValueAsString(Map.of(
+            "operationId",opId,"expectedRevision",2,"segmentId","s1",
+            "waypointId","w1","x",111,"y",222));
+        String second=mapper.writeValueAsString(Map.of(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,"segmentId","s2",
+            "waypointId","w2","x",333,"y",444));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(first),owner)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(3));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(second),guest)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(4));
+        mvc.perform(get("/api/projects/" + id).cookie(owner.cookies()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[0].x").value(111))
+            .andExpect(jsonPath("$.document.geometry.segments[1].waypoints[0].y").value(444));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(first),owner)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(4));
+
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",opId,"expectedRevision",2,"segmentId","s1",
+                "waypointId","w1","x",987,"y",222))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,"segmentId","s1",
+                "waypointId","w1","x",5,"y",6))),guest))
+            .andExpect(status().isConflict());
+
+        // A station operation must never rebase through an intervening waypoint edit.
+        mvc.perform(authorized(post("/api/projects/"+id+"/operations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "type","station.create",
+                "station",Map.of("id","independent","name","Station","x",1,"y",2)))),owner))
+            .andExpect(status().isConflict());
+
+        JsonNode latest=mapper.readTree(mvc.perform(get("/api/projects/" + id)
+            .cookie(owner.cookies())).andReturn().getResponse().getContentAsString());
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","City","document",latest.get("document"),"expectedRevision",4))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(5));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",4,"segmentId","s2",
+                "waypointId","w2","x",7,"y",8))),guest))
+            .andExpect(status().isConflict());
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",5,"segmentId","s2",
+                "waypointId","missing","x",7,"y",8))),guest))
+            .andExpect(status().isConflict());
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",5,"segmentId","s2",
+                "waypointId","w2","x",1.0e30,"y",8))),guest))
+            .andExpect(status().isBadRequest());
+        Integer rows=jdbc.queryForObject(
+            "SELECT count(*) FROM cloud_project_operations WHERE project_id=?",
+            Integer.class,UUID.fromString(id));
+        assertEquals(2,rows);
+    }
+
+    @Test
     void rateLimitBlocksRepeatedFailedLogins() throws Exception {
         String user = "wrong" + UUID.randomUUID().toString().replace("-", "").substring(0, 15);
         String ip = "198.51.100.77";

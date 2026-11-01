@@ -29,6 +29,8 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   const [permissionLost, setPermissionLost] = useState(false);
   const [newStationName, setNewStationName] = useState('新车站');
   const [liveStatus, setLiveStatus] = useState('');
+  const [appendLineId, setAppendLineId] = useState('');
+  const [appendTargetId, setAppendTargetId] = useState('');
 
   const draftInProgress = useRef(draftActive);
   const latest = useRef(project);
@@ -244,6 +246,62 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     return () => window.clearTimeout(timer);
   }, [project, session.id, session.baseJson, session.revision, busy, permissionLost, draftActive]);
 
+  const eligibleLines = project.lines.filter(line =>
+    !line.locked && !line.isFake && line.source?.format !== 'aarc'
+    && line.stationSequence.length > 0);
+  const selectedAppendLine = eligibleLines.find(line => line.id === appendLineId);
+  const selectableAppendStations = selectedAppendLine
+    ? project.stations.filter(station =>
+        !selectedAppendLine.stationSequence.includes(station.id)
+        && !project.stationLineRelations.some(relation =>
+          relation.lineId === selectedAppendLine.id && relation.stationId === station.id))
+    : [];
+
+  async function appendExisting() {
+    if (busy || working.current || fetching.current || permissionLost || dirty ||
+        draftActive || remoteRevision > session.revision || !selectedAppendLine ||
+        !appendTargetId || !selectableAppendStations.some(station => station.id === appendTargetId)) return;
+    const fromStationId = selectedAppendLine.stationSequence.at(-1);
+    if (!fromStationId) return;
+    working.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const saved = await cloudApi.appendExistingStation(session.id, {
+        operationId: crypto.randomUUID(), expectedRevision: session.revision,
+        lineId: selectedAppendLine.id, fromStationId, toStationId: appendTargetId,
+        segmentId: crypto.randomUUID(), relationId: crypto.randomUUID(),
+      });
+      if (serializeProject(latest.current) !== session.baseJson || draftInProgress.current) {
+        setRemoteRevision(previous => Math.max(previous, saved.revision));
+        setError('拓扑连接已提交，但画布在请求期间发生变化。已保留本地编辑，请核对云端最新版。');
+        return;
+      }
+      const next = {
+        id: session.id, name: saved.name, revision: saved.revision,
+        baseJson: serializeProject(saved.document),
+      };
+      activeSession.current = next;
+      latest.current = saved.document;
+      onLoadRef.current(saved.document, next);
+      setRemoteRevision(saved.revision);
+      setAppendTargetId('');
+      setMessage('已连接已有车站，线路拓扑更新至 v' + saved.revision);
+    } catch (e) {
+      if (e instanceof CloudApiError && e.status === 409) {
+        setRemoteRevision(previous => Math.max(previous, session.revision + 1));
+        setError('线路拓扑发生版本冲突，未修改本地画布。请加载最新版后重试。');
+      } else {
+        if (e instanceof CloudApiError && (e.status === 403 || e.status === 404))
+          setPermissionLost(true);
+        setError(e instanceof Error ? e.message : '连接已有车站失败');
+      }
+    } finally {
+      working.current = false;
+      setBusy(false);
+    }
+  }
+
   async function publish() {
     if (busy || permissionLost || remoteRevision > session.revision || !dirty) return;
     working.current = true;
@@ -305,12 +363,30 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       onChange={event => setNewStationName(event.target.value)} /></label>
     <button type="button" disabled={busy || permissionLost || dirty || draftActive || remoteRevision > session.revision || !newStationName.trim()}
       onClick={() => onCreateStandaloneStation(newStationName.trim())}>新增独立车站</button>
+    <label>连接线路
+      <select aria-label="待扩展线路" value={appendLineId}
+        onChange={event => { setAppendLineId(event.target.value); setAppendTargetId(''); }}>
+        <option value="">选择线路</option>
+        {eligibleLines.map(line => <option key={line.id} value={line.id}>{line.name || line.id}</option>)}
+      </select>
+    </label>
+    <label>已有目标车站
+      <select aria-label="连接目标车站" value={appendTargetId}
+        onChange={event => setAppendTargetId(event.target.value)}>
+        <option value="">选择车站</option>
+        {selectableAppendStations.map(station => <option key={station.id} value={station.id}>{station.name}</option>)}
+      </select>
+    </label>
+    <button type="button"
+      disabled={busy || permissionLost || dirty || draftActive || remoteRevision > session.revision
+        || !selectedAppendLine || !appendTargetId}
+      onClick={() => void appendExisting()}>将已有车站接到线路末端</button>
     <button type="button" disabled={busy || permissionLost || !dirty || remoteRevision > session.revision} onClick={() => void publish()}>发布当前画布</button>
     <button type="button" disabled={busy} onClick={() => void pull()}>加载云端最新版</button>
     <button type="button" disabled={busy} onClick={onExit}>退出协同模式</button>
     {error && <p role="alert" style={{ width: '100%' }}>{error}</p>}
     {message && <p role="status" style={{ width: '100%' }}>{message}</p>}
     {liveStatus && <p role="status" style={{ width: '100%' }}>{liveStatus}</p>}
-    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。站序、端点和增删区间仍需整图发布。</small>
+    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。新增受控末端连接可操作级保存；任意站序、拆分、删除、分叉和环线仍需整图发布。</small>
   </section>;
 }

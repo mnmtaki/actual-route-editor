@@ -315,7 +315,8 @@ public class ProjectController {
                 """, Long.class, id, input.expectedRevision(), currentRevision);
             Long overlaps = jdbc.queryForObject("""
                 SELECT count(*) FROM cloud_project_operations
-                 WHERE project_id=? AND revision>? AND revision<=? AND station_id=?
+                 WHERE project_id=? AND revision>? AND revision<=?
+                   AND (station_id=? OR action NOT LIKE 'station.%')
                 """, Long.class, id, input.expectedRevision(), currentRevision, stationId);
             if (recorded == null || recorded != currentRevision-input.expectedRevision()
                 || overlaps == null || overlaps > 0)
@@ -387,6 +388,110 @@ public class ProjectController {
             VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
             """, id,input.operationId(),result.revision(),user,input.type(),stationId,station.toString());
         return result;
+    }
+
+    public record WaypointOperation(@NotNull UUID operationId, @NotNull Long expectedRevision,
+                                    @NotBlank String segmentId, @NotBlank String waypointId,
+                                    @NotNull Double x, @NotNull Double y) {}
+
+    /**
+     * First bounded topology-adjacent operation: moving a control point
+     * inside an existing segment. Its endpoint stations and topology remain
+     * untouched. Never rebase through a station edit or a full-project save.
+     */
+    @PostMapping("/{id}/operations/waypoint")
+    @Transactional
+    public ProjectView moveWaypoint(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
+                                    @Valid @RequestBody WaypointOperation input) {
+        requireWritable(user,id);
+        if (input.expectedRevision()<1 || input.expectedRevision()==Long.MAX_VALUE
+            || !Double.isFinite(input.x()) || !Double.isFinite(input.y())
+            || Math.abs(input.x())>1_000_000 || Math.abs(input.y())>1_000_000
+            || input.segmentId().length()>120 || input.waypointId().length()>128)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效控制点操作");
+        String resource="segment:"+input.segmentId();
+        ObjectNode payload=mapper.createObjectNode();
+        payload.put("segmentId",input.segmentId());
+        payload.put("waypointId",input.waypointId());
+        payload.put("x",input.x());
+        payload.put("y",input.y());
+        var locked=jdbc.query("""
+            SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
+            """,(rs,n)->new Object[]{rs.getLong("revision"),rs.getString("name"),
+                rs.getString("document")},id);
+        if (locked.isEmpty())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
+        var previous=jdbc.query("""
+            SELECT action,station_id,payload FROM cloud_project_operations
+             WHERE project_id=? AND operation_id=?
+            """,(rs,n)->new String[]{rs.getString("action"),rs.getString("station_id"),
+                rs.getString("payload")},id,input.operationId());
+        if (!previous.isEmpty()) {
+            var prior=previous.get(0);
+            try {
+                if (!"segment.waypoint.move".equals(prior[0]) || !resource.equals(prior[1])
+                    || !mapper.readTree(prior[2]).equals(payload))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"operationId 已被不同操作使用");
+            } catch (com.fasterxml.jackson.core.JsonProcessingException error) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"操作记录损坏");
+            }
+            return get(user,id);
+        }
+        Object[] row=locked.get(0);
+        long current=(Long)row[0];
+        if (input.expectedRevision()>current)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"版本超前");
+        if (input.expectedRevision()<current) {
+            Long recorded=jdbc.queryForObject("""
+                SELECT count(*) FROM cloud_project_operations
+                 WHERE project_id=? AND revision>? AND revision<=?
+                """,Long.class,id,input.expectedRevision(),current);
+            Long unsafe=jdbc.queryForObject("""
+                SELECT count(*) FROM cloud_project_operations
+                 WHERE project_id=? AND revision>? AND revision<=?
+                   AND (station_id=? OR action<>'segment.waypoint.move')
+                """,Long.class,id,input.expectedRevision(),current,resource);
+            if (recorded==null || recorded!=current-input.expectedRevision()
+                || unsafe==null || unsafe>0)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "同区间或其他类型修改发生冲突，请同步最新版");
+        }
+        ObjectNode document;
+        try {
+            document=(ObjectNode)mapper.readTree((String)row[2]);
+        } catch (Exception error) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"工程数据损坏");
+        }
+        JsonNode geometry=document.path("geometry");
+        if (!(geometry instanceof ObjectNode) || !geometry.path("segments").isArray())
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"区间数据损坏");
+        ArrayNode segments=(ArrayNode)geometry.path("segments");
+        ObjectNode found=null;
+        for(JsonNode item:segments)
+            if(input.segmentId().equals(item.path("id").asText())) {
+                found=(ObjectNode)item;
+                break;
+            }
+        if (found==null || !found.path("waypoints").isArray())
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"区间不存在");
+        ObjectNode waypoint=null;
+        for(JsonNode item:found.path("waypoints"))
+            if(input.waypointId().equals(item.path("id").asText())) {
+                waypoint=(ObjectNode)item;
+                break;
+            }
+        if(waypoint==null)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"控制点已不存在");
+        waypoint.put("x",input.x());
+        waypoint.put("y",input.y());
+        ProjectView saved=saveRevision(user,id,current,(String)row[1],json(document));
+        jdbc.update("""
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,actor_id,
+                                                 action,station_id,payload)
+            VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
+            """,id,input.operationId(),saved.revision(),user,"segment.waypoint.move",
+            resource,payload.toString());
+        return saved;
     }
 
     private boolean validName(JsonNode value) {

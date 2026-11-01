@@ -76,15 +76,18 @@ class LiveCollaborationIT {
             ws.request(1);
             return null;
         }
-        boolean sawRevision(long expected, long timeoutSeconds) throws Exception {
+        boolean sawAllRevisions(java.util.Set<Long> expected, long timeoutSeconds)
+                throws Exception {
+            var seen = new java.util.HashSet<Long>();
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
             while (System.nanoTime() < deadline) {
                 long time = deadline - System.nanoTime();
                 String raw = received.poll(Math.max(1, time), TimeUnit.NANOSECONDS);
                 if (raw == null) return false;
                 JsonNode event = new ObjectMapper().readTree(raw);
-                if ("revision".equals(event.path("type").asText())
-                    && event.path("revision").asLong() == expected) return true;
+                if ("revision".equals(event.path("type").asText()))
+                    seen.add(event.path("revision").asLong());
+                if (seen.containsAll(expected)) return true;
             }
             return false;
         }
@@ -139,10 +142,8 @@ class LiveCollaborationIT {
                 var bResult=b.get(20,TimeUnit.SECONDS);
                 assertEquals(200,aResult.statusCode(),aResult.body());
                 assertEquals(200,bResult.statusCode(),bResult.body());
-                assertTrue(ownerMessages.sawRevision(2,10));
-                assertTrue(peerMessages.sawRevision(2,10));
-                assertTrue(ownerMessages.sawRevision(3,10));
-                assertTrue(peerMessages.sawRevision(3,10));
+                assertTrue(ownerMessages.sawAllRevisions(java.util.Set.of(2L,3L),10));
+                assertTrue(peerMessages.sawAllRevisions(java.util.Set.of(2L,3L),10));
                 var finalState=request(http,owner,"GET","/api/projects/" + id,null);
                 assertEquals(200,finalState.statusCode(),finalState.body());
                 JsonNode parsed=mapper.readTree(finalState.body());

@@ -517,6 +517,90 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void stationOperationsSerializeValidateDeduplicateAndRejectStaleWrites() throws Exception {
+        Session owner = account("opsowner");
+        Session editor = account("opsfriend");
+        Session outsider = account("opsother");
+        String id = createProject(owner);
+        String endpoint = "/api/projects/" + id + "/operations";
+        UUID editorId = auth.resolve(editor.sessionCookie().getValue());
+        String name = jdbc.queryForObject(
+            "SELECT username FROM app_users WHERE id=?", String.class, editorId);
+        mvc.perform(authorized(post("/api/projects/" + id + "/access-rules")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",name,"action","edit","allowed",true))), owner))
+            .andExpect(status().isOk());
+
+        UUID opCreate = UUID.randomUUID();
+        Map<String,Object> created = Map.of(
+            "operationId", opCreate, "expectedRevision", 1,
+            "type", "station.create",
+            "station", Map.of("id","solo-1","name","独立站","x",110,"y",220));
+        String createBody = mapper.writeValueAsString(created);
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(createBody), outsider)).andExpect(status().isNotFound());
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(createBody), editor))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2))
+            .andExpect(jsonPath("$.document.stations[0].name").value("独立站"));
+
+        // Exact retry remains idempotent even with an outdated base revision.
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(createBody), editor))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",opCreate,"expectedRevision",1,
+                "type","station.create",
+                "station",Map.of("id","solo-1","name","伪造操作","x",111,"y",220)))),editor))
+            .andExpect(status().isConflict());
+
+        String rename = mapper.writeValueAsString(Map.of(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,"type","station.rename",
+            "station",Map.of("id","solo-1","name","新的站名","nameS","New Station")));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(rename), owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.stations[0].name").value("新的站名"))
+            .andExpect(jsonPath("$.document.stations[0].nameS").value("New Station"));
+
+        String move = mapper.writeValueAsString(Map.of(
+            "operationId",UUID.randomUUID(),"expectedRevision",3,"type","station.move",
+            "station",Map.of("id","solo-1","x",300,"y",400)));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(move), editor))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4))
+            .andExpect(jsonPath("$.document.stations[0].x").value(300))
+            .andExpect(jsonPath("$.document.stations[0].y").value(400));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",3,
+                "type","station.move",
+                "station",Map.of("id","solo-1","x",500,"y",600)))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",4,
+                "type","station.create",
+                "station",Map.of("id","solo-1","name","重复 ID","x",1,"y",2)))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",4,
+                "type","station.delete",
+                "station",Map.of("id","solo-1")))),owner))
+            .andExpect(status().isBadRequest());
+
+        mvc.perform(get("/api/projects/" + id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4));
+        Integer count = jdbc.queryForObject(
+            "SELECT count(*) FROM cloud_project_operations WHERE project_id=?",
+            Integer.class,UUID.fromString(id));
+        assertEquals(3,count);
+    }
+
+    @Test
     void rateLimitBlocksRepeatedFailedLogins() throws Exception {
         String user = "wrong" + UUID.randomUUID().toString().replace("-", "").substring(0, 15);
         String ip = "198.51.100.77";

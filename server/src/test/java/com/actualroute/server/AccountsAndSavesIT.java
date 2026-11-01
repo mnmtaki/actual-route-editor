@@ -945,6 +945,13 @@ class AccountsAndSavesIT {
         assertEquals(1,journal);
     }
 
+    private static Map<String,Object> splitPayload(Object... fields) {
+        if(fields.length%2!=0)throw new IllegalArgumentException("Odd field count");
+        Map<String,Object> result=new java.util.LinkedHashMap<>();
+        for(int i=0;i<fields.length;i+=2)result.put((String)fields[i],fields[i+1]);
+        return result;
+    }
+
     @Test
     void segmentSplitCreatesStationAndTwoSegmentsWithoutLosingWaypoints() throws Exception {
         Session owner=account("splitOwner");
@@ -986,7 +993,7 @@ class AccountsAndSavesIT {
             .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
         String endpoint="/api/projects/"+id+"/operations/segment-split";
         UUID operation=UUID.randomUUID();
-        String body=mapper.writeValueAsString(Map.of(
+        String body=mapper.writeValueAsString(splitPayload(
             "operationId",operation,"expectedRevision",2,
             "segmentId","original","stationId","middle","stationName","新站",
             "x",250,"y",230,"beforeSegmentId","first","afterSegmentId","last",
@@ -1013,7 +1020,7 @@ class AccountsAndSavesIT {
             .content(body),peer))
             .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
         mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsString(Map.of(
+            .content(mapper.writeValueAsString(splitPayload(
                 "operationId",operation,"expectedRevision",2,
                 "segmentId","original","stationId","middle","stationName","Different",
                 "x",250,"y",230,"beforeSegmentId","first","afterSegmentId","last",
@@ -1021,7 +1028,7 @@ class AccountsAndSavesIT {
             .andExpect(status().isConflict());
         // A different operation on a stale version must never rebase topology.
         mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsString(Map.of(
+            .content(mapper.writeValueAsString(splitPayload(
                 "operationId",UUID.randomUUID(),"expectedRevision",2,
                 "segmentId","original","stationId","middle2","stationName","Other",
                 "x",260,"y",230,"beforeSegmentId","s3","afterSegmentId","s4",

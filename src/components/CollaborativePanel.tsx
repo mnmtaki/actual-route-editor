@@ -175,7 +175,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   // to a single station. Complex topology and compound edits keep manual CAS.
   useEffect(() => {
     if (busy || working.current || fetching.current || permissionLost
-        || draftActive || remoteRevision > session.revision) return;
+        || draftActive) return;
     const candidate = detectStationOperation(session.baseJson, project);
     if (!candidate) return;
     const snapshot = serializeProject(project);
@@ -195,18 +195,27 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
         ...candidate, operationId: crypto.randomUUID(), expectedRevision: session.revision,
       };
       void cloudApi.stationOperation(session.id, op).then(saved => {
+        setRemoteRevision(current => Math.max(current, saved.revision));
+        if (serializeProject(latest.current) !== snapshot || draftInProgress.current) {
+          // The server accepted the operation, but the user continued drawing
+          // during the request. Do not discard the newer local working state.
+          setLiveStatus('操作已保存至 v' + saved.revision + '；本地还有新修改，请手动检查并加载云端版本');
+          setError('操作已提交，画布在提交期间又发生变化。为避免覆盖后续编辑，未自动替换当前工作副本。');
+          return;
+        }
         const next = {
           id: session.id, name: saved.name, revision: saved.revision,
           baseJson: serializeProject(saved.document),
         };
         activeSession.current = next;
-        onUpdate(next);
-        setRemoteRevision(current => Math.max(current, saved.revision));
-        setLiveStatus('已自动同步至 v' + saved.revision);
+        onLoadRef.current(saved.document, next);
+        setLiveStatus(saved.revision > session.revision + 1
+          ? '不同站点的并发修改已合并至 v' + saved.revision
+          : '已自动同步至 v' + saved.revision);
       }).catch(e => {
         if (e instanceof CloudApiError && e.status === 409) {
           setRemoteRevision(current => Math.max(current, session.revision + 1));
-          setError('车站操作发生版本冲突，已保留本地修改。请导出备份后再加载云端最新版。');
+          setError('操作与另一位用户的修改冲突（可能是同站、整图保存或数据版本缺口）。已保留本地，请导出备份后再加载最新版。');
         } else {
           if (e instanceof CloudApiError && (e.status === 403 || e.status === 404)) setPermissionLost(true);
           setError(e instanceof Error ? e.message : '车站操作同步失败，请手动处理');
@@ -218,7 +227,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       });
     }, candidate.type === 'station.move' ? 300 : 550);
     return () => window.clearTimeout(timer);
-  }, [project, session.id, session.baseJson, session.revision, remoteRevision, busy, permissionLost, draftActive, onUpdate]);
+  }, [project, session.id, session.baseJson, session.revision, busy, permissionLost, draftActive]);
 
   async function publish() {
     if (busy || permissionLost || remoteRevision > session.revision || !dirty) return;
@@ -287,6 +296,6 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     {error && <p role="alert" style={{ width: '100%' }}>{error}</p>}
     {message && <p role="status" style={{ width: '100%' }}>{message}</p>}
     {liveStatus && <p role="status" style={{ width: '100%' }}>{liveStatus}</p>}
-    <small style={{ width: '100%' }}>单独新增车站、改名、移动可自动提交操作；修改线路拓扑或其他复杂内容时仍需手动发布完整工程。并发写入会检查版本；暂不自动合并或同步鼠标轨迹。</small>
+    <small style={{ width: '100%' }}>独立车站操作会自动提交；不同站点的并发操作由服务器安全合并，同站或整图更改仍需手动处理。线路拓扑继续使用完整工程保存；尚未同步鼠标轨迹。</small>
   </section>;
 }

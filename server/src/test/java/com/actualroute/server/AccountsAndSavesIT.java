@@ -946,6 +946,98 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void segmentSplitCreatesStationAndTwoSegmentsWithoutLosingWaypoints() throws Exception {
+        Session owner=account("splitOwner");
+        Session peer=account("splitPeer");
+        String id=createProject(owner);
+        UUID peerId=auth.resolve(peer.sessionCookie().getValue());
+        String username=jdbc.queryForObject("SELECT username FROM app_users WHERE id=?",
+            String.class,peerId);
+        mvc.perform(authorized(post("/api/projects/"+id+"/access-rules")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",username,"action","edit","allowed",true))),owner))
+            .andExpect(status().isOk());
+        JsonNode original=mapper.readTree("""
+            {"version":1,"name":"Split Network",
+             "stations":[
+               {"id":"a","name":"A","x":100,"y":200,"labelOffsetX":0,"labelOffsetY":0},
+               {"id":"b","name":"B","x":400,"y":200,"labelOffsetX":0,"labelOffsetY":0}
+             ],
+             "lines":[{"id":"line-a","name":"L","color":"#123456",
+                "stationSequence":["a","b"],"lineOrder":0,
+                "openedAt":"2020-01-01","visible":true,"locked":false}],
+             "stationLineRelations":[
+               {"id":"ra","lineId":"line-a","stationId":"a","openedAt":"2020-01-01"},
+               {"id":"rb","lineId":"line-a","stationId":"b","openedAt":"2020-01-01"}],
+             "geometry":{"segments":[
+               {"id":"original","lineId":"line-a","fromStationId":"a","toStationId":"b",
+                "mode":"smooth","structureType":"elevated","structureNodes":[],
+                "lineStyleId":"style-1",
+                "waypoints":[{"id":"w1","x":180,"y":240,"type":"smooth"},
+                             {"id":"w2","x":300,"y":220,"type":"corner"}],
+                "openedAt":"2020-01-01"}]},
+             "openingPhases":[],"timeline":{"currentDate":"2025-01-01"}}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Split Network","document",original,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        String endpoint="/api/projects/"+id+"/operations/segment-split";
+        UUID operation=UUID.randomUUID();
+        String body=mapper.writeValueAsString(Map.of(
+            "operationId",operation,"expectedRevision",2,
+            "segmentId","original","stationId","middle","stationName","新站",
+            "x",250,"y",230,"beforeSegmentId","first","afterSegmentId","last",
+            "relationId","rmiddle","splitWaypointIndex",1));
+        mvc.perform(post(endpoint).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(body),peer))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.stations[2].id").value("middle"))
+            .andExpect(jsonPath("$.document.lines[0].stationSequence[1]").value("middle"))
+            .andExpect(jsonPath("$.document.stationLineRelations[2].stationId").value("middle"))
+            .andExpect(jsonPath("$.document.geometry.segments.length()").value(2))
+            .andExpect(jsonPath("$.document.geometry.segments[0].toStationId").value("middle"))
+            .andExpect(jsonPath("$.document.geometry.segments[1].fromStationId").value("middle"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[0].id").value("w1"))
+            .andExpect(jsonPath("$.document.geometry.segments[1].waypoints[0].id").value("w2"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].structureType").value("elevated"))
+            .andExpect(jsonPath("$.document.geometry.segments[1].structureType").value("elevated"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].lineStyleId").value("style-1"));
+        // Exact replay is idempotent and produces no extra station/revision.
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(body),peer))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",operation,"expectedRevision",2,
+                "segmentId","original","stationId","middle","stationName","Different",
+                "x",250,"y",230,"beforeSegmentId","first","afterSegmentId","last",
+                "relationId","rmiddle","splitWaypointIndex",1))),owner))
+            .andExpect(status().isConflict());
+        // A different operation on a stale version must never rebase topology.
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "segmentId","original","stationId","middle2","stationName","Other",
+                "x",260,"y",230,"beforeSegmentId","s3","afterSegmentId","s4",
+                "relationId","r3","splitWaypointIndex",1))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.stations.length()").value(3));
+        assertEquals(1,jdbc.queryForObject("""
+            SELECT count(*) FROM cloud_project_operations
+            WHERE project_id=? AND action='segment.split-station'
+            """,Integer.class,UUID.fromString(id)));
+    }
+
+    @Test
     void rateLimitBlocksRepeatedFailedLogins() throws Exception {
         String user = "wrong" + UUID.randomUUID().toString().replace("-", "").substring(0, 15);
         String ip = "198.51.100.77";

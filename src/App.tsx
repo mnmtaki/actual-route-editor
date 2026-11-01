@@ -247,7 +247,7 @@ export default function App() {
     if (!id) return;
     openedShareLink.current = true;
     void cloudApi.get(id).then(remote => {
-      if (remote.visibility === 'public_view') {
+      if (!remote.canEdit) {
         openImportedProject(remote.document);
       } else {
         void cloudApi.me().then(() => openCollaborativeProject(id))

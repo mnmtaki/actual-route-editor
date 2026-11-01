@@ -31,7 +31,7 @@ public class ProjectController {
     public record RestoreRequest(@NotNull Long sourceRevision, @NotNull Long expectedRevision) {}
 
     public record ProjectView(UUID id, String name, long revision, JsonNode document,
-                              OffsetDateTime updatedAt, String visibility) {}
+                              OffsetDateTime updatedAt, String visibility, boolean canEdit) {}
 
     public record Summary(UUID id, String name, long revision, OffsetDateTime updatedAt, String role, String visibility, boolean canEdit) {}
     public record VisibilityRequest(@NotNull String visibility) {}
@@ -55,7 +55,7 @@ public class ProjectController {
         try {
             return new ProjectView(rs.getObject("id", UUID.class), rs.getString("name"),
                     rs.getLong("revision"), mapper.readTree(rs.getString("document")),
-                    rs.getObject("updated_at", OffsetDateTime.class), rs.getString("visibility"));
+                    rs.getObject("updated_at", OffsetDateTime.class), rs.getString("visibility"), rs.getBoolean("can_edit"));
         } catch (java.io.IOException e) { throw new SQLException(e); }
     }
 
@@ -160,14 +160,14 @@ public class ProjectController {
     }
 
     @GetMapping("/public")
-    public List<Summary> publicProjects() {
+    public List<Summary> publicProjects(@AuthenticationPrincipal UUID user) {
         return jdbc.query("""
             SELECT id,name,revision,updated_at,visibility FROM cloud_projects
-            WHERE visibility IN ('public_view','public_edit')
+            WHERE visibility IN ('public_view','public_edit') AND project_can_access(id,?,'view')
             ORDER BY updated_at DESC LIMIT 100
             """, (rs,n) -> new Summary(rs.getObject("id",UUID.class),rs.getString("name"),
                 rs.getLong("revision"),rs.getObject("updated_at",OffsetDateTime.class),
-                "viewer",rs.getString("visibility"),false));
+                "viewer",rs.getString("visibility"),hasAccess(user,rs.getObject("id",UUID.class),"edit")), user);
     }
 
     @GetMapping
@@ -200,9 +200,10 @@ public class ProjectController {
     @GetMapping("/{id}")
     public ProjectView get(@AuthenticationPrincipal UUID user, @PathVariable UUID id) {
         var records = jdbc.query("""
-            SELECT p.id,p.name,p.revision,p.document,p.updated_at,p.visibility
+            SELECT p.id,p.name,p.revision,p.document,p.updated_at,p.visibility,
+                   project_can_access(p.id,?,'edit') AS can_edit
             FROM cloud_projects p WHERE p.id=? AND project_can_access(p.id,?,'view')
-            """, this::view, id, user);
+            """, this::view, user, id, user);
         if (records.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工程不存在");
         return records.get(0);
     }

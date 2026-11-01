@@ -16,6 +16,14 @@ export type CloudStationOperation = {
   type: 'station.create' | 'station.rename' | 'station.move';
   station: { id: string; name?: string; x?: number; y?: number; nameS?: string; nameHistory?: unknown };
 };
+export interface CloudWaypointMove {
+  operationId: string;
+  expectedRevision: number;
+  segmentId: string;
+  waypointId: string;
+  x: number;
+  y: number;
+}
 export interface CloudProjectStatus { id: string; name: string; revision: number; visibility: CloudProjectSummary['visibility']; canEdit: boolean }
 export function cloudSocketUrl(id: string): string {
   return API_BASE.replace(/^http/i, 'ws') + '/ws/projects/' + encodeURIComponent(id);
@@ -112,6 +120,14 @@ export const cloudApi = {
   stationOperation: async (id: string, operation: CloudStationOperation) => {
     const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
       `/api/projects/${encodeURIComponent(id)}/operations`, {
+        method: 'POST', body: JSON.stringify(operation),
+      },
+    );
+    return { ...raw, document: parseProjectJson(JSON.stringify(raw.document)) } as CloudProject;
+  },
+  moveWaypoint: async (id: string, operation: CloudWaypointMove) => {
+    const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
+      `/api/projects/${encodeURIComponent(id)}/operations/waypoint`, {
         method: 'POST', body: JSON.stringify(operation),
       },
     );

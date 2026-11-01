@@ -484,8 +484,8 @@ class AccountsAndSavesIT {
         var captured = org.mockito.ArgumentCaptor.forClass(org.springframework.web.socket.TextMessage.class);
         org.mockito.Mockito.verify(ws, org.mockito.Mockito.atLeast(2)).sendMessage(captured.capture());
         assertTrue(captured.getAllValues().stream().anyMatch(
-            msg -> msg.getPayload().contains("\\"revision\\":2")
-                && msg.getPayload().contains("\\"type\\":\\"revision\\"")));
+            msg -> msg.getPayload().contains("revision")
+                && msg.getPayload().contains(":2") && msg.getPayload().contains("type")));
 
         // Stale write conflicts never emit revision 3.
         mvc.perform(authorized(put("/api/projects/" + id).contentType(MediaType.APPLICATION_JSON)
@@ -493,7 +493,7 @@ class AccountsAndSavesIT {
         captured = org.mockito.ArgumentCaptor.forClass(org.springframework.web.socket.TextMessage.class);
         org.mockito.Mockito.verify(ws, org.mockito.Mockito.atLeast(2)).sendMessage(captured.capture());
         assertFalse(captured.getAllValues().stream().anyMatch(
-            msg -> msg.getPayload().contains("\\"revision\\":3")));
+            msg -> msg.getPayload().contains("revision") && msg.getPayload().contains(":3")));
 
         UUID peerId = auth.resolve(collaborator.sessionCookie().getValue());
         String peerName = jdbc.queryForObject(

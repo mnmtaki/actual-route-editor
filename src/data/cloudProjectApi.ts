@@ -4,12 +4,16 @@ import { parseProjectJson, serializeProject } from '../import-export/projectJson
 const API_BASE = (import.meta.env.VITE_ARA_API_URL || 'http://localhost:8080').replace(/\/$/, '');
 
 export interface CloudProjectSummary {
-  id: string; name: string; revision: number; updatedAt: string; role: 'owner' | 'viewer'; visibility: 'private' | 'public_view' | 'public_edit';
+  id: string; name: string; revision: number; updatedAt: string; role: 'owner' | 'viewer'; visibility: 'private' | 'public_view' | 'public_edit'; canEdit: boolean;
 }
 export interface CloudProject extends CloudProjectSummary {
   document: ActualRouteProject;
 }
 export interface CloudIdentity { userId: string }
+export interface CloudAccessRule {
+  id: string; userId: string; username: string;
+  action: 'view' | 'edit'; allowed: boolean;
+}
 export interface CloudRevisionSummary { revision: number; name: string; createdAt: string }
 export interface CloudRevision extends CloudRevisionSummary { document: ActualRouteProject }
 
@@ -88,6 +92,13 @@ export const cloudApi = {
     api<CloudProjectSummary>(`/api/projects/${encodeURIComponent(id)}/restore`, {
       method: 'POST', body: JSON.stringify({ sourceRevision, expectedRevision }),
     }),
+  accessRules: (id: string) => api<CloudAccessRule[]>(`/api/projects/${encodeURIComponent(id)}/access-rules`),
+  setAccessRule: (id: string, username: string, action: 'view' | 'edit', allowed: boolean) =>
+    api<CloudAccessRule>(`/api/projects/${encodeURIComponent(id)}/access-rules`, {
+      method: 'POST', body: JSON.stringify({ username, action, allowed }),
+    }),
+  deleteAccessRule: (id: string, ruleId: string) =>
+    api<void>(`/api/projects/${encodeURIComponent(id)}/access-rules/${encodeURIComponent(ruleId)}`, { method: 'DELETE' }),
   publicProjects: () => api<CloudProjectSummary[]>('/api/projects/public'),
   setVisibility: (id: string, visibility: CloudProjectSummary['visibility']) =>
     api<CloudProjectSummary>(`/api/projects/${encodeURIComponent(id)}/visibility`, {

@@ -30,6 +30,8 @@ async function openCanvas(context, id) {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const failedRequests = [];
+  const consoleErrors = [];
+  page.on('console', message => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   page.on('requestfailed', request => failedRequests.push(request.url() + ' ' + request.failure()?.errorText));
   await page.goto(SITE + '/?cloudProject=' + id);
   try {
@@ -37,9 +39,12 @@ async function openCanvas(context, id) {
   } catch (failure) {
     console.error('BROWSER DEBUG:', {
       pageErrors: errors,
+      consoleErrors,
       failedRequests,
       url: page.url(),
       body: (await page.locator('body').innerText()).slice(0, 5000),
+      crossOriginProbe: await context.request.get('http://127.0.0.1:8080/api/auth/me')
+        .then(async response => ({status: response.status(), headers: response.headers(), body: await response.text()})),
       apiUser: await page.evaluate(async () => {
         try {
           const response = await fetch('http://127.0.0.1:8080/api/auth/me', {credentials:'include'});

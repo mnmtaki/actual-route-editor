@@ -36,6 +36,8 @@ public class ProjectController {
     public record Summary(UUID id, String name, long revision, OffsetDateTime updatedAt) {}
     public record RevisionSummary(long revision, String name, OffsetDateTime createdAt) {}
     public record RevisionView(long revision, String name, JsonNode document, OffsetDateTime createdAt) {}
+    public record InviteRequest(@NotBlank @Size(min=3,max=40) String username) {}
+    public record Collaborator(UUID userId, String username, String role) {}
 
     private String json(JsonNode value) {
         if (!value.isObject() || !value.has("stations") || !value.get("stations").isArray()
@@ -71,11 +73,72 @@ public class ProjectController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工程不存在");
     }
 
+    private void requireReadable(UUID user, UUID id) {
+        Integer count = jdbc.queryForObject("""
+            SELECT count(*) FROM cloud_projects p
+            WHERE p.id=? AND (p.owner_id=? OR EXISTS (
+                SELECT 1 FROM cloud_project_members m WHERE m.project_id=p.id AND m.user_id=?))
+            """, Integer.class, id, user, user);
+        if (count == null || count == 0)
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工程不存在");
+    }
+
+    @GetMapping("/{id}/members")
+    public List<Collaborator> members(@AuthenticationPrincipal UUID user, @PathVariable UUID id) {
+        requireReadable(user, id);
+        return jdbc.query("""
+            SELECT u.id, u.username, 'owner' AS role FROM cloud_projects p
+                JOIN app_users u ON u.id=p.owner_id WHERE p.id=?
+            UNION ALL
+            SELECT u.id, u.username, 'editor' AS role FROM cloud_project_members m
+                JOIN app_users u ON u.id=m.user_id WHERE m.project_id=?
+            ORDER BY role DESC, username
+            """, (rs, n) -> new Collaborator(rs.getObject("id",UUID.class),
+                 rs.getString("username"), rs.getString("role")), id, id);
+    }
+
+    @PostMapping("/{id}/members")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Transactional
+    public Collaborator invite(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
+                               @Valid @RequestBody InviteRequest input) {
+        requireOwned(user, id);
+        var target = jdbc.query("SELECT id,username FROM app_users WHERE username=?",
+            (rs,n) -> new Collaborator(rs.getObject("id",UUID.class),rs.getString("username"),"editor"),
+            input.username());
+        if (target.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "用户名不存在");
+        Collaborator member=target.get(0);
+        if (member.userId().equals(user))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"不能邀请自己");
+        int added=jdbc.update("""
+            INSERT INTO cloud_project_members(project_id,user_id) VALUES (?,?)
+            ON CONFLICT DO NOTHING
+            """,id,member.userId());
+        if(added==0) throw new ResponseStatusException(HttpStatus.CONFLICT,"成员已经存在");
+        return member;
+    }
+
+    @DeleteMapping("/{id}/members/{memberId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Transactional
+    public void removeMember(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
+                             @PathVariable UUID memberId) {
+        requireOwned(user, id);
+        if (jdbc.update("DELETE FROM cloud_project_members WHERE project_id=? AND user_id=?",
+                 id,memberId)==0)
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"成员不存在");
+    }
+
     @GetMapping
     public List<Summary> list(@AuthenticationPrincipal UUID user) {
-        return jdbc.query("SELECT id,name,revision,updated_at FROM cloud_projects WHERE owner_id=? ORDER BY updated_at DESC",
-                (rs, i) -> new Summary(rs.getObject("id", UUID.class), rs.getString("name"),
-                        rs.getLong("revision"), rs.getObject("updated_at", OffsetDateTime.class)), user);
+        return jdbc.query("""
+            SELECT p.id,p.name,p.revision,p.updated_at FROM cloud_projects p
+            WHERE p.owner_id=? OR EXISTS (
+                SELECT 1 FROM cloud_project_members m
+                WHERE m.project_id=p.id AND m.user_id=?)
+            ORDER BY p.updated_at DESC
+            """, (rs, i) -> new Summary(rs.getObject("id", UUID.class), rs.getString("name"),
+                        rs.getLong("revision"), rs.getObject("updated_at", OffsetDateTime.class)), user, user);
     }
 
     @PostMapping
@@ -95,23 +158,28 @@ public class ProjectController {
 
     @GetMapping("/{id}")
     public ProjectView get(@AuthenticationPrincipal UUID user, @PathVariable UUID id) {
-        var records = jdbc.query("SELECT id,name,revision,document,updated_at FROM cloud_projects WHERE id=? AND owner_id=?",
-                this::view, id, user);
+        var records = jdbc.query("""
+            SELECT p.id,p.name,p.revision,p.document,p.updated_at
+            FROM cloud_projects p WHERE p.id=? AND
+              (p.owner_id=? OR EXISTS (
+                SELECT 1 FROM cloud_project_members m WHERE m.project_id=p.id AND m.user_id=?))
+            """, this::view, id, user, user);
         if (records.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工程不存在");
         return records.get(0);
     }
 
     @GetMapping("/{id}/revisions")
     public List<RevisionSummary> revisions(@AuthenticationPrincipal UUID user, @PathVariable UUID id) {
-        requireOwned(user, id);
+        requireReadable(user, id);
         return jdbc.query("""
             SELECT r.revision,r.name,r.created_at
               FROM cloud_project_revisions r
               JOIN cloud_projects p ON p.id=r.project_id
-             WHERE r.project_id=? AND p.owner_id=?
+             WHERE r.project_id=? AND (p.owner_id=? OR EXISTS (
+                 SELECT 1 FROM cloud_project_members m WHERE m.project_id=p.id AND m.user_id=?))
              ORDER BY r.revision DESC
             """, (rs, i) -> new RevisionSummary(rs.getLong("revision"),rs.getString("name"),
-                    rs.getObject("created_at", OffsetDateTime.class)), id, user);
+                    rs.getObject("created_at", OffsetDateTime.class)), id, user, user);
     }
 
     @GetMapping("/{id}/revisions/{revision}")
@@ -122,8 +190,9 @@ public class ProjectController {
             SELECT r.revision,r.name,r.document,r.created_at
               FROM cloud_project_revisions r
               JOIN cloud_projects p ON p.id=r.project_id
-             WHERE r.project_id=? AND p.owner_id=? AND r.revision=?
-            """, this::revisionView, id, user, revision);
+             WHERE r.project_id=? AND r.revision=? AND (p.owner_id=? OR EXISTS (
+                 SELECT 1 FROM cloud_project_members m WHERE m.project_id=p.id AND m.user_id=?))
+            """, this::revisionView, id, revision, user, user);
         if (records.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "版本不存在");
         return records.get(0);
     }
@@ -141,6 +210,7 @@ public class ProjectController {
                                @Valid @RequestBody RestoreRequest input) {
         if (input.sourceRevision() == null || input.sourceRevision() < 1)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "需要有效的 sourceRevision");
+        requireOwned(user, id);
         RevisionView source = revision(user, id, input.sourceRevision());
         // Restore is an append-only NEW revision, never a destructive historical overwrite.
         return saveRevision(user, id, input.expectedRevision(), source.name(), json(source.document()));
@@ -152,10 +222,12 @@ public class ProjectController {
         int changed = jdbc.update("""
             UPDATE cloud_projects SET name=?, document=CAST(? AS jsonb), revision=revision+1,
                 updated_at=now()
-            WHERE id=? AND owner_id=? AND revision=?
-            """, name, document, id, user, expected);
+            WHERE id=? AND revision=? AND (owner_id=? OR EXISTS (
+                SELECT 1 FROM cloud_project_members m
+                WHERE m.project_id=cloud_projects.id AND m.user_id=?))
+            """, name, document, id, expected, user, user);
         if (changed != 1) {
-            requireOwned(user, id);
+            requireReadable(user, id);
             throw new ResponseStatusException(HttpStatus.CONFLICT, "工程版本冲突，请刷新或另存后重试");
         }
         // Same database transaction as the CAS update. Any failure rolls back both writes.

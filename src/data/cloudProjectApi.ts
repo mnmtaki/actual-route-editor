@@ -109,10 +109,14 @@ export const cloudApi = {
     }),
   deleteAccessRule: (id: string, ruleId: string) =>
     api<void>(`/api/projects/${encodeURIComponent(id)}/access-rules/${encodeURIComponent(ruleId)}`, { method: 'DELETE' }),
-  stationOperation: (id: string, operation: CloudStationOperation) =>
-    api<CloudProject>(`/api/projects/${encodeURIComponent(id)}/operations`, {
-      method: 'POST', body: JSON.stringify(operation),
-    }),
+  stationOperation: async (id: string, operation: CloudStationOperation) => {
+    const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
+      `/api/projects/${encodeURIComponent(id)}/operations`, {
+        method: 'POST', body: JSON.stringify(operation),
+      },
+    );
+    return { ...raw, document: parseProjectJson(JSON.stringify(raw.document)) } as CloudProject;
+  },
   status: (id: string) =>
     api<CloudProjectStatus>(`/api/projects/${encodeURIComponent(id)}/status`),
   publicProjects: () => api<CloudProjectSummary[]>('/api/projects/public'),

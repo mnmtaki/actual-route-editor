@@ -78,6 +78,25 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void browserCorsReturnsCredentialedTrustedOriginHeaders() throws Exception {
+        Session account = account("corsBrowser");
+        mvc.perform(get("/api/auth/me")
+            .cookie(account.cookies()).header("Origin", "http://localhost:5173"))
+            .andExpect(status().isOk())
+            .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
+            .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options(
+            "/api/projects").header("Origin","http://localhost:5173")
+            .header("Access-Control-Request-Method","POST")
+            .header("Access-Control-Request-Headers","X-ARA-CSRF, Content-Type"))
+            .andExpect(status().isOk())
+            .andExpect(header().string("Access-Control-Allow-Origin","http://localhost:5173"));
+        mvc.perform(get("/api/auth/me").cookie(account.cookies())
+            .header("Origin","https://untrusted.example"))
+            .andExpect(header().doesNotExist("Access-Control-Allow-Origin"));
+    }
+
+    @Test
     void sessionPersistsThroughCookieAndLogoutRevokesIt() throws Exception {
         Session s = account("session");
         mvc.perform(get("/api/auth/me").cookie(s.cookies()))

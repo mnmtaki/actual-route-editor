@@ -94,7 +94,7 @@ class AccountsAndSavesIT {
         Session user2 = account("second");
         String id = createProject(user1);
         mvc.perform(get("/api/projects/" + id).cookie(user2.cookies())).andExpect(status().isNotFound());
-        mvc.perform(get("/api/projects/" + id)).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/projects/" + id)).andExpect(status().isNotFound());
         mvc.perform(get("/api/projects").cookie(user2.cookies()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
         mvc.perform(put("/api/projects/" + id).cookie(user1.cookies())
@@ -260,80 +260,68 @@ class AccountsAndSavesIT {
     }
 
     @Test
-    void collaboratorsCanPublishButCannotManageOwnershipAndStaleWritersConflict() throws Exception {
-        Session owner = account("collabOwner");
-        Session editor = account("collabEditor");
-        Session unrelated = account("collabOther");
+    void publicVisibilitySupportsAnonymousViewingAndLoggedInEditingWithoutInvites() throws Exception {
+        Session owner = account("publicowner");
+        Session visitor = account("publiceditor");
         String id = createProject(owner);
+        String visibilityUrl = "/api/projects/" + id + "/visibility";
 
-        UUID editorId = auth.resolve(editor.sessionCookie().getValue());
-        String editorUsername = jdbc.queryForObject(
-            "SELECT username FROM app_users WHERE id=?", String.class, editorId);
-
-        mvc.perform(get("/api/projects/" + id).cookie(editor.cookies()))
+        mvc.perform(get("/api/projects/" + id))
             .andExpect(status().isNotFound());
-        mvc.perform(authorized(post("/api/projects/" + id + "/members")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsString(Map.of("username", editorUsername))), unrelated))
+        mvc.perform(get("/api/projects/" + id).cookie(visitor.cookies()))
             .andExpect(status().isNotFound());
-        mvc.perform(authorized(post("/api/projects/" + id + "/members")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsString(Map.of("username", editorUsername))), owner))
-            .andExpect(status().isCreated()).andExpect(jsonPath("$.role").value("editor"));
-        mvc.perform(authorized(post("/api/projects/" + id + "/members")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsString(Map.of("username", editorUsername))), owner))
-            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/public"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
 
-        mvc.perform(get("/api/projects").cookie(editor.cookies()))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$[0].id").value(id))
-            .andExpect(jsonPath("$[0].role").value("editor"));
-        mvc.perform(get("/api/projects/" + id).cookie(editor.cookies()))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(1));
-        mvc.perform(get("/api/projects/" + id + "/revisions").cookie(editor.cookies()))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
-        mvc.perform(get("/api/projects/" + id + "/members").cookie(editor.cookies()))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
-
-        // Editor commits first: owner stale v1 request must fail with HTTP 409.
+        String viewMode = mapper.writeValueAsString(Map.of("visibility", "public_view"));
+        mvc.perform(authorized(put(visibilityUrl).contentType(MediaType.APPLICATION_JSON)
+            .content(viewMode), visitor)).andExpect(status().isNotFound());
+        mvc.perform(authorized(put(visibilityUrl).contentType(MediaType.APPLICATION_JSON)
+            .content(viewMode), owner)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.visibility").value("public_view"));
+        mvc.perform(get("/api/projects/public")).andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].id").value(id));
+        mvc.perform(get("/api/projects/" + id)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.visibility").value("public_view"));
+        mvc.perform(get("/api/projects/" + id + "/revisions/1"))
+            .andExpect(status().isOk());
+        mvc.perform(get("/api/projects/" + id + "/revisions"))
+            .andExpect(status().isOk());
+        String edit = mapper.writeValueAsString(Map.of(
+            "name","Edited", "document",document(), "expectedRevision",1));
         mvc.perform(authorized(put("/api/projects/" + id)
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsString(Map.of(
-                "name", "SharedEdit", "document", document(), "expectedRevision", 1))), editor))
+            .contentType(MediaType.APPLICATION_JSON).content(edit), visitor))
+            .andExpect(status().isNotFound());
+        mvc.perform(put("/api/projects/" + id)
+            .contentType(MediaType.APPLICATION_JSON).content(edit))
+            .andExpect(status().isUnauthorized());
+
+        mvc.perform(authorized(put(visibilityUrl).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("visibility", "public_edit"))), owner))
+            .andExpect(status().isOk());
+        mvc.perform(authorized(put("/api/projects/" + id)
+            .contentType(MediaType.APPLICATION_JSON).content(edit), visitor))
             .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
         mvc.perform(authorized(put("/api/projects/" + id)
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsString(Map.of(
-                "name", "StaleOwner", "document", document(), "expectedRevision", 1))), owner))
+            .contentType(MediaType.APPLICATION_JSON).content(edit), owner))
             .andExpect(status().isConflict());
-        mvc.perform(get("/api/projects/" + id).cookie(owner.cookies()))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("SharedEdit"));
-        mvc.perform(get("/api/projects/" + id + "/revisions/2").cookie(editor.cookies()))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("SharedEdit"));
-
+        mvc.perform(authorized(delete("/api/projects/" + id), visitor))
+            .andExpect(status().isNotFound());
         mvc.perform(authorized(post("/api/projects/" + id + "/restore")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsString(Map.of(
-                "sourceRevision", 1, "expectedRevision", 2))), editor))
+            .contentType(MediaType.APPLICATION_JSON).content(
+                mapper.writeValueAsString(Map.of("sourceRevision",1,"expectedRevision",2))), visitor))
             .andExpect(status().isNotFound());
-        mvc.perform(authorized(delete("/api/projects/" + id), editor))
-            .andExpect(status().isNotFound());
-        mvc.perform(authorized(post("/api/projects/" + id + "/members")
-            .contentType(MediaType.APPLICATION_JSON)
-            .content(mapper.writeValueAsString(Map.of("username", editorUsername))), editor))
-            .andExpect(status().isNotFound());
-
-        mvc.perform(authorized(delete("/api/projects/" + id + "/members/" + editorId), owner))
-            .andExpect(status().isNoContent());
-        mvc.perform(get("/api/projects/" + id).cookie(editor.cookies()))
-            .andExpect(status().isNotFound());
-        mvc.perform(get("/api/projects").cookie(editor.cookies()))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+        mvc.perform(authorized(put(visibilityUrl).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("visibility", "unknown"))), owner))
+            .andExpect(status().isBadRequest());
+        mvc.perform(authorized(put(visibilityUrl).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("visibility", "private"))), owner))
+            .andExpect(status().isOk());
+        mvc.perform(get("/api/projects/" + id)).andExpect(status().isNotFound());
         mvc.perform(authorized(put("/api/projects/" + id)
             .contentType(MediaType.APPLICATION_JSON)
             .content(mapper.writeValueAsString(Map.of(
-                "name", "Revoked", "document", document(), "expectedRevision", 2))), editor))
+                "name","Revoked","document",document(),"expectedRevision",2))), visitor))
             .andExpect(status().isNotFound());
     }
 

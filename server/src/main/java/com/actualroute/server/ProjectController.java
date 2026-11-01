@@ -303,8 +303,25 @@ public class ProjectController {
         }
         Object[] row = record.get(0);
         long currentRevision = (Long) row[0];
-        if (currentRevision != input.expectedRevision())
-            throw new ResponseStatusException(HttpStatus.CONFLICT,"操作版本已过期，请同步最新工程");
+        if (input.expectedRevision() > currentRevision)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"操作基线版本超前");
+        if (input.expectedRevision() < currentRevision) {
+            // Accept stale writes only when EVERY intervening revision is a
+            // station operation on a different station. A full-project save,
+            // restore or missing operation record is an unsafe merge boundary.
+            Long recorded = jdbc.queryForObject("""
+                SELECT count(*) FROM cloud_project_operations
+                 WHERE project_id=? AND revision>? AND revision<=?
+                """, Long.class, id, input.expectedRevision(), currentRevision);
+            Long overlaps = jdbc.queryForObject("""
+                SELECT count(*) FROM cloud_project_operations
+                 WHERE project_id=? AND revision>? AND revision<=? AND station_id=?
+                """, Long.class, id, input.expectedRevision(), currentRevision, stationId);
+            if (recorded == null || recorded != currentRevision-input.expectedRevision()
+                || overlaps == null || overlaps > 0)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "存在同站或整图更改，无法自动合并，请同步最新版");
+        }
         ObjectNode document;
         try {
             document = (ObjectNode) mapper.readTree((String)row[2]);

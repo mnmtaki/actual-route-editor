@@ -23,7 +23,10 @@ import org.springframework.web.server.ResponseStatusException;
 public class ProjectController {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
-    ProjectController(JdbcTemplate jdbc, ObjectMapper mapper) { this.jdbc = jdbc; this.mapper = mapper; }
+    private final ProjectSocketHub socketHub;
+    ProjectController(JdbcTemplate jdbc, ObjectMapper mapper, ProjectSocketHub socketHub) {
+        this.jdbc = jdbc; this.mapper = mapper; this.socketHub = socketHub;
+    }
 
     public record SaveRequest(@NotBlank @Size(max = 200) String name,
                               @NotNull JsonNode document,
@@ -284,6 +287,8 @@ public class ProjectController {
                 LIMIT 10
             )
             """, id, id);
+        // Inform connected editors only after the transaction commits.
+        socketHub.publishAfterCommit(id, expected + 1);
         return get(user, id);
     }
 

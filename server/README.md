@@ -29,6 +29,7 @@ PUT /api/projects/{uuid} — atomic CAS save by owner or effectively authorized 
 GET /api/projects/public — discover publicly shared projects
 GET /api/projects/{uuid}/status — lightweight current revision and effective edit permission
 WS /ws/projects/{uuid} — authenticated, edit-authorized revision notifications
+POST /api/projects/{uuid}/operations — serialize isolated station.create/rename/move mutations (operationId, expectedRevision, station)
 PUT /api/projects/{uuid}/visibility — owner sets private / public_view / public_edit
 GET /api/projects/{uuid}/access-rules — owner lists specific user permissions
 POST /api/projects/{uuid}/access-rules — owner sets an allow/deny rule by registered username
@@ -148,3 +149,32 @@ This implementation uses an in-process WebSocket room registry. Running
 multiple API instances requires Redis pub/sub or another shared event bus and
 additional session/routing verification. There is no automatic merging,
 cursor sharing or pixel-level simultaneous drawing yet.
+
+## Stage-one station operation collaboration (Flyway V8 + V9)
+
+Three narrow commands are now supported: `station.create` (standalone,
+unconnected stations only), `station.rename` (including foreign name and
+existing name-history metadata), and `station.move` (world coordinates).
+These commands are sent as authenticated HTTP requests and committed by the
+Spring Boot server; other connected clients receive a WebSocket revision
+announcement and fetch the latest project. This is not streaming pointer
+movement and not a CRDT/OT merge.
+
+The server takes a PostgreSQL row lock, checks effective edit permission,
+validates the command, checks `expectedRevision`, and persists both the
+resulting immutable project version and the operation ID in a single
+transaction. Identical operation-ID retries are deduplicated; using the
+same ID for different payloads returns 409. Stale versions return 409
+without altering server state. Operation IDs are not truncated with the
+ten-revision history; future retention policies must avoid compromising
+retry semantics.
+
+The React editor watches its existing history state and auto-submits only
+when the *entire* difference from the loaded baseline is provably one of
+these isolated station changes; a short debounce coalesces edits. Changes
+to line station sequences, segments, waypoints, station styling, multiple
+stations, or other metadata deliberately retain the manual full-document
+CAS save path. The collaborative toolbar also provides a standalone station
+creation action. Live edits are not allowed to overwrite a dirty local
+working copy. If clients write concurrently, the stale writer must reconcile
+or reload explicitly. Existing user permissions continue to apply.

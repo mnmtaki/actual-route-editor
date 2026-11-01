@@ -113,3 +113,65 @@ test('two browser contexts merge distinct stations and update both rendered canv
     await guest.close();
   }
 });
+
+test('two actual browser canvases converge after disjoint segment waypoint moves', async ({ browser }) => {
+  const owner = await browser.newContext();
+  const peer = await browser.newContext();
+  try {
+    const ownerName = 'pathOwner' + suffix();
+    const peerName = 'pathEditor' + suffix();
+    const ownerCsrf = await registerAndLogin(owner, ownerName);
+    const peerCsrf = await registerAndLogin(peer, peerName);
+    const seedPage = await owner.newPage();
+    await seedPage.goto(SITE);
+    const demo = await seedPage.evaluate(async () => {
+      const module = await import('/src/data/demo.ts');
+      return module.demoProject;
+    });
+    await seedPage.close();
+    const created = await write(owner, ownerCsrf, '/api/projects', {
+      name: 'Two Segments', document: demo,
+    });
+    const id = created.id;
+    await write(owner, ownerCsrf, '/api/projects/' + id + '/access-rules', {
+      username: peerName, action: 'edit', allowed: true,
+    });
+    const a = await openCanvas(owner, id);
+    const b = await openCanvas(peer, id);
+    const lineA = '[data-segment-id="a-1"] path.segment-main';
+    const lineB = '[data-segment-id="a-2"] path.segment-main';
+    await expect(a.locator(lineA).first()).toBeAttached();
+    await expect(b.locator(lineB).first()).toBeAttached();
+    const originalA = await a.locator(lineA).first().getAttribute('d');
+    const originalB = await b.locator(lineB).first().getAttribute('d');
+
+    const path = '/api/projects/' + id + '/operations/waypoint';
+    await Promise.all([
+      write(owner, ownerCsrf, path, {
+        operationId: crypto.randomUUID(), expectedRevision: 1,
+        segmentId: 'a-1', waypointId: 'w1', x: 318, y: 479,
+      }),
+      write(peer, peerCsrf, path, {
+        operationId: crypto.randomUUID(), expectedRevision: 1,
+        segmentId: 'a-2', waypointId: 'w2', x: 490, y: 267,
+      }),
+    ]);
+    for (const page of [a,b]) {
+      await expect(page.getByRole('region', { name: '协同工作区' })
+        .getByText(/本地基线 v3 · 远端 v3/)).toBeVisible({ timeout: 20000 });
+      await expect.poll(() => page.locator(lineA).first().getAttribute('d'),
+        { timeout: 10000 }).not.toEqual(originalA);
+      await expect.poll(() => page.locator(lineB).first().getAttribute('d'),
+        { timeout: 10000 }).not.toEqual(originalB);
+    }
+    const aPathA = await a.locator(lineA).first().getAttribute('d');
+    const bPathA = await b.locator(lineA).first().getAttribute('d');
+    const aPathB = await a.locator(lineB).first().getAttribute('d');
+    const bPathB = await b.locator(lineB).first().getAttribute('d');
+    expect(aPathA).toEqual(bPathA);
+    expect(aPathB).toEqual(bPathB);
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});

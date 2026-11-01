@@ -1,6 +1,7 @@
 import { CloudProjects } from "./components/CloudProjects";
 import { CollaborativePanel, type CollaborativeSession } from "./components/CollaborativePanel";
 import { cloudApi } from "./data/cloudProjectApi";
+import { createStandaloneStation } from "./data/stationLiveOperations";
 import { formatStationSpacingText } from './data/stationSpacingText';
 import { useEffect, useRef, useState } from "react";
 import { Toolbar } from "./components/Toolbar";
@@ -1456,6 +1457,13 @@ export default function App() {
         />
         {collab && <CollaborativePanel session={collab} project={history.project}
           draftActive={Boolean(drawing || roadDraft || calibration || phasePreview)}
+          onCreateStandaloneStation={(name) => {
+            const stationId = uid("station");
+            const x = view.x + view.width / 2;
+            const y = view.y + view.height / 2;
+            history.commit(current => createStandaloneStation(current, name, x, y, stationId));
+            setSelection({ type: "station", id: stationId });
+          }}
           onUpdate={setCollab}
           onLoad={(project, next) => { resetEditorForProject(project); setCollab(next); }}
           onExit={() => { setCollab(null); setNotice("已退出协同模式，当前本地工作副本保留"); }}

@@ -84,7 +84,7 @@ export function CloudProjects({ currentProject, importAsLocalCopy, onOpenCollabo
               const remote = await cloudApi.get(item.id);
               importAsLocalCopy(remote.document);
             })}>查看本地副本</button>
-            {loggedIn && item.visibility === 'public_edit' &&
+            {loggedIn && item.canEdit &&
               <button type="button" disabled={busy} onClick={() => onOpenCollaborative(item.id)}>协同编辑</button>}
           </div>
         </article>)}

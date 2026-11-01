@@ -807,6 +807,24 @@ public class ProjectController {
             if(lineId.equals(segment.path("lineId").asText())) lineSegmentCount++;
         if(lineSegmentCount!=sequence.size()-1)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"分叉或站序不一致，请使用完整工程保存");
+        // Exact chain validation: a matching count alone could hide branches
+        // or gaps, in which case splitting would corrupt station ordering.
+        java.util.Set<String> sequenceIds=new java.util.HashSet<>();
+        for(JsonNode element:sequence)
+            if(!sequenceIds.add(element.asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"线路站序存在重复车站");
+        for(int i=0;i<sequence.size()-1;i++) {
+            String a=sequence.get(i).asText(), c=sequence.get(i+1).asText();
+            int matches=0;
+            for(JsonNode segment:segments) {
+                if(!lineId.equals(segment.path("lineId").asText()))continue;
+                if(a.equals(segment.path("fromStationId").asText())
+                    && c.equals(segment.path("toStationId").asText()))matches++;
+            }
+            if(matches!=1)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"区间和站序不构成唯一连续链");
+        }
+
         for(JsonNode old:sequence)
             if(input.stationId().equals(old.asText()))
                 throw new ResponseStatusException(HttpStatus.CONFLICT,"车站已在线路中");
@@ -818,10 +836,13 @@ public class ProjectController {
             ||!source.path("source").isMissingNode()
             ||!line.path("source").isMissingNode())
             throw new ResponseStatusException(HttpStatus.CONFLICT,"复杂历史或结构区间不支持快捷拆分");
-        for(JsonNode phase:document.path("openingPhases"))
-            if(lineId.equals(phase.path("lineId").asText())
-                || phase.path("segmentIds").toString().contains(input.segmentId()))
+        for(JsonNode phase:document.path("openingPhases")) {
+            boolean referencesSegment=false;
+            for(JsonNode segmentId:phase.path("segmentIds"))
+                if(input.segmentId().equals(segmentId.asText()))referencesSegment=true;
+            if(lineId.equals(phase.path("lineId").asText()) || referencesSegment)
                 throw new ResponseStatusException(HttpStatus.CONFLICT,"分期区间不允许快捷拆分");
+        }
         if(!(source.path("waypoints") instanceof ArrayNode waypoints)
             ||input.splitWaypointIndex()>waypoints.size())
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"控制点分割位置无效");

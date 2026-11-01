@@ -283,10 +283,22 @@ public class ProjectController {
         if (record.isEmpty())
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
         var previous = jdbc.query("""
-            SELECT revision FROM cloud_project_operations WHERE project_id=? AND operation_id=?
-            """, (rs,n) -> rs.getLong("revision"), id,input.operationId());
+            SELECT revision,action,station_id,payload FROM cloud_project_operations
+            WHERE project_id=? AND operation_id=?
+            """, (rs,n) -> new Object[] {rs.getLong("revision"),rs.getString("action"),
+                rs.getString("station_id"),rs.getString("payload")}, id,input.operationId());
+        JsonNode station = input.station();
+        String stationId = station.path("id").asText("");
         if (!previous.isEmpty()) {
-            // A retry is idempotent: no revision increment or duplicate broadcast.
+            Object[] prior=previous.get(0);
+            try {
+                if (!prior[1].equals(input.type()) || !prior[2].equals(stationId)
+                    || !mapper.readTree((String)prior[3]).equals(station))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"operationId 已被不同操作使用");
+            } catch (com.fasterxml.jackson.core.JsonProcessingException error) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"操作记录损坏");
+            }
+            // An identical retry is idempotent, even if a later revision exists.
             return get(user,id);
         }
         Object[] row = record.get(0);
@@ -300,8 +312,6 @@ public class ProjectController {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"工程数据损坏");
         }
         ArrayNode stations = (ArrayNode) document.get("stations");
-        JsonNode station = input.station();
-        String stationId = station.path("id").asText("");
         if (stationId.isBlank() || stationId.length() > 128)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效车站 ID");
         int index = -1;
@@ -332,11 +342,16 @@ public class ProjectController {
                     throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效车站名称");
                 ObjectNode target=(ObjectNode)stations.get(index);
                 target.put("name",station.path("name").asText());
+                if (station.has("nameS")) {
+                    if (!station.get("nameS").isTextual() || station.get("nameS").asText().length()>200)
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效外文站名");
+                    target.put("nameS",station.get("nameS").asText());
+                } else target.remove("nameS");
                 if (station.has("nameHistory")) {
                     if (!station.get("nameHistory").isArray() || station.get("nameHistory").size()>100)
                         throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效站名历史");
                     target.set("nameHistory",station.get("nameHistory").deepCopy());
-                }
+                } else target.remove("nameHistory");
             }
             case "station.move" -> {
                 if (index == -1)
@@ -351,9 +366,9 @@ public class ProjectController {
         }
         ProjectView result = saveRevision(user,id,currentRevision,(String)row[1],json(document));
         jdbc.update("""
-            INSERT INTO cloud_project_operations(project_id,operation_id,revision,actor_id,action,station_id)
-            VALUES(?,?,?,?,?,?)
-            """, id,input.operationId(),result.revision(),user,input.type(),stationId);
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,actor_id,action,station_id,payload)
+            VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
+            """, id,input.operationId(),result.revision(),user,input.type(),stationId,station.toString());
         return result;
     }
 

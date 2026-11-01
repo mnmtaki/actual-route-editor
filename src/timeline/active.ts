@@ -103,7 +103,14 @@ export function getEditorVisibleStationsAtTime(project: ActualRouteProject, time
     if (!standalone && !getEditorVisibleFakeLinesAtStation(project, relation.stationId, time).some(line => line.id === relation.lineId)) continue
     canonicalIds.add(getCompoundStationCanonical(project, relation.stationId)?.id ?? relation.stationId)
   }
-  return project.stations.filter(station => canonicalIds.has(station.id))
+  // Standalone stations created in the editor have no station-line
+  // relation yet. They must remain visible (and selectable) on the canvas;
+  // otherwise a successfully synchronized station seems to disappear.
+  const relatedIds = new Set(project.stationLineRelations.map(item => item.stationId))
+  return project.stations.filter(station => canonicalIds.has(station.id) ||
+    (!station.free && !relatedIds.has(station.id) &&
+     !stationsWithAnySegment.has(station.id) &&
+     isActiveAt(station.openedAt, station.closedAt, time)))
 }
 export function getActiveNetworkAtTime(project: ActualRouteProject, time: string) {
   const unsortedLines = project.lines.filter(line => line.visible && isLineOperationalAt(line, time))

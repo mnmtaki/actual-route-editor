@@ -235,3 +235,64 @@ test('browser UI appends an existing station to line terminal and peer sees topo
     await peer.close();
   }
 });
+
+test('two browser canvases display a split segment and inserted station', async ({ browser }) => {
+  const owner=await browser.newContext();
+  const peer=await browser.newContext();
+  try {
+    const ownerCsrf=await registerAndLogin(owner,USERS.owner);
+    await registerAndLogin(peer,USERS.peer);
+    const bootstrap=await owner.newPage();
+    await bootstrap.goto(SITE);
+    const seed=await bootstrap.evaluate(async ()=>(await import('/src/data/demo.ts')).demoProject);
+    await bootstrap.close();
+    const created=await write(owner,ownerCsrf,'/api/projects',{
+      name:'Split-Station Collaboration',document:seed,
+    });
+    const id=created.id;
+    await write(owner,ownerCsrf,'/api/projects/'+id+'/access-rules',{
+      username:USERS.peer,action:'edit',allowed:true,
+    });
+    const a=await openCanvas(owner,id);
+    const b=await openCanvas(peer,id);
+    await a.getByLabel('待拆分区间').selectOption('a-1');
+    await a.getByLabel('区间插入位置').selectOption('0');
+    await a.getByLabel('插入车站名称').fill('协作插入站');
+    await a.getByRole('button',{name:'在区间中插入车站'}).click();
+    await expect.poll(async () => {
+      const response=await owner.request.get(API+'/api/projects/'+id);
+      const project=await response.json();
+      const line=project.document.lines.find(item=>item.id==='line-a');
+      const members=project.document.stationLineRelations;
+      const segments=project.document.geometry.segments;
+      const newStation=project.document.stations.find(station=>station.name==='协作插入站');
+      return {
+        revision:project.revision,
+        totalStations:project.document.stations.length,
+        totalSegments:segments.length,
+        sequenceLength:line.stationSequence.length,
+        originalExists:segments.some(segment=>segment.id==='a-1'),
+        hasFirst:segments.some(segment=>segment.fromStationId==='s1'
+          && segment.toStationId===newStation?.id),
+        hasSecond:segments.some(segment=>segment.fromStationId===newStation?.id
+          && segment.toStationId==='s2'),
+        hasRelation:members.some(relation=>relation.stationId===newStation?.id
+          && relation.lineId==='line-a'),
+      };
+    },{timeout:20000}).toEqual({
+      revision:2,totalStations:9,totalSegments:8,sequenceLength:5,
+      originalExists:false,hasFirst:true,hasSecond:true,hasRelation:true,
+    });
+    for(const page of [a,b]) {
+      await expect(page.getByRole('region',{name:'协同工作区'})
+        .getByText(/本地基线 v2 · 远端 v2/)).toBeVisible({timeout:20000});
+      await expect(page.locator('svg').getByText('协作插入站').first()).toBeVisible({timeout:15000});
+      await expect(page.locator('[data-layer="segments"] path.segment-main'))
+        .toHaveCount(8,{timeout:20000});
+      await expect(page.getByText('WebSocket 已连接')).toBeVisible();
+    }
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});

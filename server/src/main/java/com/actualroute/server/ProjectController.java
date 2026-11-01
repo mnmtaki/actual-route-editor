@@ -2,6 +2,8 @@ package com.actualroute.server;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -252,6 +254,116 @@ public class ProjectController {
             """, this::revisionView, id, revision, user);
         if (records.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "版本不存在");
         return records.get(0);
+    }
+
+    /**
+     * Only isolated station changes use the live protocol. Changes to line
+     * topology/relations must still be saved through the full-document CAS.
+     * A row lock serializes a read, mutation and increment across instances.
+     */
+    public record StationOperation(@NotNull UUID operationId, @NotNull Long expectedRevision,
+                                   @NotBlank String type, @NotNull JsonNode station) {}
+
+    @PostMapping("/{id}/operations")
+    @Transactional
+    public ProjectView applyStationOperation(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
+                                             @Valid @RequestBody StationOperation input) {
+        requireWritable(user, id);
+        if (input.expectedRevision() < 1 || input.expectedRevision() == Long.MAX_VALUE)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "无效的操作基线版本");
+        if (!List.of("station.create", "station.rename", "station.move").contains(input.type()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "暂不支持该实时操作");
+        if (!input.station().isObject())
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "无效的车站操作");
+        // Lock before checking idempotency or the base revision.
+        var record = jdbc.query("""
+            SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
+            """, (rs,n) -> new Object[] { rs.getLong("revision"),rs.getString("name"),
+                rs.getString("document") }, id);
+        if (record.isEmpty())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
+        var previous = jdbc.query("""
+            SELECT revision FROM cloud_project_operations WHERE project_id=? AND operation_id=?
+            """, (rs,n) -> rs.getLong("revision"), id,input.operationId());
+        if (!previous.isEmpty()) {
+            // A retry is idempotent: no revision increment or duplicate broadcast.
+            return get(user,id);
+        }
+        Object[] row = record.get(0);
+        long currentRevision = (Long) row[0];
+        if (currentRevision != input.expectedRevision())
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"操作版本已过期，请同步最新工程");
+        ObjectNode document;
+        try {
+            document = (ObjectNode) mapper.readTree((String)row[2]);
+        } catch (Exception error) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"工程数据损坏");
+        }
+        ArrayNode stations = (ArrayNode) document.get("stations");
+        JsonNode station = input.station();
+        String stationId = station.path("id").asText("");
+        if (stationId.isBlank() || stationId.length() > 128)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效车站 ID");
+        int index = -1;
+        for (int i=0; i<stations.size(); i++) {
+            if (stationId.equals(stations.get(i).path("id").asText())) { index=i; break; }
+        }
+        switch(input.type()) {
+            case "station.create" -> {
+                if (index != -1)
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"车站 ID 已存在");
+                if (!validName(station.path("name")) || !validCoord(station.path("x"))
+                    || !validCoord(station.path("y")))
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效新车站");
+                // Only standalone station creation; no implicit line topology mutation.
+                ObjectNode created = mapper.createObjectNode();
+                created.put("id",stationId);
+                created.put("name",station.path("name").asText());
+                created.put("x",station.path("x").asDouble());
+                created.put("y",station.path("y").asDouble());
+                created.put("labelOffsetX",0);
+                created.put("labelOffsetY",0);
+                stations.add(created);
+            }
+            case "station.rename" -> {
+                if (index == -1)
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"车站已不存在");
+                if (!validName(station.path("name")))
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效车站名称");
+                ObjectNode target=(ObjectNode)stations.get(index);
+                target.put("name",station.path("name").asText());
+                if (station.has("nameHistory")) {
+                    if (!station.get("nameHistory").isArray() || station.get("nameHistory").size()>100)
+                        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效站名历史");
+                    target.set("nameHistory",station.get("nameHistory").deepCopy());
+                }
+            }
+            case "station.move" -> {
+                if (index == -1)
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"车站已不存在");
+                if (!validCoord(station.path("x")) || !validCoord(station.path("y")))
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效站点坐标");
+                ObjectNode target=(ObjectNode)stations.get(index);
+                target.put("x",station.path("x").asDouble());
+                target.put("y",station.path("y").asDouble());
+            }
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"不支持的操作");
+        }
+        ProjectView result = saveRevision(user,id,currentRevision,(String)row[1],json(document));
+        jdbc.update("""
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,actor_id,action,station_id)
+            VALUES(?,?,?,?,?,?)
+            """, id,input.operationId(),result.revision(),user,input.type(),stationId);
+        return result;
+    }
+
+    private boolean validName(JsonNode value) {
+        return value.isTextual() && !value.asText().isBlank() && value.asText().length()<=200;
+    }
+
+    private boolean validCoord(JsonNode value) {
+        return value.isNumber() && Double.isFinite(value.asDouble()) &&
+            Math.abs(value.asDouble())<=1_000_000;
     }
 
     @PutMapping("/{id}")

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createEmptyProject } from './model';
+import { createEmptyProject } from './storage';
 import { serializeProject } from '../import-export/projectJson';
 import { detectStationOperation, createStandaloneStation } from './stationLiveOperations';
 

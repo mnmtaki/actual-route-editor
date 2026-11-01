@@ -22,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class AccountsAndSavesIT {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper mapper;
+    @Autowired AuthService auth;
+    @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     record Session(Cookie sessionCookie, Cookie csrfCookie) {
         Cookie[] cookies() { return new Cookie[]{sessionCookie, csrfCookie}; }
@@ -255,6 +257,84 @@ class AccountsAndSavesIT {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.revision").value(13))
             .andExpect(jsonPath("$.name").value("City-v3"));
+    }
+
+    @Test
+    void collaboratorsCanPublishButCannotManageOwnershipAndStaleWritersConflict() throws Exception {
+        Session owner = account("collabOwner");
+        Session editor = account("collabEditor");
+        Session unrelated = account("collabOther");
+        String id = createProject(owner);
+
+        UUID editorId = auth.resolve(editor.sessionCookie().getValue());
+        String editorUsername = jdbc.queryForObject(
+            "SELECT username FROM app_users WHERE id=?", String.class, editorId);
+
+        mvc.perform(get("/api/projects/" + id).cookie(editor.cookies()))
+            .andExpect(status().isNotFound());
+        mvc.perform(authorized(post("/api/projects/" + id + "/members")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("username", editorUsername))), unrelated))
+            .andExpect(status().isNotFound());
+        mvc.perform(authorized(post("/api/projects/" + id + "/members")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("username", editorUsername))), owner))
+            .andExpect(status().isCreated()).andExpect(jsonPath("$.role").value("editor"));
+        mvc.perform(authorized(post("/api/projects/" + id + "/members")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("username", editorUsername))), owner))
+            .andExpect(status().isConflict());
+
+        mvc.perform(get("/api/projects").cookie(editor.cookies()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].id").value(id))
+            .andExpect(jsonPath("$[0].role").value("editor"));
+        mvc.perform(get("/api/projects/" + id).cookie(editor.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(1));
+        mvc.perform(get("/api/projects/" + id + "/revisions").cookie(editor.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+        mvc.perform(get("/api/projects/" + id + "/members").cookie(editor.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2));
+
+        // Editor commits first: owner stale v1 request must fail with HTTP 409.
+        mvc.perform(authorized(put("/api/projects/" + id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name", "SharedEdit", "document", document(), "expectedRevision", 1))), editor))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        mvc.perform(authorized(put("/api/projects/" + id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name", "StaleOwner", "document", document(), "expectedRevision", 1))), owner))
+            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/" + id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("SharedEdit"));
+        mvc.perform(get("/api/projects/" + id + "/revisions/2").cookie(editor.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("SharedEdit"));
+
+        mvc.perform(authorized(post("/api/projects/" + id + "/restore")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "sourceRevision", 1, "expectedRevision", 2))), editor))
+            .andExpect(status().isNotFound());
+        mvc.perform(authorized(delete("/api/projects/" + id), editor))
+            .andExpect(status().isNotFound());
+        mvc.perform(authorized(post("/api/projects/" + id + "/members")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("username", editorUsername))), editor))
+            .andExpect(status().isNotFound());
+
+        mvc.perform(authorized(delete("/api/projects/" + id + "/members/" + editorId), owner))
+            .andExpect(status().isNoContent());
+        mvc.perform(get("/api/projects/" + id).cookie(editor.cookies()))
+            .andExpect(status().isNotFound());
+        mvc.perform(get("/api/projects").cookie(editor.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+        mvc.perform(authorized(put("/api/projects/" + id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name", "Revoked", "document", document(), "expectedRevision", 2))), editor))
+            .andExpect(status().isNotFound());
     }
 
     @Test

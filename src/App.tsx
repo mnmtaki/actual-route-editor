@@ -1455,6 +1455,7 @@ export default function App() {
           onChange={(e) => importBg(e.currentTarget)}
         />
         {collab && <CollaborativePanel session={collab} project={history.project}
+          draftActive={Boolean(drawing || roadDraft || calibration || phasePreview)}
           onUpdate={setCollab}
           onLoad={(project, next) => { resetEditorForProject(project); setCollab(next); }}
           onExit={() => { setCollab(null); setNotice("已退出协同模式，当前本地工作副本保留"); }}

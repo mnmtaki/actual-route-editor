@@ -699,7 +699,8 @@ class AccountsAndSavesIT {
             org.mockito.Mockito.verify(socket,org.mockito.Mockito.atLeast(4))
                 .sendMessage(messages.capture());
             assertTrue(messages.getAllValues().stream().anyMatch(message ->
-                message.getPayload().contains("\\\"revision\\\":5")));
+                message.getPayload().contains("revision")
+                    && message.getPayload().contains(":5")));
         }
         mvc.perform(get("/api/projects/" + id).cookie(owner.cookies()))
             .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(5))

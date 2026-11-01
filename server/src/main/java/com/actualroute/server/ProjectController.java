@@ -38,6 +38,7 @@ public class ProjectController {
 
     public record Summary(UUID id, String name, long revision, OffsetDateTime updatedAt, String role, String visibility, boolean canEdit) {}
     public record VisibilityRequest(@NotNull String visibility) {}
+    public record ProjectStatus(UUID id, String name, long revision, String visibility, boolean canEdit) {}
     public record RuleRequest(@NotBlank String username, @NotBlank String action, @NotNull Boolean allowed) {}
     public record AccessRule(UUID id, UUID userId, String username, String action, boolean allowed) {}
     public record RevisionSummary(long revision, String name, OffsetDateTime createdAt) {}
@@ -198,6 +199,20 @@ public class ProjectController {
             VALUES (?,1,?,CAST(? AS jsonb))
             """, id, input.name(), document);
         return get(user, id);
+    }
+
+    @GetMapping("/{id}/status")
+    public ProjectStatus status(@AuthenticationPrincipal UUID user, @PathVariable UUID id) {
+        var records = jdbc.query("""
+            SELECT p.id,p.name,p.revision,p.visibility,
+                   project_can_access(p.id,?,'edit') AS can_edit
+            FROM cloud_projects p
+            WHERE p.id=? AND project_can_access(p.id,?,'view')
+            """, (rs,n) -> new ProjectStatus(rs.getObject("id", UUID.class),
+                rs.getString("name"), rs.getLong("revision"),
+                rs.getString("visibility"), rs.getBoolean("can_edit")), user, id, user);
+        if (records.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "工程不存在");
+        return records.get(0);
     }
 
     @GetMapping("/{id}")

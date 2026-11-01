@@ -50,6 +50,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     let retryTimer: number | undefined;
     let pingTimer: number | undefined;
     let retryMs = 1000;
+    let pendingRevision = session.revision;
     const permissionLostRef = { current: false };
     setRemoteRevision(session.revision);
     setConnected(false);
@@ -57,6 +58,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
 
     async function receiveRevision(revision: number) {
       if (!alive || !Number.isSafeInteger(revision) || revision < 1) return;
+      pendingRevision = Math.max(pendingRevision, revision);
       setRemoteRevision(previous => Math.max(previous, revision));
       const current = activeSession.current;
       if (revision <= current.revision || working.current || fetching.current) return;
@@ -66,8 +68,10 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
         return;
       }
       fetching.current = true;
+      let successfullyFetched = false;
       try {
         const remote = await cloudApi.get(current.id);
+        successfullyFetched = true;
         if (!alive || activeSession.current.id !== current.id) return;
         setRemoteRevision(previous => Math.max(previous, remote.revision));
         const newest = activeSession.current;
@@ -82,6 +86,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
           baseJson: serializeProject(remote.document),
         };
         activeSession.current = next;
+        latest.current = remote.document;
         onLoadRef.current(remote.document, next);
         setMessage('已实时同步云端 v' + remote.revision);
         setError('');
@@ -89,6 +94,11 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
         if (alive) setError(e instanceof Error ? e.message : '自动获取远端工程失败');
       } finally {
         fetching.current = false;
+        // WebSocket revisions can arrive while a document fetch is in flight.
+        // Never lose the highest advertised revision; give React a turn to
+        // commit the previous auto-load before checking for the next one.
+        if (successfullyFetched && alive && pendingRevision > activeSession.current.revision)
+          window.setTimeout(() => { if (alive) void receiveRevision(pendingRevision); }, 0);
       }
     }
 

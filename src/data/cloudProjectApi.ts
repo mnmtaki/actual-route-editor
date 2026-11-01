@@ -61,7 +61,7 @@ export const cloudApi = {
   logout: () => api<{ status: string }>('/api/auth/logout', { method: 'POST' }),
   list: () => api<CloudProjectSummary[]>('/api/projects'),
   get: async (id: string) => {
-    const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; document: unknown }>(
+    const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
       `/api/projects/${encodeURIComponent(id)}`,
     );
     return { ...raw, document: parseProjectJson(JSON.stringify(raw.document)) } as CloudProject;

@@ -211,3 +211,30 @@ Tests:
   These are **network-level integration tests**, not browser-UI E2E.
 - Full browser canvas validation with two actual graphical browser contexts
   remains a separate acceptance step, as does CRDT/OT for topology editing.
+
+## Segment waypoint operations — bounded topology collaboration (V10)
+
+`POST /api/projects/{id}/operations/waypoint` accepts `operationId`,
+`expectedRevision`, `segmentId`, `waypointId`, `x` and `y`. It updates only
+the coordinate pair of an **existing** waypoint on an **existing** segment;
+it does not edit station sequences, endpoints, modes, styles, structures,
+waypoint arrays or route topology. The server checks edit authorization,
+finite bounded coordinates, idempotency and strict operation ordering.
+Changes are made under a PostgreSQL project row lock and broadcast after
+a successful commit.
+
+Concurrent waypoint moves from a stale base may be rebased only when
+**every** intervening revision is another waypoint move on a *different
+segment*. A same-segment operation, station operation, full-project CAS,
+history restore, or missing journal entry prevents the merge. Conversely,
+station operations also refuse to rebase across a waypoint operation.
+This intentionally favors safety over permissive merging.
+
+The frontend compares the whole serialized project before submitting a
+single-point move. All topology-changing modifications still use the
+existing full-project CAS path. Multiple simultaneous control-point moves
+in one local commit are not converted into a partial operation; the user
+must publish the full map. No collaborative undo or CRDT-based topology
+merging is claimed. Unit tests validate conservative detection and server
+integration tests cover disjoint merging and conflict boundaries. Browser
+E2E now also covers two rendered canvases after waypoint operations.

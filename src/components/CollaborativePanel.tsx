@@ -3,6 +3,7 @@ import type { ActualRouteProject } from '../data/model';
 import { serializeProject } from '../import-export/projectJson';
 import { cloudApi, cloudSocketUrl, CloudApiError } from '../data/cloudProjectApi';
 import { detectStationOperation } from '../data/stationLiveOperations';
+import { detectWaypointMove } from '../data/waypointLiveOperations';
 
 export interface CollaborativeSession {
   id: string;
@@ -177,7 +178,8 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     if (busy || working.current || fetching.current || permissionLost
         || draftActive) return;
     const candidate = detectStationOperation(session.baseJson, project);
-    if (!candidate) return;
+    const waypointCandidate = candidate ? null : detectWaypointMove(session.baseJson, project);
+    if (!candidate && !waypointCandidate) return;
     const snapshot = serializeProject(project);
     const attemptKey = session.id + ':' + session.revision + ':' + snapshot;
     if (lastAutoAttempt.current === attemptKey) return;
@@ -189,12 +191,15 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       lastAutoAttempt.current = attemptKey;
       working.current = true;
       setBusy(true);
-      setLiveStatus('正在同步' + (candidate.type === 'station.move' ? '车站位置' : candidate.type === 'station.rename' ? '站名' : '新增车站') + '…');
+      setLiveStatus('正在同步' + (waypointCandidate ? '区间控制点' : candidate?.type === 'station.move' ? '车站位置' : candidate?.type === 'station.rename' ? '站名' : '新增车站') + '…');
       setError('');
       const op = {
-        ...candidate, operationId: crypto.randomUUID(), expectedRevision: session.revision,
+        ...(waypointCandidate ?? candidate), operationId: crypto.randomUUID(), expectedRevision: session.revision,
       };
-      void cloudApi.stationOperation(session.id, op).then(saved => {
+      const submitted = waypointCandidate
+        ? cloudApi.moveWaypoint(session.id, op as typeof op & typeof waypointCandidate)
+        : cloudApi.stationOperation(session.id, op as Parameters<typeof cloudApi.stationOperation>[1]);
+      void submitted.then(saved => {
         setRemoteRevision(current => Math.max(current, saved.revision));
         if (serializeProject(latest.current) !== snapshot || draftInProgress.current) {
           // The server accepted the operation, but the user continued drawing
@@ -225,7 +230,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
         working.current = false;
         setBusy(false);
       });
-    }, candidate.type === 'station.move' ? 300 : 550);
+    }, waypointCandidate || candidate?.type === 'station.move' ? 300 : 550);
     return () => window.clearTimeout(timer);
   }, [project, session.id, session.baseJson, session.revision, busy, permissionLost, draftActive]);
 
@@ -296,6 +301,6 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     {error && <p role="alert" style={{ width: '100%' }}>{error}</p>}
     {message && <p role="status" style={{ width: '100%' }}>{message}</p>}
     {liveStatus && <p role="status" style={{ width: '100%' }}>{liveStatus}</p>}
-    <small style={{ width: '100%' }}>独立车站操作会自动提交；不同站点的并发操作由服务器安全合并，同站或整图更改仍需手动处理。线路拓扑继续使用完整工程保存；尚未同步鼠标轨迹。</small>
+    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。站序、端点和增删区间仍需整图发布。</small>
   </section>;
 }

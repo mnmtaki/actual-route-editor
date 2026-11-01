@@ -52,3 +52,71 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test -- --run
+
+  browser-collaboration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: actual_route
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: actual_route
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U actual_route"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: jdbc:postgresql://localhost:5432/actual_route
+      DATABASE_USER: actual_route
+      DATABASE_PASSWORD: test-password
+      ARA_COOKIE_SECURE: 'false'
+      ARA_CORS_ORIGIN: http://127.0.0.1:5173
+      VITE_ARA_API_URL: http://127.0.0.1:8080
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: server/pom.xml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm install --no-save --package-lock=false @playwright/test
+      - run: npx playwright install --with-deps chromium
+      - name: Start Java backend and Vite frontend
+        shell: bash
+        run: |
+          (cd server && mvn -B -ntp spring-boot:run > ../backend.log 2>&1) &
+          echo $! > backend.pid
+          npm run dev -- --host 127.0.0.1 > frontend.log 2>&1 &
+          echo $! > frontend.pid
+          for i in $(seq 1 100); do
+            if curl -fsS http://127.0.0.1:5173/ >/dev/null 2>&1 &&
+               curl -sS -o /dev/null http://127.0.0.1:8080/api/auth/me; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat backend.log frontend.log
+          exit 1
+      - name: Run two-browser canvas E2E
+        run: npx playwright test --config=playwright.config.mjs
+      - name: Upload browser artifacts and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collaboration-browser-e2e
+          path: |
+            test-results/
+            backend.log
+            frontend.log
+          if-no-files-found: ignore

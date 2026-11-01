@@ -41,7 +41,8 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/api/auth/register", "/api/auth/login").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/projects/public",
-                    "/api/projects/*", "/api/projects/*/revisions", "/api/projects/*/revisions/*").permitAll()
+                    "/api/projects/*", "/api/projects/*/status",
+                    "/api/projects/*/revisions", "/api/projects/*/revisions/*").permitAll()
                 .anyRequest().authenticated())
             .addFilterBefore(filter, org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter.class)
             .build();

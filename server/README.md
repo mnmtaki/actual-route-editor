@@ -264,3 +264,32 @@ The server-side integration test validates authorization, atomic updates
 to segment/relation/sequence structures, idempotent retry and conflict
 rejection. A Chromium two-context browser test validates the UI action,
 server-persisted topology and both synchronized rendered canvases.
+
+## Insert a station into an existing segment (Flyway V12)
+
+The guarded `POST /api/projects/{id}/operations/segment-split` operation
+takes the exact `expectedRevision`, a source `segmentId`, new station and
+relation IDs, two fresh segment IDs, new station name/world coordinates and
+`splitWaypointIndex` (0 through the original waypoint count). PostgreSQL
+locks the project row and updates **station, station-line membership, line
+station sequence and segment geometry atomically**, preserving the original
+waypoints in the chosen before/after order. Simple segment structure type,
+line style and mode are copied to both pieces. IDs and operation payloads
+are journaled for exact idempotent retry; reusing an ID for different
+content or splitting from an older version returns 409.
+
+This operation currently applies only to straightforward native directed
+lines, with consistent segment-to-station sequences, no branching,
+phase-specific segment membership, AARC provenance, historical segment
+line changes or structural boundary nodes. Complex structure splits still
+require the legacy local editor workflow and explicit full-cloud CAS
+publication: copying boundary nodes without computing new structure
+positions would silently corrupt segment presentation.
+
+The collaborative toolbar has a line-segment selector and a waypoint-chain
+interval selector. It inserts a new station at the midpoint of the selected
+interval, rather than allowing arbitrary cursor placement. A browser E2E
+test validates the segment split, persisted topology and both online
+canvases. Deletion, arbitrary insert geometry, cross-line transfers,
+operation-based undo and full branching topology collaboration remain
+outside this bounded endpoint.

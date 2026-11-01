@@ -31,6 +31,9 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   const [liveStatus, setLiveStatus] = useState('');
   const [appendLineId, setAppendLineId] = useState('');
   const [appendTargetId, setAppendTargetId] = useState('');
+  const [splitSegmentId, setSplitSegmentId] = useState('');
+  const [splitName, setSplitName] = useState('新车站');
+  const [splitWaypointIndex, setSplitWaypointIndex] = useState('0');
 
   const draftInProgress = useRef(draftActive);
   const latest = useRef(project);
@@ -257,6 +260,71 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
           relation.lineId === selectedAppendLine.id && relation.stationId === station.id))
     : [];
 
+  const splitEligibleSegments = project.geometry.segments.filter(segment =>
+    project.lines.some(line => line.id === segment.lineId && !line.locked
+      && !line.isFake && line.source?.format !== 'aarc') &&
+    !segment.source && !segment.structureNodes?.length &&
+    !segment.operationHistory?.length && !segment.lineHistory?.length);
+  const selectedSplitSegment = splitEligibleSegments.find(segment => segment.id === splitSegmentId);
+  const splitIndex = Number(splitWaypointIndex);
+  const splitFrom = selectedSplitSegment
+    ? project.stations.find(station => station.id === selectedSplitSegment.fromStationId) : undefined;
+  const splitTo = selectedSplitSegment
+    ? project.stations.find(station => station.id === selectedSplitSegment.toStationId) : undefined;
+  const splitChain = selectedSplitSegment && splitFrom && splitTo
+    ? [splitFrom, ...selectedSplitSegment.waypoints, splitTo] : [];
+  const splitCanApply = Boolean(selectedSplitSegment && Number.isInteger(splitIndex)
+    && splitIndex >= 0 && splitIndex < splitChain.length - 1 && splitName.trim());
+
+  async function insertStationIntoSegment() {
+    if (!splitCanApply || busy || working.current || fetching.current || permissionLost
+      || dirty || draftActive || remoteRevision > session.revision
+      || !selectedSplitSegment) return;
+    const first = splitChain[splitIndex], second = splitChain[splitIndex + 1];
+    if (!first || !second) return;
+    working.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const saved = await cloudApi.splitSegment(session.id, {
+        operationId: crypto.randomUUID(), expectedRevision: session.revision,
+        segmentId: selectedSplitSegment.id,
+        stationId: crypto.randomUUID(), relationId: crypto.randomUUID(),
+        beforeSegmentId: crypto.randomUUID(), afterSegmentId: crypto.randomUUID(),
+        stationName: splitName.trim(),
+        x: (first.x + second.x) / 2, y: (first.y + second.y) / 2,
+        splitWaypointIndex: splitIndex,
+      });
+      if (serializeProject(latest.current) !== session.baseJson || draftInProgress.current) {
+        setRemoteRevision(previous => Math.max(previous, saved.revision));
+        setError('拆分已提交，但编辑期间画布发生其他修改。已保留本地画布，请核对云端最新版。');
+        return;
+      }
+      const next = {
+        id: session.id, name: saved.name, revision: saved.revision,
+        baseJson: serializeProject(saved.document),
+      };
+      activeSession.current = next;
+      latest.current = saved.document;
+      onLoadRef.current(saved.document, next);
+      setRemoteRevision(saved.revision);
+      setSplitSegmentId('');
+      setMessage('已将区间拆为两段并新增车站，云端 v' + saved.revision);
+    } catch (e) {
+      if (e instanceof CloudApiError && e.status === 409) {
+        setRemoteRevision(previous => Math.max(previous, session.revision + 1));
+        setError('区间拆分发生版本或拓扑冲突，已保留当前画布。请同步最新版后重试。');
+      } else {
+        if (e instanceof CloudApiError && (e.status === 403 || e.status === 404))
+          setPermissionLost(true);
+        setError(e instanceof Error ? e.message : '拆分区间失败');
+      }
+    } finally {
+      working.current = false;
+      setBusy(false);
+    }
+  }
+
   async function appendExisting() {
     if (busy || working.current || fetching.current || permissionLost || dirty ||
         draftActive || remoteRevision > session.revision || !selectedAppendLine ||
@@ -381,12 +449,38 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       disabled={busy || permissionLost || dirty || draftActive || remoteRevision > session.revision
         || !selectedAppendLine || !appendTargetId}
       onClick={() => void appendExisting()}>将已有车站接到线路末端</button>
+    <label>插入车站的区间
+      <select aria-label="待拆分区间" value={splitSegmentId}
+        onChange={event => { setSplitSegmentId(event.target.value); setSplitWaypointIndex('0'); }}>
+        <option value="">选择区间</option>
+        {splitEligibleSegments.map(segment => <option key={segment.id} value={segment.id}>
+          {project.lines.find(line => line.id === segment.lineId)?.name || segment.lineId} ·
+          {project.stations.find(station => station.id === segment.fromStationId)?.name || segment.fromStationId} —
+          {project.stations.find(station => station.id === segment.toStationId)?.name || segment.toStationId}
+        </option>)}
+      </select>
+    </label>
+    <label>插入位置
+      <select aria-label="区间插入位置" value={splitWaypointIndex} onChange={event => setSplitWaypointIndex(event.target.value)}
+        disabled={!selectedSplitSegment}>
+        {splitChain.slice(0,-1).map((_,index) => <option value={String(index)} key={index}>
+          {index+1} / {splitChain.length-1} 段中点
+        </option>)}
+      </select>
+    </label>
+    <label>新站名
+      <input aria-label="插入车站名称" value={splitName} maxLength={100}
+        onChange={event => setSplitName(event.target.value)} />
+    </label>
+    <button type="button" disabled={busy || permissionLost || dirty || draftActive
+      || remoteRevision > session.revision || !splitCanApply}
+      onClick={() => void insertStationIntoSegment()}>在区间中插入车站</button>
     <button type="button" disabled={busy || permissionLost || !dirty || remoteRevision > session.revision} onClick={() => void publish()}>发布当前画布</button>
     <button type="button" disabled={busy} onClick={() => void pull()}>加载云端最新版</button>
     <button type="button" disabled={busy} onClick={onExit}>退出协同模式</button>
     {error && <p role="alert" style={{ width: '100%' }}>{error}</p>}
     {message && <p role="status" style={{ width: '100%' }}>{message}</p>}
     {liveStatus && <p role="status" style={{ width: '100%' }}>{liveStatus}</p>}
-    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。新增受控末端连接可操作级保存；任意站序、拆分、删除、分叉和环线仍需整图发布。</small>
+    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。支持受控线路末端连接和简单连续区间的插站拆分；复杂结构、分期、删除、分叉和环线仍需整图发布。</small>
   </section>;
 }

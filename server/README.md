@@ -178,3 +178,36 @@ CAS save path. The collaborative toolbar also provides a standalone station
 creation action. Live edits are not allowed to overwrite a dirty local
 working copy. If clients write concurrently, the stale writer must reconcile
 or reload explicitly. Existing user permissions continue to apply.
+
+## Disjoint-station merge and two-client verification
+
+The operation endpoint now supports conservative rebasing: a stale station
+operation may be committed against the newest project when **every**
+intervening revision is an operation on a **different station ID**. The
+project row lock serializes concurrent requests, while the operation journal
+proves that no intervening full-document save, historical restoration,
+unlogged revision or same-station change occurred. Any unsafe overlap still
+returns HTTP 409. The rebased result retains all earlier station changes,
+increments the authoritative revision and broadcasts the committed revision.
+`expectedRevision` is still required: automatic merging applies only to
+this narrow operation endpoint, never to whole-document PUT/restore.
+
+In the React collaborative workspace, an isolated station edit is allowed to
+submit even if another editor has already published an update. On successful
+merge, the client replaces the unchanged local working state with the
+authoritative merged response. If further local edits or an in-progress
+drawing appeared during the request, the local state is left untouched and
+an explicit reconcile notice appears.
+
+Tests:
+- `AccountsAndSavesIT` checks two independently authenticated editors,
+  different-station stale operations, concurrent move/rename, same-station
+  rejection, full-document save barriers, operation deduplication, and both
+  clients receiving WebSocket notifications through simulated sessions.
+- `LiveCollaborationIT` launches the real embedded Spring Boot HTTP and
+  WebSocket server, connects two separate cookie-authenticated WebSocket
+  clients, simultaneously sends station operations over HTTP and verifies
+  each client receives committed version notifications and the merged state.
+  These are **network-level integration tests**, not browser-UI E2E.
+- Full browser canvas validation with two actual graphical browser contexts
+  remains a separate acceptance step, as does CRDT/OT for topology editing.

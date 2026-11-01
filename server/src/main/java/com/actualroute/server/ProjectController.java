@@ -583,7 +583,43 @@ public class ProjectController {
         }
         if(!fromExists || !toExists)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"连接端点车站不存在");
+        // This endpoint supports only simple, contiguous native lines.
+        // Branches, gaps, and opening-phase-specific geometry must not be
+        // silently rewritten by a convenient terminal-append command.
+        if(line.path("operationHistory").isArray()
+            && !line.path("operationHistory").isEmpty())
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "含线路历史状态的工程请使用完整工程保存");
+        for(JsonNode phase:document.path("openingPhases"))
+            if(input.lineId().equals(phase.path("lineId").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "含分期工程的线路暂不支持快捷拓扑追加");
         ArrayNode segments=(ArrayNode)document.path("geometry").path("segments");
+        int matchingSegments=0;
+        for(JsonNode old:segments)
+            if(input.lineId().equals(old.path("lineId").asText())) matchingSegments++;
+        if(matchingSegments!=sequence.size()-1)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "线路拓扑不是单一连续链，不允许快捷追加");
+        java.util.Set<String> already=new java.util.HashSet<>();
+        for(JsonNode value:sequence)
+            if(!already.add(value.asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "线路站序存在重复节点");
+        for(int k=0;k<sequence.size()-1;k++) {
+            String a=sequence.get(k).asText(), c=sequence.get(k+1).asText();
+            int matching=0;
+            for(JsonNode old:segments) {
+                if(!input.lineId().equals(old.path("lineId").asText())) continue;
+                String first=old.path("fromStationId").asText();
+                String second=old.path("toStationId").asText();
+                if((a.equals(first)&&c.equals(second)) ||
+                   (a.equals(second)&&c.equals(first))) matching++;
+            }
+            if(matching!=1)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "站序与区间连接不一致，请使用完整工程保存");
+        }
         for(JsonNode segment:segments) {
             if(input.segmentId().equals(segment.path("id").asText()))
                 throw new ResponseStatusException(HttpStatus.CONFLICT,"区间 ID 冲突");

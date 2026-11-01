@@ -326,6 +326,110 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void specificAccountRulesOverridePublicDefaultsAndAllowPrivateCollaboration() throws Exception {
+        Session owner = account("ruleOwner");
+        Session friend = account("ruleFriend");
+        Session stranger = account("ruleStranger");
+        String id = createProject(owner);
+        String root = "/api/projects/" + id;
+        UUID friendId = auth.resolve(friend.sessionCookie().getValue());
+        String friendName = jdbc.queryForObject(
+            "SELECT username FROM app_users WHERE id=?", String.class, friendId);
+
+        // A private project is hidden from non-owners until explicitly authorized.
+        mvc.perform(get(root).cookie(friend.cookies())).andExpect(status().isNotFound());
+        mvc.perform(get("/api/projects").cookie(friend.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(0));
+        String grantEdit = mapper.writeValueAsString(Map.of(
+            "username", friendName, "action", "edit", "allowed", true));
+        mvc.perform(authorized(post(root + "/access-rules")
+            .contentType(MediaType.APPLICATION_JSON).content(grantEdit), friend))
+            .andExpect(status().isNotFound());
+        mvc.perform(authorized(post(root + "/access-rules")
+            .contentType(MediaType.APPLICATION_JSON).content(grantEdit), owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.allowed").value(true));
+
+        mvc.perform(get(root).cookie(friend.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.canEdit").value(true));
+        mvc.perform(get("/api/projects").cookie(friend.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$[0].canEdit").value(true))
+            .andExpect(jsonPath("$[0].visibility").value("private"));
+        mvc.perform(get(root + "/revisions").cookie(friend.cookies()))
+            .andExpect(status().isOk());
+        mvc.perform(get(root).cookie(stranger.cookies()))
+            .andExpect(status().isNotFound());
+        mvc.perform(get(root)).andExpect(status().isNotFound());
+
+        // Private collaborator writes; expectedRevision still serializes concurrent saves.
+        String write1 = mapper.writeValueAsString(Map.of(
+            "name","PrivateCollaborative","document",document(),"expectedRevision",1));
+        mvc.perform(authorized(put(root).contentType(MediaType.APPLICATION_JSON)
+            .content(write1), friend)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(2));
+        mvc.perform(authorized(put(root).contentType(MediaType.APPLICATION_JSON)
+            .content(write1), owner)).andExpect(status().isConflict());
+
+        // A specific view denial supersedes an edit grant.
+        mvc.perform(authorized(post(root + "/access-rules").contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",friendName,"action","view","allowed",false))),owner))
+            .andExpect(status().isOk());
+        mvc.perform(get(root).cookie(friend.cookies())).andExpect(status().isNotFound());
+        mvc.perform(authorized(put(root).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Denied","document",document(),"expectedRevision",2))),friend))
+            .andExpect(status().isNotFound());
+
+        // Now make the project public-edit: explicit user view denial must still win.
+        mvc.perform(authorized(put(root + "/visibility")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("visibility","public_edit"))),owner))
+            .andExpect(status().isOk());
+        mvc.perform(get(root).cookie(friend.cookies())).andExpect(status().isNotFound());
+        mvc.perform(get("/api/projects/public").cookie(friend.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath(
+                "$[?(@.id=='" + id + "')]").isEmpty());
+        mvc.perform(get(root)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.canEdit").value(false));
+        mvc.perform(get(root).cookie(stranger.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.canEdit").value(true));
+
+        // Replace view denial with view grant, then deny editing specifically.
+        mvc.perform(authorized(post(root + "/access-rules").contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",friendName,"action","view","allowed",true))),owner))
+            .andExpect(status().isOk());
+        mvc.perform(authorized(post(root + "/access-rules").contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",friendName,"action","edit","allowed",false))),owner))
+            .andExpect(status().isOk());
+        mvc.perform(get(root).cookie(friend.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.canEdit").value(false));
+        mvc.perform(authorized(put(root).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","DeniedEdit","document",document(),"expectedRevision",2))),friend))
+            .andExpect(status().isNotFound());
+        mvc.perform(get(root + "/access-rules").cookie(friend.cookies()))
+            .andExpect(status().isNotFound());
+        String rulesJson = mvc.perform(get(root + "/access-rules").cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(2))
+            .andReturn().getResponse().getContentAsString();
+        JsonNode savedRules = mapper.readTree(rulesJson);
+        String editRuleId = "";
+        for (JsonNode rule : savedRules) {
+            if (rule.get("action").asText().equals("edit"))
+                editRuleId = rule.get("id").asText();
+        }
+        assertFalse(editRuleId.isEmpty());
+        mvc.perform(authorized(delete(root + "/access-rules/" + editRuleId),friend))
+            .andExpect(status().isNotFound());
+        mvc.perform(authorized(delete(root + "/access-rules/" + editRuleId),owner))
+            .andExpect(status().isNoContent());
+        mvc.perform(get(root).cookie(friend.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.canEdit").value(true));
+    }
+
+    @Test
     void rateLimitBlocksRepeatedFailedLogins() throws Exception {
         String user = "wrong" + UUID.randomUUID().toString().replace("-", "").substring(0, 15);
         String ip = "198.51.100.77";

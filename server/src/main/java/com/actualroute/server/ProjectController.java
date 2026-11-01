@@ -670,6 +670,222 @@ public class ProjectController {
         return saved;
     }
 
+    /**
+     * Bounded topology split. The client supplies an insertion position in
+     * the existing waypoint chain; complex structure boundaries, phases,
+     * imported AARC and branched lines are explicitly excluded.
+     * Full graph state and operation journal update in one transaction.
+     */
+    public record SegmentSplitOperation(
+        @NotNull UUID operationId, @NotNull Long expectedRevision,
+        @NotBlank String segmentId, @NotBlank String stationId,
+        @NotBlank String stationName, @NotNull Double x, @NotNull Double y,
+        @NotBlank String beforeSegmentId, @NotBlank String afterSegmentId,
+        @NotBlank String relationId, @NotNull Integer splitWaypointIndex
+    ) {}
+
+    @PostMapping("/{id}/operations/segment-split")
+    @Transactional
+    public ProjectView splitSegment(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
+                                    @Valid @RequestBody SegmentSplitOperation input) {
+        requireWritable(user,id);
+        if (input.expectedRevision()<1 || input.expectedRevision()==Long.MAX_VALUE
+            || !validId(input.segmentId()) || !validId(input.stationId())
+            || !validId(input.beforeSegmentId()) || !validId(input.afterSegmentId())
+            || !validId(input.relationId()) || !validName(mapper.getNodeFactory().textNode(input.stationName()))
+            || !Double.isFinite(input.x()) || !Double.isFinite(input.y())
+            || Math.abs(input.x())>1_000_000 || Math.abs(input.y())>1_000_000
+            || input.splitWaypointIndex()<0
+            || input.segmentId().equals(input.beforeSegmentId())
+            || input.segmentId().equals(input.afterSegmentId())
+            || input.beforeSegmentId().equals(input.afterSegmentId()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效的区间拆分请求");
+
+        ObjectNode payload=mapper.createObjectNode();
+        payload.put("segmentId",input.segmentId());
+        payload.put("stationId",input.stationId());
+        payload.put("stationName",input.stationName());
+        payload.put("x",input.x());
+        payload.put("y",input.y());
+        payload.put("beforeSegmentId",input.beforeSegmentId());
+        payload.put("afterSegmentId",input.afterSegmentId());
+        payload.put("relationId",input.relationId());
+        payload.put("splitWaypointIndex",input.splitWaypointIndex());
+
+        var rows=jdbc.query("""
+            SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
+            """,(rs,n)->new Object[]{rs.getLong("revision"),rs.getString("name"),
+                rs.getString("document")},id);
+        if(rows.isEmpty())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
+
+        String resource="segment:"+input.segmentId();
+        var previous=jdbc.query("""
+            SELECT action,station_id,payload FROM cloud_project_operations
+            WHERE project_id=? AND operation_id=?
+            """,(rs,n)->new String[]{rs.getString("action"),rs.getString("station_id"),
+                rs.getString("payload")},id,input.operationId());
+        if(!previous.isEmpty()) {
+            String[] prior=previous.get(0);
+            try {
+                if(!"segment.split-station".equals(prior[0]) || !resource.equals(prior[1])
+                    || !mapper.readTree(prior[2]).equals(payload))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"operationId 已用于不同操作");
+            } catch(com.fasterxml.jackson.core.JsonProcessingException ex) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"操作记录损坏");
+            }
+            return get(user,id);
+        }
+        Object[] row=rows.get(0);
+        long revision=(Long)row[0];
+        if(revision!=input.expectedRevision())
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"线路拓扑版本冲突，请同步最新版");
+        ObjectNode document;
+        try {
+            document=(ObjectNode)mapper.readTree((String)row[2]);
+        } catch(Exception ex) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"工程 JSON 无效");
+        }
+        if(!(document.path("stations") instanceof ArrayNode stations)
+            || !(document.path("lines") instanceof ArrayNode lines)
+            || !(document.path("stationLineRelations") instanceof ArrayNode relations)
+            || !(document.path("geometry").path("segments") instanceof ArrayNode segments))
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"线路拓扑数据不完整");
+
+        ObjectNode source=null;
+        int sourceIndex=-1;
+        for(int i=0;i<segments.size();i++) {
+            JsonNode segment=segments.get(i);
+            String segmentId=segment.path("id").asText();
+            if(segmentId.equals(input.segmentId())) {
+                if(!(segment instanceof ObjectNode))
+                    throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"区间对象无效");
+                source=(ObjectNode)segment;
+                sourceIndex=i;
+            }
+            if(segmentId.equals(input.beforeSegmentId()) ||
+               segmentId.equals(input.afterSegmentId()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"新拆分区间 ID 已存在");
+        }
+        if(source==null)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"待拆区间已不存在");
+        for(JsonNode station:stations)
+            if(input.stationId().equals(station.path("id").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"车站 ID 已存在");
+        for(JsonNode relation:relations)
+            if(input.relationId().equals(relation.path("id").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"车站关联 ID 已存在");
+
+        String lineId=source.path("lineId").asText();
+        String from=source.path("fromStationId").asText();
+        String to=source.path("toStationId").asText();
+        ObjectNode line=null;
+        for(JsonNode node:lines) {
+            if(lineId.equals(node.path("id").asText())) {
+                line=(ObjectNode)node;break;
+            }
+        }
+        if(line==null || line.path("locked").asBoolean(false) ||
+           line.path("isFake").asBoolean(false) ||
+           "aarc".equals(line.path("source").path("format").asText()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"此线路不能进行实时拆分");
+        if(!(line.path("stationSequence") instanceof ArrayNode sequence) ||
+           sequence.size()<2)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"线路站序无效");
+        int insertAfter=-1;
+        for(int i=0;i<sequence.size()-1;i++)
+            if(from.equals(sequence.get(i).asText())
+                && to.equals(sequence.get(i+1).asText())) {
+                if(insertAfter>=0)
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"线路存在重复区间");
+                insertAfter=i;
+            }
+        if(insertAfter<0)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"区间方向与站序不一致");
+        int lineSegmentCount=0;
+        for(JsonNode segment:segments)
+            if(lineId.equals(segment.path("lineId").asText())) lineSegmentCount++;
+        if(lineSegmentCount!=sequence.size()-1)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"分叉或站序不一致，请使用完整工程保存");
+        for(JsonNode old:sequence)
+            if(input.stationId().equals(old.asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"车站已在线路中");
+        // No complex historical/phase/structural dependencies may be dropped.
+        if((source.path("structureNodes").isArray() && !source.path("structureNodes").isEmpty())
+            ||(source.path("operationHistory").isArray() && !source.path("operationHistory").isEmpty())
+            ||(source.path("lineHistory").isArray() && !source.path("lineHistory").isEmpty())
+            ||(line.path("operationHistory").isArray() && !line.path("operationHistory").isEmpty())
+            ||!source.path("source").isMissingNode()
+            ||!line.path("source").isMissingNode())
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"复杂历史或结构区间不支持快捷拆分");
+        for(JsonNode phase:document.path("openingPhases"))
+            if(lineId.equals(phase.path("lineId").asText())
+                || phase.path("segmentIds").toString().contains(input.segmentId()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"分期区间不允许快捷拆分");
+        if(!(source.path("waypoints") instanceof ArrayNode waypoints)
+            ||input.splitWaypointIndex()>waypoints.size())
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"控制点分割位置无效");
+
+        boolean fromExists=false,toExists=false;
+        for(JsonNode station:stations) {
+            if(from.equals(station.path("id").asText()))fromExists=true;
+            if(to.equals(station.path("id").asText()))toExists=true;
+        }
+        if(!fromExists||!toExists)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"区间端点不存在");
+        JsonNode opened=source.path("openedAt");
+        if(!opened.isTextual())opened=line.path("openedAt");
+        if(!opened.isTextual())opened=document.path("timeline").path("currentDate");
+
+        ObjectNode station=mapper.createObjectNode();
+        station.put("id",input.stationId());
+        station.put("name",input.stationName().trim());
+        station.put("x",input.x());
+        station.put("y",input.y());
+        station.put("labelOffsetX",0);
+        station.put("labelOffsetY",0);
+
+        ObjectNode relation=mapper.createObjectNode();
+        relation.put("id",input.relationId());
+        relation.put("stationId",input.stationId());
+        relation.put("lineId",lineId);
+        if(opened.isTextual())relation.put("openedAt",opened.asText());
+        else relation.putNull("openedAt");
+        relation.putNull("closedAt");
+
+        ObjectNode before=source.deepCopy();
+        ObjectNode after=source.deepCopy();
+        before.put("id",input.beforeSegmentId());
+        before.put("toStationId",input.stationId());
+        after.put("id",input.afterSegmentId());
+        after.put("fromStationId",input.stationId());
+        ArrayNode firstWaypoints=mapper.createArrayNode();
+        ArrayNode secondWaypoints=mapper.createArrayNode();
+        for(int i=0;i<waypoints.size();i++) {
+            if(i<input.splitWaypointIndex())firstWaypoints.add(waypoints.get(i).deepCopy());
+            else secondWaypoints.add(waypoints.get(i).deepCopy());
+        }
+        before.set("waypoints",firstWaypoints);
+        after.set("waypoints",secondWaypoints);
+        // Copy basic elevated/underground state and style metadata, but
+        // reject structural control nodes above: they require geometry splitting.
+        stations.add(station);
+        relations.add(relation);
+        sequence.insert(insertAfter+1,input.stationId());
+        segments.remove(sourceIndex);
+        segments.insert(sourceIndex,before);
+        segments.insert(sourceIndex+1,after);
+
+        ProjectView saved=saveRevision(user,id,revision,(String)row[1],json(document));
+        jdbc.update("""
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,actor_id,
+                action,station_id,payload)
+            VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
+            """,id,input.operationId(),saved.revision(),user,
+                "segment.split-station",resource,payload.toString());
+        return saved;
+    }
+
     private boolean validId(String id) {
         return id!=null && !id.isBlank() && id.length()<=120;
     }

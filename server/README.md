@@ -24,9 +24,11 @@ GET /api/auth/me — returns userId while the cookie is valid
 POST /api/auth/logout — revokes session, clears cookies
 GET /api/projects — user's projects
 POST /api/projects — create project
-GET /api/projects/{uuid} — load by owner or if public
-PUT /api/projects/{uuid} — require expectedRevision for atomic CAS save (owner or public_edit logged-in user)
+GET /api/projects/{uuid} — load when effective view permission allows (including private grants)
+PUT /api/projects/{uuid} — atomic CAS save by owner or effectively authorized editor
 GET /api/projects/public — discover publicly shared projects
+GET /api/projects/{uuid}/status — lightweight current revision and effective edit permission
+WS /ws/projects/{uuid} — authenticated, edit-authorized revision notifications
 PUT /api/projects/{uuid}/visibility — owner sets private / public_view / public_edit
 GET /api/projects/{uuid}/access-rules — owner lists specific user permissions
 POST /api/projects/{uuid}/access-rules — owner sets an allow/deny rule by registered username
@@ -46,16 +48,16 @@ DELETE /api/projects/{uuid} — delete
   per 15m and 50 per remote IP per 15m; register 5 per IP per hour.
   Remote IP is taken directly from the socket: do not place the service
   behind an untrusted proxy; configure proxy source IP handling separately.
-- Private project reads and writes require ownership. Public viewing may be anonymous.
-  Public editing requires a logged-in user and CSRF protection. Only owners may manage collaborators, delete a cloud project, or
-  restore its history. Version conflicts return HTTP 409 without overwriting
-  a newer save.
+- Private access can also be granted explicitly to specific registered accounts.
+  Public viewing may be anonymous; cloud updates require login, CSRF, and effective
+  edit permission. Only owners may change permissions, delete a project or restore
+  its history. Version conflicts return HTTP 409 without overwriting newer saves.
 
 ## Boundaries
 - Cloud saves remain opt-in and do not replace browser IndexedDB saves.
 - This version does not include password recovery, multi-device management,
   email verification, operation-based real-time collaboration or automatic
-  per-edit cloud syncing.
+  per-edit cloud syncing. WebSocket revision notifications are available.
 - CSRF cookie is JS-readable by design; its session binding in PostgreSQL
   prevents arbitrary cookie spoofing. XSS prevention still matters.
 - Configure a trusted proxy, API request size limits and cleanup for expired
@@ -90,8 +92,9 @@ discarded). The old invitation API is no longer exposed.
 The UI exposes sharing links (`?cloudProject=<uuid>`) and a public project
 browser. Opening a shared project in the editor creates a distinct local
 IndexedDB working copy. In collaborative mode, publishing uses expectedRevision
-to reject stale writes; the editor polls for new cloud versions about every
-four seconds. No mouse/operation-level real-time merge is implemented yet.
+to reject stale writes. The editor uses an authenticated WebSocket connection
+to receive committed revision notifications, with 30-second metadata polling
+as fallback. No mouse/operation-level real-time merge is implemented yet.
 
 ## Per-user project access grants (Flyway V7)
 
@@ -121,3 +124,27 @@ by removing the explicit allow. Conversely, `public_edit` plus a user's
 Per-user rules are not an approval mechanism and do not provide true
 operation-level real-time merge. CAS revisions still protect against
 overwriting a newer version. V7 does not modify the ten-snapshot cap.
+
+## Real-time revision notifications (single server)
+
+The frontend connects to `/ws/projects/{uuid}` after opening an editable
+shared project. This is a **server-to-client** channel, not an operation
+replication protocol. Browser connections carry the HttpOnly session cookie
+automatically: the handshake rejects untrusted `Origin`, unauthenticated
+requests and accounts without effective `edit` permission. The server
+rechecks the cookie session and edit permission on every broadcast and each
+client `ping` (sent every 30 seconds), closing revoked connections.
+
+After a cloud CAS save or restore, Spring transaction synchronization sends
+`{"type":"revision","projectId":"...","revision":N}` **only after commit**.
+Failed/conflicting writes send no event. On receiving a newer revision, clients
+load the updated document automatically **only when the local working copy
+matches its last acknowledged baseline**. If local edits are pending, the
+client preserves them and surfaces a conflict/update notice instead.
+
+The client reconnects with exponential backoff, and checks the lightweight
+`GET /api/projects/{uuid}/status` every 30 seconds to recover missed events.
+This implementation uses an in-process WebSocket room registry. Running
+multiple API instances requires Redis pub/sub or another shared event bus and
+additional session/routing verification. There is no automatic merging,
+cursor sharing or pixel-level simultaneous drawing yet.

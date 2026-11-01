@@ -857,6 +857,95 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void appendExistingStationUpdatesAllTopologyAndRejectsInvalidOrConcurrentReplays() throws Exception {
+        Session owner=account("connectOwner");
+        Session peer=account("connectPeer");
+        String id=createProject(owner);
+        UUID guestId=auth.resolve(peer.sessionCookie().getValue());
+        String username=jdbc.queryForObject("SELECT username FROM app_users WHERE id=?",
+            String.class,guestId);
+        mvc.perform(authorized(post("/api/projects/"+id+"/access-rules")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",username,"action","edit","allowed",true))),owner))
+            .andExpect(status().isOk());
+        JsonNode seed=mapper.readTree("""
+            {"version":1,"name":"Network","stations":[
+                {"id":"a","name":"A","x":10,"y":20,"labelOffsetX":0,"labelOffsetY":0},
+                {"id":"b","name":"B","x":30,"y":40,"labelOffsetX":0,"labelOffsetY":0},
+                {"id":"c","name":"C","x":50,"y":60,"labelOffsetX":0,"labelOffsetY":0}
+              ],"lines":[
+                {"id":"l1","name":"Main","color":"#335577",
+                 "stationSequence":["a","b"],"lineOrder":0,"visible":true,"locked":false,
+                 "openedAt":"2020-01-01"}
+              ],"stationLineRelations":[
+                {"id":"r-a","stationId":"a","lineId":"l1","openedAt":"2020-01-01"},
+                {"id":"r-b","stationId":"b","lineId":"l1","openedAt":"2020-01-01"}
+              ],"geometry":{"segments":[
+                {"id":"s-ab","lineId":"l1","fromStationId":"a","toStationId":"b",
+                 "mode":"straight","structureType":"underground","waypoints":[]}
+              ]},"timeline":{"currentDate":"2025-01-01"}}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("name","Network",
+                "document",seed,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        UUID operation=UUID.randomUUID();
+        String path="/api/projects/"+id+"/operations/line-append";
+        String body=mapper.writeValueAsString(Map.of(
+            "operationId",operation,"expectedRevision",2,
+            "lineId","l1","fromStationId","b","toStationId","c",
+            "segmentId","s-bc","relationId","r-c"));
+        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(body),peer))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.lines[0].stationSequence[2]").value("c"))
+            .andExpect(jsonPath("$.document.geometry.segments[1].fromStationId").value("b"))
+            .andExpect(jsonPath("$.document.geometry.segments[1].toStationId").value("c"))
+            .andExpect(jsonPath("$.document.stationLineRelations[2].stationId").value("c"));
+        // The same operation is a no-op on retry.
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(body),peer))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",operation,"expectedRevision",2,
+                "lineId","l1","fromStationId","b","toStationId","c",
+                "segmentId","different","relationId","r-c"))),peer))
+            .andExpect(status().isConflict());
+        // Same version race or stale topology is rejected.
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "lineId","l1","fromStationId","b","toStationId","c",
+                "segmentId","s-new","relationId","r-new"))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",3,
+                "lineId","l1","fromStationId","c","toStationId","a",
+                "segmentId","s-loop","relationId","r-loop"))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",3,
+                "lineId","l1","fromStationId","b","toStationId","a",
+                "segmentId","s-back","relationId","r-back"))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.geometry.segments.length()").value(2));
+        Integer journal=jdbc.queryForObject("""
+            SELECT count(*) FROM cloud_project_operations
+             WHERE project_id=? AND action='line.append-existing'
+            """,Integer.class,UUID.fromString(id));
+        assertEquals(1,journal);
+    }
+
+    @Test
     void rateLimitBlocksRepeatedFailedLogins() throws Exception {
         String user = "wrong" + UUID.randomUUID().toString().replace("-", "").substring(0, 15);
         String ip = "198.51.100.77";

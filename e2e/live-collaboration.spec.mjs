@@ -1,16 +1,26 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, request } from '@playwright/test';
 
 const API = 'http://127.0.0.1:8080';
 const SITE = 'http://127.0.0.1:5173';
 const suffix = () => Math.random().toString(36).slice(2, 11);
+const USERS = { owner: 'e2eOwner' + suffix(), peer: 'e2eEditor' + suffix() };
+const PASSWORD = 'browser-test-password-123';
+test.beforeAll(async () => {
+  const api = await request.newContext();
+  try {
+    for (const username of Object.values(USERS)) {
+      const response = await api.post(API + '/api/auth/register', {
+        data: { username, password: PASSWORD },
+      });
+      expect(response.status(), await response.text()).toBe(201);
+    }
+  } finally {
+    await api.dispose();
+  }
+});
 async function registerAndLogin(context, username) {
-  const password = 'browser-test-password-123';
-  const registered = await context.request.post(API + '/api/auth/register', {
-    data: { username, password },
-  });
-  expect(registered.status()).toBe(201);
   const logged = await context.request.post(API + '/api/auth/login', {
-    data: { username, password },
+    data: { username, password: PASSWORD },
   });
   expect(logged.status()).toBe(200);
   const cookies = await context.cookies(API);
@@ -63,8 +73,8 @@ test('two browser contexts merge distinct stations and update both rendered canv
   const owner = await browser.newContext();
   const guest = await browser.newContext();
   try {
-    const ownerName = 'browserOwner' + suffix();
-    const guestName = 'browserEditor' + suffix();
+    const ownerName = USERS.owner;
+    const guestName = USERS.peer;
     const ownerCsrf = await registerAndLogin(owner, ownerName);
     await registerAndLogin(guest, guestName);
     const ownerBootstrap = await owner.newPage();
@@ -118,8 +128,8 @@ test('two actual browser canvases converge after disjoint segment waypoint moves
   const owner = await browser.newContext();
   const peer = await browser.newContext();
   try {
-    const ownerName = 'pathOwner' + suffix();
-    const peerName = 'pathEditor' + suffix();
+    const ownerName = USERS.owner;
+    const peerName = USERS.peer;
     const ownerCsrf = await registerAndLogin(owner, ownerName);
     const peerCsrf = await registerAndLogin(peer, peerName);
     const seedPage = await owner.newPage();
@@ -180,8 +190,8 @@ test('browser UI appends an existing station to line terminal and peer sees topo
   const owner=await browser.newContext();
   const peer=await browser.newContext();
   try {
-    const ownerName='topologyOwner'+suffix();
-    const peerName='topologyPeer'+suffix();
+    const ownerName=USERS.owner;
+    const peerName=USERS.peer;
     const csrf=await registerAndLogin(owner,ownerName);
     await registerAndLogin(peer,peerName);
     const init=await owner.newPage();

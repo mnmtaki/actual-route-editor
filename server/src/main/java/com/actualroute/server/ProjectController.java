@@ -494,6 +494,150 @@ public class ProjectController {
         return saved;
     }
 
+    /**
+     * Safely extend the terminal station of an existing native line to a
+     * different station that already exists in this project. Other topology
+     * operations (splits, loops, branches, deletions) are not allowed here.
+     * All topology mutations require an exact global revision.
+     */
+    public record LineAppendOperation(@NotNull UUID operationId, @NotNull Long expectedRevision,
+                                      @NotBlank String lineId, @NotBlank String fromStationId,
+                                      @NotBlank String toStationId, @NotBlank String segmentId,
+                                      @NotBlank String relationId) {}
+
+    @PostMapping("/{id}/operations/line-append")
+    @Transactional
+    public ProjectView appendExistingStation(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
+                                             @Valid @RequestBody LineAppendOperation input) {
+        requireWritable(user,id);
+        if(input.expectedRevision()<1 || input.expectedRevision()==Long.MAX_VALUE
+            || !validId(input.lineId()) || !validId(input.fromStationId())
+            || !validId(input.toStationId()) || !validId(input.segmentId())
+            || !validId(input.relationId())
+            || input.fromStationId().equals(input.toStationId()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效的线路连接操作");
+        ObjectNode payload=mapper.createObjectNode();
+        payload.put("lineId",input.lineId());
+        payload.put("fromStationId",input.fromStationId());
+        payload.put("toStationId",input.toStationId());
+        payload.put("segmentId",input.segmentId());
+        payload.put("relationId",input.relationId());
+        String resource="line:"+input.lineId();
+        var locked=jdbc.query("""
+            SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
+            """,(rs,n)->new Object[]{rs.getLong("revision"),rs.getString("name"),
+                rs.getString("document")},id);
+        if(locked.isEmpty())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
+        var previous=jdbc.query("""
+            SELECT action,station_id,payload FROM cloud_project_operations
+             WHERE project_id=? AND operation_id=?
+            """,(rs,n)->new String[]{rs.getString("action"),rs.getString("station_id"),
+                rs.getString("payload")},id,input.operationId());
+        if(!previous.isEmpty()) {
+            String[] prior=previous.get(0);
+            try {
+                if(!"line.append-existing".equals(prior[0]) || !resource.equals(prior[1])
+                    || !mapper.readTree(prior[2]).equals(payload))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"operationId 已被其他操作使用");
+            } catch(com.fasterxml.jackson.core.JsonProcessingException ex) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"操作日志损坏");
+            }
+            return get(user,id);
+        }
+        Object[] row=locked.get(0);
+        long revision=(Long)row[0];
+        if(revision!=input.expectedRevision())
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"线路拓扑已更新，请先同步最新版");
+        ObjectNode document;
+        try {
+            document=(ObjectNode)mapper.readTree((String)row[2]);
+        } catch(Exception ex) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"工程数据损坏");
+        }
+        if(!document.path("lines").isArray() || !document.path("stations").isArray()
+            || !document.path("stationLineRelations").isArray()
+            || !document.path("geometry").path("segments").isArray())
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"工程拓扑结构无效");
+        ObjectNode line=null;
+        for(JsonNode item:document.path("lines"))
+            if(input.lineId().equals(item.path("id").asText())) {
+                if(!(item instanceof ObjectNode))
+                    throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"线路结构损坏");
+                line=(ObjectNode)item; break;
+            }
+        if(line==null || line.path("locked").asBoolean(false)
+            || line.path("isFake").asBoolean(false)
+            || line.path("source").path("format").asText().equals("aarc"))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"线路不可编辑或不支持此类连接");
+        if(!(line.path("stationSequence") instanceof ArrayNode sequence) || sequence.isEmpty()
+            || !input.fromStationId().equals(sequence.get(sequence.size()-1).asText()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"连接起点不再是线路终点");
+        for(JsonNode station:sequence)
+            if(input.toStationId().equals(station.asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"目标站已在线路中，禁止隐式环线与分叉");
+        boolean fromExists=false,toExists=false;
+        for(JsonNode station:document.path("stations")) {
+            if(input.fromStationId().equals(station.path("id").asText())) fromExists=true;
+            if(input.toStationId().equals(station.path("id").asText())) toExists=true;
+        }
+        if(!fromExists || !toExists)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"连接端点车站不存在");
+        ArrayNode segments=(ArrayNode)document.path("geometry").path("segments");
+        for(JsonNode segment:segments) {
+            if(input.segmentId().equals(segment.path("id").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"区间 ID 冲突");
+            if(input.lineId().equals(segment.path("lineId").asText()) &&
+                ((input.fromStationId().equals(segment.path("fromStationId").asText())
+                    && input.toStationId().equals(segment.path("toStationId").asText()))
+                ||(input.toStationId().equals(segment.path("fromStationId").asText())
+                    && input.fromStationId().equals(segment.path("toStationId").asText()))))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"线路区间已存在");
+        }
+        ArrayNode relations=(ArrayNode)document.path("stationLineRelations");
+        for(JsonNode rel:relations) {
+            if(input.relationId().equals(rel.path("id").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"关联 ID 冲突");
+            if(input.lineId().equals(rel.path("lineId").asText())
+                && input.toStationId().equals(rel.path("stationId").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"目标车站已有此线路关联，请改用完整工程保存");
+        }
+        JsonNode opened=line.path("openedAt");
+        if(opened.isMissingNode() || opened.isNull()) opened=document.path("timeline").path("currentDate");
+        ObjectNode relation=mapper.createObjectNode();
+        relation.put("id",input.relationId());
+        relation.put("stationId",input.toStationId());
+        relation.put("lineId",input.lineId());
+        if(opened.isTextual()) relation.put("openedAt",opened.asText()); else relation.putNull("openedAt");
+        relation.putNull("closedAt");
+        ObjectNode segment=mapper.createObjectNode();
+        segment.put("id",input.segmentId());
+        segment.put("lineId",input.lineId());
+        segment.put("fromStationId",input.fromStationId());
+        segment.put("toStationId",input.toStationId());
+        segment.put("mode","straight");
+        segment.put("structureType","underground");
+        segment.set("structureNodes",mapper.createArrayNode());
+        segment.set("waypoints",mapper.createArrayNode());
+        if(opened.isTextual()) segment.put("openedAt",opened.asText()); else segment.putNull("openedAt");
+        segment.putNull("closedAt");
+        sequence.add(input.toStationId());
+        segments.add(segment);
+        relations.add(relation);
+        ProjectView saved=saveRevision(user,id,revision,(String)row[1],json(document));
+        jdbc.update("""
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,actor_id,
+                                                 action,station_id,payload)
+            VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
+            """,id,input.operationId(),saved.revision(),user,"line.append-existing",
+            resource,payload.toString());
+        return saved;
+    }
+
+    private boolean validId(String id) {
+        return id!=null && !id.isBlank() && id.length()<=120;
+    }
+
     private boolean validName(JsonNode value) {
         return value.isTextual() && !value.asText().isBlank() && value.asText().length()<=200;
     }

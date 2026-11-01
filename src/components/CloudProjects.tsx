@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CloudRevisionHistory } from './CloudRevisionHistory';
+import { CloudAccessRules } from './CloudAccessRules';
 import type { ActualRouteProject } from '../data/model';
 import { cloudApi, CloudApiError, type CloudProjectSummary } from '../data/cloudProjectApi';
 
@@ -17,6 +18,7 @@ export function CloudProjects({ currentProject, importAsLocalCopy, onOpenCollabo
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [historyId, setHistoryId] = useState<string | null>(null);
+  const [rulesId, setRulesId] = useState<string | null>(null);
   const [publicItems, setPublicItems] = useState<CloudProjectSummary[]>([]);
   const [publicOpen, setPublicOpen] = useState(false);
   const [linkText, setLinkText] = useState('');
@@ -64,7 +66,7 @@ export function CloudProjects({ currentProject, importAsLocalCopy, onOpenCollabo
   return (
     <section aria-label="云端工程库" style={{ borderTop: '1px solid var(--border, #7775)', marginTop: 16, paddingTop: 12 }}>
       <h3>云端存档（Java 后端）</h3>
-      <p>支持私有、公开浏览和公开协作；公开协作允许所有已登录用户参与，无需邀请。</p>
+      <p>工程可设置公开权限，也可给指定账号单独允许或拒绝查看和编辑，无需邀请流程。</p>
       <div className="project-library-actions">
         <label>分享链接或工程 ID <input aria-label="共享工程链接" value={linkText} onChange={e => setLinkText(e.target.value)} /></label>
         <button type="button" disabled={busy || !linkText.trim()} onClick={() => void action(openLink)}>查看工程</button>
@@ -129,7 +131,7 @@ export function CloudProjects({ currentProject, importAsLocalCopy, onOpenCollabo
                     importAsLocalCopy(loaded.document);
                     setNotice('云端存档已导入为新的本地工程');
                   })}>导入为本地副本</button>
-                  <button type="button" disabled={busy} onClick={() => onOpenCollaborative(item.id)}>进入协同编辑</button>
+                  {item.canEdit && <button type="button" disabled={busy} onClick={() => onOpenCollaborative(item.id)}>进入协同编辑</button>}
                   {item.role === 'owner' && <button type="button" disabled={busy} onClick={() => void action(async () => {
                     if (!window.confirm('将当前编辑器工程覆盖此云端存档？本地工程不会改变。')) return;
                     await cloudApi.update(item.id, item.revision, currentProject);
@@ -155,6 +157,7 @@ export function CloudProjects({ currentProject, importAsLocalCopy, onOpenCollabo
                     await navigator.clipboard.writeText(shareUrl(item.id));
                     setNotice('分享链接已复制');
                   })}>复制分享链接</button>}
+                  {item.role === 'owner' && <button type="button" disabled={busy} onClick={() => setRulesId(current => current === item.id ? null : item.id)}>{rulesId === item.id ? '收起授权' : '指定用户授权'}</button>}
                   {item.role === 'owner' && <button type="button" disabled={busy} onClick={() => void action(async () => {
                     if (!window.confirm(`永久删除云端存档「${item.name}」？`)) return;
                     await cloudApi.delete(item.id);
@@ -162,6 +165,7 @@ export function CloudProjects({ currentProject, importAsLocalCopy, onOpenCollabo
                   })}>删除云存档</button>}
                 </div>
               </article>
+              {rulesId === item.id && item.role === 'owner' && <CloudAccessRules projectId={item.id} />}
               {historyId === item.id && <CloudRevisionHistory id={item.id} latestRevision={item.revision} onRestored={refresh} />}
               </div>
             ))}

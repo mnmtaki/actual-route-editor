@@ -43,7 +43,7 @@ async function openCanvas(context, id) {
       failedRequests,
       url: page.url(),
       body: (await page.locator('body').innerText()).slice(0, 5000),
-      crossOriginProbe: await context.request.get('http://127.0.0.1:8080/api/auth/me')
+      crossOriginProbe: await context.request.get('http://127.0.0.1:8080/api/auth/me', { headers: { Origin: SITE } })
         .then(async response => ({status: response.status(), headers: response.headers(), body: await response.text()})),
       apiUser: await page.evaluate(async () => {
         try {

@@ -10,6 +10,10 @@ export interface CloudProject extends CloudProjectSummary {
   document: ActualRouteProject;
 }
 export interface CloudIdentity { userId: string }
+export interface CloudProjectStatus { id: string; name: string; revision: number; visibility: CloudProjectSummary['visibility']; canEdit: boolean }
+export function cloudSocketUrl(id: string): string {
+  return API_BASE.replace(/^http/i, 'ws') + '/ws/projects/' + encodeURIComponent(id);
+}
 export interface CloudAccessRule {
   id: string; userId: string; username: string;
   action: 'view' | 'edit'; allowed: boolean;
@@ -99,6 +103,8 @@ export const cloudApi = {
     }),
   deleteAccessRule: (id: string, ruleId: string) =>
     api<void>(`/api/projects/${encodeURIComponent(id)}/access-rules/${encodeURIComponent(ruleId)}`, { method: 'DELETE' }),
+  status: (id: string) =>
+    api<CloudProjectStatus>(`/api/projects/${encodeURIComponent(id)}/status`),
   publicProjects: () => api<CloudProjectSummary[]>('/api/projects/public'),
   setVisibility: (id: string, visibility: CloudProjectSummary['visibility']) =>
     api<CloudProjectSummary>(`/api/projects/${encodeURIComponent(id)}/visibility`, {

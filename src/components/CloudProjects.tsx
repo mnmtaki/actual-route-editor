@@ -86,7 +86,7 @@ export function CloudProjects({ currentProject, importAsLocalCopy, onOpenCollabo
               <button type="button" disabled={busy} onClick={() => onOpenCollaborative(item.id)}>协同编辑</button>}
           </div>
         </article>)}
-      </div>
+      </div>}
       {checking ? <p role="status">正在检查云端登录状态…</p> : !loggedIn ? (
         <div>
           <label>用户名 <input aria-label="云端用户名" value={username} maxLength={40} autoComplete="username" onChange={e => setUsername(e.target.value)}/></label>

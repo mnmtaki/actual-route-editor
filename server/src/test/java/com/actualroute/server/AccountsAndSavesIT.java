@@ -615,6 +615,35 @@ class AccountsAndSavesIT {
                 "username",peerName,"action","edit","allowed",true))),owner))
             .andExpect(status().isOk());
 
+        // Simulate two independent browser WebSocket sessions using real
+        // cookie-authenticated handshake checks and mocked wire endpoints.
+        var wsHandler=org.mockito.Mockito.mock(org.springframework.web.socket.WebSocketHandler.class);
+        var wsResponse=org.mockito.Mockito.mock(org.springframework.http.server.ServerHttpResponse.class);
+        var ownerReq=new org.springframework.mock.web.MockHttpServletRequest("GET","/ws/projects/" + id);
+        ownerReq.addHeader("Origin","http://localhost:5173");
+        ownerReq.setCookies(owner.sessionCookie());
+        var peerReq=new org.springframework.mock.web.MockHttpServletRequest("GET","/ws/projects/" + id);
+        peerReq.addHeader("Origin","http://localhost:5173");
+        peerReq.setCookies(peer.sessionCookie());
+        var ownerAttrs=new java.util.HashMap<String,Object>();
+        var peerAttrs=new java.util.HashMap<String,Object>();
+        assertTrue(projectSocketHub.beforeHandshake(
+            new org.springframework.http.server.ServletServerHttpRequest(ownerReq),
+            wsResponse,wsHandler,ownerAttrs));
+        assertTrue(projectSocketHub.beforeHandshake(
+            new org.springframework.http.server.ServletServerHttpRequest(peerReq),
+            wsResponse,wsHandler,peerAttrs));
+        var ownerSocket=org.mockito.Mockito.mock(org.springframework.web.socket.WebSocketSession.class);
+        var peerSocket=org.mockito.Mockito.mock(org.springframework.web.socket.WebSocketSession.class);
+        org.mockito.Mockito.when(ownerSocket.getId()).thenReturn("owner-" + id);
+        org.mockito.Mockito.when(peerSocket.getId()).thenReturn("peer-" + id);
+        org.mockito.Mockito.when(ownerSocket.getAttributes()).thenReturn(ownerAttrs);
+        org.mockito.Mockito.when(peerSocket.getAttributes()).thenReturn(peerAttrs);
+        org.mockito.Mockito.when(ownerSocket.isOpen()).thenReturn(true);
+        org.mockito.Mockito.when(peerSocket.isOpen()).thenReturn(true);
+        projectSocketHub.afterConnectionEstablished(ownerSocket);
+        projectSocketHub.afterConnectionEstablished(peerSocket);
+
         // Both editors begin from exactly the same v1 document.
         String makeA=mapper.writeValueAsString(Map.of(
             "operationId",UUID.randomUUID(),"expectedRevision",1,"type","station.create",
@@ -664,6 +693,14 @@ class AccountsAndSavesIT {
             go.countDown();
             pool.shutdownNow();
         }
+        // Both connected clients see the winning serialized v5 event.
+        for (var socket : java.util.List.of(ownerSocket,peerSocket)) {
+            var messages=org.mockito.ArgumentCaptor.forClass(org.springframework.web.socket.TextMessage.class);
+            org.mockito.Mockito.verify(socket,org.mockito.Mockito.atLeast(4))
+                .sendMessage(messages.capture());
+            assertTrue(messages.getAllValues().stream().anyMatch(message ->
+                message.getPayload().contains("\\\"revision\\\":5")));
+        }
         mvc.perform(get("/api/projects/" + id).cookie(owner.cookies()))
             .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(5))
             .andExpect(jsonPath("$.document.stations[0].x").value(111))
@@ -693,6 +730,10 @@ class AccountsAndSavesIT {
         mvc.perform(get("/api/projects/" + id).cookie(owner.cookies()))
             .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(6))
             .andExpect(jsonPath("$.document.stations.length()").value(2));
+        projectSocketHub.afterConnectionClosed(ownerSocket,
+            org.springframework.web.socket.CloseStatus.NORMAL);
+        projectSocketHub.afterConnectionClosed(peerSocket,
+            org.springframework.web.socket.CloseStatus.NORMAL);
     }
 
     @Test

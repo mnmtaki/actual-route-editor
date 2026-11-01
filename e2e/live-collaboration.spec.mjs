@@ -29,8 +29,26 @@ async function openCanvas(context, id) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  const failedRequests = [];
+  page.on('requestfailed', request => failedRequests.push(request.url() + ' ' + request.failure()?.errorText));
   await page.goto(SITE + '/?cloudProject=' + id);
-  await expect(page.getByRole('region', { name: '协同工作区' })).toBeVisible({ timeout: 20000 });
+  try {
+    await expect(page.getByRole('region', { name: '协同工作区' })).toBeVisible({ timeout: 20000 });
+  } catch (failure) {
+    console.error('BROWSER DEBUG:', {
+      pageErrors: errors,
+      failedRequests,
+      url: page.url(),
+      body: (await page.locator('body').innerText()).slice(0, 5000),
+      apiUser: await page.evaluate(async () => {
+        try {
+          const response = await fetch('http://127.0.0.1:8080/api/auth/me', {credentials:'include'});
+          return {status: response.status, body: await response.text()};
+        } catch(error) { return String(error); }
+      }),
+    });
+    throw failure;
+  }
   await expect(page.getByText('WebSocket 已连接')).toBeVisible({ timeout: 20000 });
   expect(errors).toEqual([]);
   return page;

@@ -238,3 +238,29 @@ must publish the full map. No collaborative undo or CRDT-based topology
 merging is claimed. Unit tests validate conservative detection and server
 integration tests cover disjoint merging and conflict boundaries. Browser
 E2E now also covers two rendered canvases after waypoint operations.
+
+## Native line topology: append an existing station (V11)
+
+The authenticated `POST /api/projects/{id}/operations/line-append` takes
+`operationId`, `expectedRevision`, `lineId`, `fromStationId`,
+`toStationId`, `segmentId` and `relationId`. Unlike isolated station
+and waypoint moves, a topology mutation **requires an exact project
+revision** and is never automatically rebased. The endpoint atomically
+appends the target station to the line's station sequence, creates a
+straight underground segment and a station-line membership, and logs
+the operation in the shared journal. It broadcasts only after commit.
+Retries with the same ID and identical payload are idempotent.
+
+This narrow endpoint intentionally refuses: non-terminal anchors,
+already-member targets, duplicate ID/segments, locked/AARC/fake lines,
+inconsistent or branched segment chains, opening-phase-specific topology,
+and any stale revision. Split, delete, ring creation and arbitrary branch
+changes remain full-document CAS operations until their dependency graph,
+phase semantics and inverse operations can be validated. The editor offers
+a line/target selector inside the collaborative workspace for this limited
+append operation.
+
+The server-side integration test validates authorization, atomic updates
+to segment/relation/sequence structures, idempotent retry and conflict
+rejection. A Chromium two-context browser test validates the UI action,
+server-persisted topology and both synchronized rendered canvases.

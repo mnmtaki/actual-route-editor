@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ActualRouteProject } from '../data/model';
 import { serializeProject } from '../import-export/projectJson';
 import { cloudApi, cloudSocketUrl, CloudApiError } from '../data/cloudProjectApi';
+import { detectStationOperation } from '../data/stationLiveOperations';
 
 export interface CollaborativeSession {
   id: string;
@@ -10,10 +11,11 @@ export interface CollaborativeSession {
   baseJson: string;
 }
 
-export function CollaborativePanel({ session, project, draftActive, onUpdate, onLoad, onExit }: {
+export function CollaborativePanel({ session, project, draftActive, onCreateStandaloneStation, onUpdate, onLoad, onExit }: {
   session: CollaborativeSession;
   project: ActualRouteProject;
   draftActive: boolean;
+  onCreateStandaloneStation: (name: string) => void;
   onUpdate: (next: CollaborativeSession) => void;
   onLoad: (project: ActualRouteProject, next: CollaborativeSession) => void;
   onExit: () => void;
@@ -24,6 +26,8 @@ export function CollaborativePanel({ session, project, draftActive, onUpdate, on
   const [error, setError] = useState('');
   const [connected, setConnected] = useState(false);
   const [permissionLost, setPermissionLost] = useState(false);
+  const [newStationName, setNewStationName] = useState('新车站');
+  const [liveStatus, setLiveStatus] = useState('');
 
   const draftInProgress = useRef(draftActive);
   const latest = useRef(project);
@@ -31,6 +35,7 @@ export function CollaborativePanel({ session, project, draftActive, onUpdate, on
   const onLoadRef = useRef(onLoad);
   const working = useRef(false);
   const fetching = useRef(false);
+  const lastAutoAttempt = useRef('');
   draftInProgress.current = draftActive;
   latest.current = project;
   activeSession.current = session;
@@ -166,6 +171,55 @@ export function CollaborativePanel({ session, project, draftActive, onUpdate, on
     };
   }, [session.id]);
 
+  // Stage-one operation protocol: auto-send only changes provably isolated
+  // to a single station. Complex topology and compound edits keep manual CAS.
+  useEffect(() => {
+    if (busy || working.current || fetching.current || permissionLost
+        || draftActive || remoteRevision > session.revision) return;
+    const candidate = detectStationOperation(session.baseJson, project);
+    if (!candidate) return;
+    const snapshot = serializeProject(project);
+    const attemptKey = session.id + ':' + session.revision + ':' + snapshot;
+    if (lastAutoAttempt.current === attemptKey) return;
+    const timer = window.setTimeout(() => {
+      if (working.current || fetching.current) return;
+      // A new local action might have happened during the debounce window.
+      if (serializeProject(latest.current) !== snapshot
+          || activeSession.current.revision !== session.revision) return;
+      lastAutoAttempt.current = attemptKey;
+      working.current = true;
+      setBusy(true);
+      setLiveStatus('正在同步' + (candidate.type === 'station.move' ? '车站位置' : candidate.type === 'station.rename' ? '站名' : '新增车站') + '…');
+      setError('');
+      const op = {
+        ...candidate, operationId: crypto.randomUUID(), expectedRevision: session.revision,
+      };
+      void cloudApi.stationOperation(session.id, op).then(saved => {
+        const next = {
+          id: session.id, name: saved.name, revision: saved.revision,
+          baseJson: serializeProject(saved.document),
+        };
+        activeSession.current = next;
+        onUpdate(next);
+        setRemoteRevision(current => Math.max(current, saved.revision));
+        setLiveStatus('已自动同步至 v' + saved.revision);
+      }).catch(e => {
+        if (e instanceof CloudApiError && e.status === 409) {
+          setRemoteRevision(current => Math.max(current, session.revision + 1));
+          setError('车站操作发生版本冲突，已保留本地修改。请导出备份后再加载云端最新版。');
+        } else {
+          if (e instanceof CloudApiError && (e.status === 403 || e.status === 404)) setPermissionLost(true);
+          setError(e instanceof Error ? e.message : '车站操作同步失败，请手动处理');
+        }
+        setLiveStatus('自动同步未完成');
+      }).finally(() => {
+        working.current = false;
+        setBusy(false);
+      });
+    }, candidate.type === 'station.move' ? 300 : 550);
+    return () => window.clearTimeout(timer);
+  }, [project, session.id, session.baseJson, session.revision, remoteRevision, busy, permissionLost, draftActive, onUpdate]);
+
   async function publish() {
     if (busy || permissionLost || remoteRevision > session.revision || !dirty) return;
     working.current = true;
@@ -223,11 +277,16 @@ export function CollaborativePanel({ session, project, draftActive, onUpdate, on
     <span>本地基线 v{session.revision} · 远端 v{remoteRevision}</span>
     <span>{dirty ? '● 未发布修改' : draftActive ? '绘制操作进行中' : '✓ 与已加载版本一致'}</span>
     <span>{permissionLost ? '协作权限已失效' : connected ? 'WebSocket 已连接' : '实时连接中断 · 30 秒兜底检查'}</span>
+    <label>新增独立车站 <input aria-label="新车站名称" value={newStationName} maxLength={100}
+      onChange={event => setNewStationName(event.target.value)} /></label>
+    <button type="button" disabled={busy || permissionLost || dirty || draftActive || remoteRevision > session.revision || !newStationName.trim()}
+      onClick={() => onCreateStandaloneStation(newStationName.trim())}>新增独立车站</button>
     <button type="button" disabled={busy || permissionLost || !dirty || remoteRevision > session.revision} onClick={() => void publish()}>发布当前画布</button>
     <button type="button" disabled={busy} onClick={() => void pull()}>加载云端最新版</button>
     <button type="button" disabled={busy} onClick={onExit}>退出协同模式</button>
     {error && <p role="alert" style={{ width: '100%' }}>{error}</p>}
     {message && <p role="status" style={{ width: '100%' }}>{message}</p>}
-    <small style={{ width: '100%' }}>发布后实时通知其他在线协作者；仅在对方没有未发布修改时自动加载。尚未实现逐操作合并与鼠标位置同步。</small>
+    {liveStatus && <p role="status" style={{ width: '100%' }}>{liveStatus}</p>}
+    <small style={{ width: '100%' }}>单独新增车站、改名、移动可自动提交操作；修改线路拓扑或其他复杂内容时仍需手动发布完整工程。并发写入会检查版本；暂不自动合并或同步鼠标轨迹。</small>
   </section>;
 }

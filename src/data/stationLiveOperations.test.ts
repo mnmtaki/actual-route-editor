@@ -2,10 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { createEmptyProject } from './storage';
 import { serializeProject } from '../import-export/projectJson';
 import { detectStationOperation, createStandaloneStation } from './stationLiveOperations';
+import { getEditorVisibleStationsAtTime } from '../timeline/active';
 
 describe('station operation isolation', () => {
   const base = createEmptyProject();
   const first = createStandaloneStation(base,'Station A',100,200,'sta-one');
+  it('shows an unconnected station on the editor canvas but not a free AARC control point', () => {
+    expect(getEditorVisibleStationsAtTime(first, first.timeline.currentDate)
+      .map(station => station.id)).toContain('sta-one');
+    const free = { ...first, stations: first.stations.map(station => ({ ...station, free: true })) };
+    expect(getEditorVisibleStationsAtTime(free, first.timeline.currentDate)
+      .map(station => station.id)).not.toContain('sta-one');
+  });
   it('recognizes standalone station additions', () => {
     expect(detectStationOperation(serializeProject(base),first)).toMatchObject({
       type:'station.create',station:{id:'sta-one',name:'Station A',x:100,y:200},

@@ -24,11 +24,10 @@ GET /api/auth/me — returns userId while the cookie is valid
 POST /api/auth/logout — revokes session, clears cookies
 GET /api/projects — user's projects
 POST /api/projects — create project
-GET /api/projects/{uuid} — load (owner or invited editor)
-GET /api/projects/{uuid}/members — list owner and invited editors
-POST /api/projects/{uuid}/members — owner invites existing username
-DELETE /api/projects/{uuid}/members/{userId} — owner removes collaborator
-PUT /api/projects/{uuid} — require expectedRevision for atomic CAS save
+GET /api/projects/{uuid} — load by owner or if public
+PUT /api/projects/{uuid} — require expectedRevision for atomic CAS save (owner or public_edit logged-in user)
+GET /api/projects/public — discover publicly shared projects
+PUT /api/projects/{uuid}/visibility — owner sets private / public_view / public_edit
 GET /api/projects/{uuid}/revisions — list ten most recent snapshots
 GET /api/projects/{uuid}/revisions/{revision} — download a retained snapshot
 POST /api/projects/{uuid}/restore — sourceRevision + expectedRevision, restores as a NEW revision
@@ -44,8 +43,8 @@ DELETE /api/projects/{uuid} — delete
   per 15m and 50 per remote IP per 15m; register 5 per IP per hour.
   Remote IP is taken directly from the socket: do not place the service
   behind an untrusted proxy; configure proxy source IP handling separately.
-- Project reads and CAS saves are scoped to the owner or explicitly invited
-  editors. Only owners may manage collaborators, delete a cloud project, or
+- Private project reads and writes require ownership. Public viewing may be anonymous.
+  Public editing requires a logged-in user and CSRF protection. Only owners may manage collaborators, delete a cloud project, or
   restore its history. Version conflicts return HTTP 409 without overwriting
   a newer save.
 
@@ -73,22 +72,20 @@ DELETE /api/projects/{uuid} — delete
   manually saved and restored versions, count toward the ten-snapshot limit.
 - Local IndexedDB saves and downloaded JSON backups are unaffected.
 
-## Initial multi-user editing (revision-level collaboration)
-1. Owner creates a cloud project in the editor project library.
-2. Owner expands **共享成员** and invites a registered username.
-3. Both owner and invited editor can see the cloud project; choose **进入协同编辑**.
-4. A **separate local IndexedDB copy** is created for each editor. Local drawing
-   is not automatically published. Press **发布当前画布** to save the entire JSON
-   against the revision that was loaded.
-5. Every ~4 seconds the browser polls the project revision. On a new version,
-   an update indicator appears. Press **加载云端最新版** to load it into the
-   current canvas. If local changes exist, the editor warns before replacing them.
-6. If another editor published first, the stale writer's PUT returns HTTP 409.
-   The client preserves its local working copy and does **not** overwrite remote.
-7. Owner can revoke access immediately for subsequent server operations.
+## Public access and early collaboration
 
-This is **NOT** pixel-level/cursor-level multiplayer or an OT/CRDT merge:
-remote changes are shown after saving and refreshing, and concurrent edits to
-different stations are not automatically merged. Only owner may restore an old
-history snapshot or delete the shared project. All existing revision retention
-rules (10 snapshots) still apply.
+New projects default to `private`. Owners may change visibility at any time:
+- `private`: owner only.
+- `public_view`: anyone, including anonymous visitors, may view by shared link, browse and download a local copy. Only owner can publish.
+- `public_edit`: anyone may view; any authenticated account may publish a complete working copy.
+
+Visibility uses the database, not client-side controls. Owners alone may change
+visibility, restore revisions or permanently delete projects. The old
+invitation/member table is removed by Flyway V6 (existing invitations are
+discarded). The old invitation API is no longer exposed.
+
+The UI exposes sharing links (`?cloudProject=<uuid>`) and a public project
+browser. Opening a shared project in the editor creates a distinct local
+IndexedDB working copy. In collaborative mode, publishing uses expectedRevision
+to reject stale writes; the editor polls for new cloud versions about every
+four seconds. No mouse/operation-level real-time merge is implemented yet.

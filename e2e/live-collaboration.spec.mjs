@@ -175,3 +175,53 @@ test('two actual browser canvases converge after disjoint segment waypoint moves
     await peer.close();
   }
 });
+
+test('browser UI appends an existing station to line terminal and peer sees topology', async ({ browser }) => {
+  const owner=await browser.newContext();
+  const peer=await browser.newContext();
+  try {
+    const ownerName='topologyOwner'+suffix();
+    const peerName='topologyPeer'+suffix();
+    const csrf=await registerAndLogin(owner,ownerName);
+    await registerAndLogin(peer,peerName);
+    const init=await owner.newPage();
+    await init.goto(SITE);
+    const demo=await init.evaluate(async () => (await import('/src/data/demo.ts')).demoProject);
+    await init.close();
+    const created=await write(owner,csrf,'/api/projects',{
+      name:'Topology Collaboration',document:demo,
+    });
+    const id=created.id;
+    await write(owner,csrf,'/api/projects/'+id+'/access-rules',{
+      username:peerName,action:'edit',allowed:true,
+    });
+    const a=await openCanvas(owner,id);
+    const b=await openCanvas(peer,id);
+    await a.getByLabel('待扩展线路').selectOption('line-a');
+    await a.getByLabel('连接目标车站').selectOption('s5');
+    await a.getByRole('button',{name:'将已有车站接到线路末端'}).click();
+    await expect.poll(async () => {
+      const result=await owner.request.get(API+'/api/projects/'+id);
+      const state=await result.json();
+      return {
+        revision:state.revision,
+        sequence:state.document.lines.find(line => line.id==='line-a').stationSequence,
+        segmentCount:state.document.geometry.segments.length,
+        membership:state.document.stationLineRelations.some(rel=>
+          rel.lineId==='line-a' && rel.stationId==='s5'),
+      };
+    },{timeout:20000}).toEqual({
+      revision:2,sequence:['s1','s2','s3','s4','s5'],segmentCount:8,membership:true,
+    });
+    for(const page of [a,b]) {
+      await expect(page.getByRole('region',{name:'协同工作区'})
+        .getByText(/本地基线 v2 · 远端 v2/)).toBeVisible({timeout:20000});
+      await expect(page.locator('[data-layer="segments"] path.segment-main'))
+        .toHaveCount(8,{timeout:20000});
+      await expect(page.getByText('WebSocket 已连接')).toBeVisible();
+    }
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});

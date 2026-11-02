@@ -672,7 +672,7 @@ public class ProjectController {
     public record LineAppendOperation(@NotNull UUID operationId, @NotNull Long expectedRevision,
                                       @NotBlank String lineId, @NotBlank String fromStationId,
                                       @NotBlank String toStationId, @NotBlank String segmentId,
-                                      @NotBlank String relationId) {}
+                                      @NotBlank String relationId, String openingPhaseId) {}
 
     @PostMapping("/{id}/operations/line-append")
     @Transactional
@@ -683,6 +683,7 @@ public class ProjectController {
             || !validId(input.lineId()) || !validId(input.fromStationId())
             || !validId(input.toStationId()) || !validId(input.segmentId())
             || !validId(input.relationId())
+            || (input.openingPhaseId()!=null && !validId(input.openingPhaseId()))
             || input.fromStationId().equals(input.toStationId()))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效的线路连接操作");
         ObjectNode payload=mapper.createObjectNode();
@@ -691,6 +692,7 @@ public class ProjectController {
         payload.put("toStationId",input.toStationId());
         payload.put("segmentId",input.segmentId());
         payload.put("relationId",input.relationId());
+        if(input.openingPhaseId()!=null)payload.put("openingPhaseId",input.openingPhaseId());
         String resource="line:"+input.lineId();
         var locked=jdbc.query("""
             SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
@@ -759,10 +761,21 @@ public class ProjectController {
             && !line.path("operationHistory").isEmpty())
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "含线路历史状态的工程请使用完整工程保存");
-        for(JsonNode phase:document.path("openingPhases"))
-            if(input.lineId().equals(phase.path("lineId").asText()))
+        ObjectNode targetPhase=null;
+        for(JsonNode phase:document.path("openingPhases")) {
+            if(!input.lineId().equals(phase.path("lineId").asText())) continue;
+            if(input.openingPhaseId()==null
+                || !input.openingPhaseId().equals(phase.path("id").asText())
+                || targetPhase!=null || !(phase instanceof ObjectNode object)
+                || !(phase.path("segmentIds") instanceof ArrayNode)
+                || !(phase.path("stationRelationIds") instanceof ArrayNode)
+                || !phase.path("openedAt").isTextual())
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "含分期工程的线路暂不支持快捷拓扑追加");
+                    "分期线路必须指定唯一且完整的目标分期");
+            targetPhase=object;
+        }
+        if(input.openingPhaseId()!=null && targetPhase==null)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"指定分期不存在");
         ArrayNode segments=(ArrayNode)document.path("geometry").path("segments");
         int matchingSegments=0;
         for(JsonNode old:segments)
@@ -807,7 +820,7 @@ public class ProjectController {
                 && input.toStationId().equals(rel.path("stationId").asText()))
                 throw new ResponseStatusException(HttpStatus.CONFLICT,"目标车站已有此线路关联，请改用完整工程保存");
         }
-        JsonNode opened=line.path("openedAt");
+        JsonNode opened=targetPhase!=null ? targetPhase.path("openedAt") : line.path("openedAt");
         if(opened.isMissingNode() || opened.isNull()) opened=document.path("timeline").path("currentDate");
         ObjectNode relation=mapper.createObjectNode();
         relation.put("id",input.relationId());
@@ -829,6 +842,10 @@ public class ProjectController {
         sequence.add(input.toStationId());
         segments.add(segment);
         relations.add(relation);
+        if(targetPhase!=null) {
+            ((ArrayNode)targetPhase.path("segmentIds")).add(input.segmentId());
+            ((ArrayNode)targetPhase.path("stationRelationIds")).add(input.relationId());
+        }
         ProjectView saved=saveRevision(user,id,revision,(String)row[1],json(document));
         jdbc.update("""
             INSERT INTO cloud_project_operations(project_id,operation_id,revision,actor_id,

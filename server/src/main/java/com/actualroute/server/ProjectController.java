@@ -1095,6 +1095,17 @@ public class ProjectController {
         }
         if(relationCount!=1)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"车站成员关系不唯一");
+        String removedRelationId=relations.get(relationIndex).path("id").asText();
+        for(JsonNode phase:document.path("openingPhases")) {
+            for(String key:java.util.List.of("stationRelationIds","overriddenStationRelationIds"))
+                for(JsonNode value:phase.path(key))
+                    if(removedRelationId.equals(value.asText()))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,"分期引用了车站关联");
+        }
+        for(JsonNode event:document.path("operationEvents"))
+            for(JsonNode value:event.path("stationRelationIds"))
+                if(removedRelationId.equals(value.asText()))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"运营事件引用了车站关联");
         // Never remove a shared transfer station or a referenced node globally.
         boolean referenced=false;
         for(JsonNode lineNode:lines) {
@@ -1138,6 +1149,8 @@ public class ProjectController {
         sequence.remove(position);
         relations.remove(relationIndex);
         if(safelyRemoveStation)stations.remove(stationIndex);
+        else if(input.lineId().equals(station.path("orientationAnchorLineId").asText()))
+            station.remove("orientationAnchorLineId");
 
         ProjectView saved=saveRevision(user,id,revision,(String)row[1],json(document));
         jdbc.update("""

@@ -74,7 +74,10 @@ export function detectCanvasLineAppend(baseJson: string, project: ActualRoutePro
       relation.lineId !== line.id || relation.stationId !== toStationId ||
       segment.lineId !== line.id || segment.fromStationId !== fromStationId ||
       segment.toStationId !== toStationId || segment.waypoints.length !== 0 ||
-      segment.mode !== 'straight') return null;
+      segment.mode !== 'straight' || segment.structureType !== 'underground' ||
+      (segment.structureNodes?.length ?? 0) !== 0 || segment.source ||
+      segment.lineStyleId !== undefined || segment.operationHistory?.length ||
+      segment.lineHistory?.length || segment.cornerRadius !== undefined) return null;
   return { lineId: line.id, fromStationId, toStationId,
     segmentId: segment.id, relationId: relation.id };
 }
@@ -132,6 +135,15 @@ export function detectCanvasSegmentSplit(baseJson: string, project: ActualRouteP
   const second=added.find(segment=>segment.fromStationId===station.id && segment.toStationId===source.toStationId);
   if (!first || !second || first.lineId!==line.id || second.lineId!==line.id ||
       !equal(first.waypoints.concat(second.waypoints),source.waypoints) ||
+      ![first,second].every(part =>
+        part.mode === source.mode &&
+        part.structureType === source.structureType &&
+        part.lineStyleId === source.lineStyleId &&
+        part.cornerRadius === source.cornerRadius &&
+        part.openedAt === source.openedAt &&
+        part.closedAt === source.closedAt &&
+        (part.structureNodes?.length ?? 0) === 0 &&
+        !part.source && !part.operationHistory?.length && !part.lineHistory?.length) ||
       !before.geometry.segments.filter(item=>item.id!==source.id).every(item=>
         after.geometry.segments.some(current=>equal(item,current)))) return null;
   return { segmentId:source.id, stationId:station.id, stationName:station.name,

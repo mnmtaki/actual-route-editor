@@ -1131,6 +1131,62 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void canvasMiddleStationRemovalPreservesStraightAndSmoothGeometry() throws Exception {
+        for(String mode:java.util.List.of("straight","smooth")) {
+            Session owner=account("deleteCanvas");
+            String id=createProject(owner);
+            var doc=mapper.readTree("""
+                {"version":1,"name":"Canvas Removal",
+                 "stations":[{"id":"a","name":"A","x":0,"y":0},
+                             {"id":"b","name":"B","x":50,"y":5},
+                             {"id":"c","name":"C","x":100,"y":0}],
+                 "lines":[{"id":"line","name":"L","color":"#abcdef",
+                           "stationSequence":["a","b","c"],"lineOrder":0,
+                           "visible":true,"locked":false}],
+                 "stationLineRelations":[{"id":"ra","lineId":"line","stationId":"a"},
+                                         {"id":"rb","lineId":"line","stationId":"b"},
+                                         {"id":"rc","lineId":"line","stationId":"c"}],
+                 "geometry":{"segments":[
+                   {"id":"ab","lineId":"line","fromStationId":"a",
+                    "toStationId":"b","mode":"straight","structureType":"underground",
+                    "waypoints":[{"id":"wa","x":25,"y":3,"type":"smooth"}]},
+                   {"id":"bc","lineId":"line","fromStationId":"b",
+                    "toStationId":"c","mode":"straight","structureType":"underground",
+                    "waypoints":[{"id":"wc","x":75,"y":3,"type":"smooth"}]}]},
+                 "openingPhases":[],"operationEvents":[]}
+                """);
+            ((com.fasterxml.jackson.databind.node.ObjectNode)doc.path("geometry").path("segments").get(0)).put("mode",mode);
+            ((com.fasterxml.jackson.databind.node.ObjectNode)doc.path("geometry").path("segments").get(1)).put("mode",mode);
+            mvc.perform(authorized(put("/api/projects/"+id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of(
+                    "name","Canvas Removal","document",doc,"expectedRevision",1))),owner))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+            UUID operationId=UUID.randomUUID();
+            String body=mapper.writeValueAsString(splitPayload(
+                "operationId",operationId,"expectedRevision",2,
+                "lineId","line","stationId","b",
+                "beforeSegmentId","ab","afterSegmentId","bc",
+                "mergedSegmentId","merged","preservedWaypointId","middle",
+                "canvasSemantics",true));
+            String endpoint="/api/projects/"+id+"/operations/remove-middle-station";
+            mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+                .content(body),owner))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.revision").value(3))
+                .andExpect(jsonPath("$.document.geometry.segments[0].mode").value("smooth"))
+                .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[1].type")
+                    .value(mode.equals("straight")?"corner":"smooth"))
+                .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[0].type")
+                    .value(mode.equals("straight")?"corner":"smooth"))
+                .andExpect(jsonPath("$.document.stations.length()").value(2));
+            mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+                .content(body),owner))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        }
+    }
+
+    @Test
     void removeMiddleStationMergesCompatibleSegmentsPreservesGeometryAndRejectsStale() throws Exception {
         Session owner=account("removeOwner");
         Session peer=account("removePeer");

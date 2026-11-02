@@ -1,6 +1,6 @@
 import type { ActualRouteProject } from './model';
 import { serializeProject } from '../import-export/projectJson';
-import type { CloudLineAppend, CloudSegmentSplit, CloudMiddleStationRemoval } from './cloudProjectApi';
+import type { CloudLineAppend, CloudSegmentSplit, CloudMiddleStationRemoval, CloudNewLineStation } from './cloudProjectApi';
 
 /**
  * The backend's line-append endpoint intentionally supports only an existing,
@@ -262,4 +262,85 @@ export function detectCanvasMiddleStationRemoval(baseJson: string, project: Actu
     beforeSegmentId:first.id, afterSegmentId:second.id,
     mergedSegmentId:merged.id, preservedWaypointId:center.id,
     canvasSemantics:true };
+}
+
+/**
+ * Recognize exactly one ordinary continuous-drawing station creation.
+ * Every new resource is transmitted unmodified and committed atomically by
+ * Java, including draft waypoints and one explicit opening phase.
+ */
+export function detectCanvasNewLineStation(baseJson: string, project: ActualRouteProject):
+  Omit<CloudNewLineStation, 'operationId' | 'expectedRevision'> | null {
+  let before: ActualRouteProject;
+  try { before=JSON.parse(baseJson) as ActualRouteProject; } catch { return null; }
+  const after=JSON.parse(serializeProject(project)) as ActualRouteProject;
+  if(!equal({...before,stations:[],lines:[],stationLineRelations:[],
+      openingPhases:[],geometry:{...before.geometry,segments:[]}},
+    {...after,stations:[],lines:[],stationLineRelations:[],
+      openingPhases:[],geometry:{...after.geometry,segments:[]}})) return null;
+  if(after.stations.length!==before.stations.length+1 ||
+     after.stationLineRelations.length!==before.stationLineRelations.length+1 ||
+     after.lines.length!==before.lines.length ||
+     after.openingPhases.length!==before.openingPhases.length ||
+     !before.stations.every((station,i)=>equal(station,after.stations[i])) ||
+     !before.stationLineRelations.every((relation,i)=>equal(relation,after.stationLineRelations[i])) ||
+     !before.geometry.segments.every((segment,i)=>equal(segment,after.geometry.segments[i]))) return null;
+  const station=after.stations.at(-1),relation=after.stationLineRelations.at(-1);
+  if(!station || !relation || !station.id || !station.name.trim() ||
+     !Number.isFinite(station.x) || !Number.isFinite(station.y) ||
+     !Number.isFinite(station.labelOffsetX) || !Number.isFinite(station.labelOffsetY) ||
+     Object.keys(station).length!==6 || Object.keys(relation).length>5 ||
+     relation.stationId!==station.id ||
+     before.stations.some(value=>value.id===station.id)) return null;
+  const changedLines=after.lines.filter((line,i)=>!equal(line,before.lines[i]));
+  if(changedLines.length!==1) return null;
+  const line=changedLines[0],previous=before.lines.find(value=>value.id===line.id);
+  if(!previous || relation.lineId!==line.id || previous.locked ||
+     previous.isFake || previous.source || previous.operationHistory?.length ||
+     !equal({...previous,stationSequence:[]},{...line,stationSequence:[]})) return null;
+  const oldSequence=previous.stationSequence;
+  if(!equal(line.stationSequence,[...oldSequence,station.id]) ||
+     new Set(oldSequence).size!==oldSequence.length ||
+     before.geometry.segments.filter(segment=>segment.lineId===line.id).length!==Math.max(0,oldSequence.length-1) ||
+     !oldSequence.slice(1).every((id,i)=>before.geometry.segments.filter(segment=>
+       segment.lineId===line.id && segment.fromStationId===oldSequence[i] &&
+       segment.toStationId===id).length===1)) return null;
+  const fromStationId=oldSequence.at(-1);
+  const newSegments=after.geometry.segments.slice(before.geometry.segments.length);
+  if(newSegments.length!==(fromStationId?1:0)) return null;
+  const segment=newSegments[0];
+  if(segment && (segment.lineId!==line.id ||
+     segment.fromStationId!==fromStationId || segment.toStationId!==station.id ||
+     !['straight','smooth'].includes(segment.mode) ||
+     segment.structureType!=='underground' ||
+     segment.source || segment.structureNodes?.length ||
+     segment.operationHistory?.length || segment.lineHistory?.length ||
+     segment.lineStyleId!==undefined || segment.cornerRadius!==undefined ||
+     segment.waypoints.length>500 || segment.waypoints.some(w=>
+       !w.id || !Number.isFinite(w.x) || !Number.isFinite(w.y) ||
+       !['smooth','corner'].includes(w.type) || Object.keys(w).length!==4))) return null;
+  const changedPhases=after.openingPhases.filter((phase,i)=>!equal(phase,before.openingPhases[i]));
+  const phase=changedPhases.length===1?changedPhases[0]:null;
+  if(changedPhases.length>1 ||
+     (phase && (!segment && phase.segmentIds.length!==before.openingPhases.find(p=>p.id===phase.id)?.segmentIds.length)) ||
+     (phase && (
+       phase.lineId!==line.id ||
+       !equal({...phase,segmentIds:[],stationRelationIds:[]},
+         {...before.openingPhases.find(p=>p.id===phase.id),segmentIds:[],stationRelationIds:[]}) ||
+       !equal(phase.segmentIds,[
+         ...(before.openingPhases.find(p=>p.id===phase.id)?.segmentIds??[]),
+         ...(segment?[segment.id]:[])]) ||
+       !equal(phase.stationRelationIds,[
+         ...(before.openingPhases.find(p=>p.id===phase.id)?.stationRelationIds??[]),relation.id])
+     )) ||
+     (!phase && before.openingPhases.some(p=>p.lineId===line.id)) ||
+     !before.openingPhases.every((p,i)=>
+       p.id===after.openingPhases[i].id &&
+       (p.id===phase?.id || equal(p,after.openingPhases[i]))) ||
+     before.openingPhases.filter(p=>p.lineId===line.id).length!==(phase?1:0)) return null;
+  const opened=phase?.openedAt??previous.openedAt??before.timeline.currentDate??null;
+  if((relation.openedAt??null)!==opened ||
+     (segment && (segment.openedAt??null)!==opened)) return null;
+  return {lineId:line.id,fromStationId:fromStationId??null,station,relation,
+    ...(segment?{segment}:{}),...(phase?{openingPhaseId:phase.id}:{})};
 }

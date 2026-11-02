@@ -73,7 +73,7 @@ function dedupeSnapSources(items: SnapRaySource[]) {
   })
 }
 
-export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, mapSelectMode = false, mapSelectAppend = false, mapMoveMode = false, mapSelections = [], onMapSelectionChange, onMapMoveCommit, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, onDraftHistoryChange, onDraftEdit, snapOptions = { node: false, neighbor: false, grid: false }, stationLabelMode = 'direction', showStationSpacing = false, view, setView, ref }: {
+export function NetworkCanvas({ project, selection, selectedStationIds = [], onToggleStationSelection, mapSelectMode = false, mapSelectAppend = false, mapMoveMode = false, mapSelections = [], onMapSelectionChange, onMapMoveCommit, drawing, roadDraft, phasePreview, calibration, onCalibrationPoint, onSelect, onCreatePoint, onConnectStation, onExtend, onFinishDrawing, onSegmentPoint, onPreview, onDragCommit, onEditBlocked, onDraftHistoryChange, onDraftEdit, onLineDraftPendingChange, snapOptions = { node: false, neighbor: false, grid: false }, stationLabelMode = 'direction', showStationSpacing = false, view, setView, ref }: {
   project: ActualRouteProject; selection: Selection; drawing: DrawingMode | null; roadDraft?: Road | null; phasePreview?: { segmentIds: string[]; stationIds: string[] } | null
   calibration?: { points: Point[] } | null; onCalibrationPoint?: (point: Point) => void
   selectedStationIds?: string[]; onToggleStationSelection?: (stationId: string) => void
@@ -81,6 +81,7 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   onSelect: (selection: Selection) => void; onCreatePoint: (point: Point) => void; onConnectStation: (id: string) => void; onExtend: (id: string) => void; onFinishDrawing?: () => void
   onSegmentPoint: (id: string, point: Point) => void; onPreview: (project: ActualRouteProject) => void; onDragCommit: (before: ActualRouteProject, next: ActualRouteProject) => void; onEditBlocked?: (message: string) => void
   onDraftHistoryChange?: (canUndo: boolean, canRedo: boolean) => void; onDraftEdit?: () => void
+  onLineDraftPendingChange?: (pending: boolean) => void
   snapOptions?: { node: boolean; neighbor: boolean; grid: boolean }; stationLabelMode?: 'direction' | 'free'; showStationSpacing?: boolean
   view: View; setView: React.Dispatch<React.SetStateAction<View>>; ref?: Ref<NetworkCanvasHandle>
 }) {
@@ -115,6 +116,11 @@ export function NetworkCanvas({ project, selection, selectedStationIds = [], onT
   const [lineDraft, setLineDraft] = useState<LineDraftState | null>(null)
   const latestLineDraft = useRef<LineDraftState | null>(null)
   latestLineDraft.current = lineDraft
+  // Draft points are not committed to the project snapshot. Only actual
+  // unfinished points should block sync, not continuous line drawing mode.
+  useEffect(() => {
+    onLineDraftPendingChange?.(Boolean(lineDraft?.points.length))
+  }, [lineDraft?.points.length, onLineDraftPendingChange])
   const draftPast = useRef<LineDraftPoint[][]>([])
   const draftFuture = useRef<LineDraftPoint[][]>([])
   const notifyDraftHistory = () => onDraftHistoryChange?.(draftPast.current.length > 0, draftFuture.current.length > 0)

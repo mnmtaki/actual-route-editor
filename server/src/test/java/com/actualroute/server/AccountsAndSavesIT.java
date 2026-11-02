@@ -900,6 +900,106 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void differentLinesRebaseTopologyWhileSameLineAndFullSaveConflict() throws Exception {
+        Session owner=account("lineMerge");
+        String id=createProject(owner);
+        JsonNode doc=mapper.readTree("""
+            {"version":1,"name":"Two Lines",
+             "stations":[
+               {"id":"a","name":"A","x":0,"y":0,"labelOffsetX":14,"labelOffsetY":-14},
+               {"id":"b","name":"B","x":100,"y":0,"labelOffsetX":14,"labelOffsetY":-14}],
+             "lines":[
+               {"id":"l1","name":"One","color":"#123456","stationSequence":["a"],
+                "lineOrder":0,"visible":true,"locked":false},
+               {"id":"l2","name":"Two","color":"#654321","stationSequence":["b"],
+                "lineOrder":1,"visible":true,"locked":false}],
+             "stationLineRelations":[
+               {"id":"ra","lineId":"l1","stationId":"a"},
+               {"id":"rb","lineId":"l2","stationId":"b"}],
+             "geometry":{"segments":[]},"openingPhases":[]}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Two Lines","document",doc,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        String endpoint="/api/projects/"+id+"/operations/line-append-new";
+        String first=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","l1","fromStationId","a",
+            "station",mapper.readTree("""
+                {"id":"c","name":"C","x":10,"y":0,"labelOffsetX":14,"labelOffsetY":-14}
+                """),
+            "relation",mapper.readTree("""
+                {"id":"rc","lineId":"l1","stationId":"c"}
+                """),
+            "segment",mapper.readTree("""
+                {"id":"ac","lineId":"l1","fromStationId":"a","toStationId":"c",
+                 "mode":"straight","structureType":"underground","waypoints":[]}
+                """)));
+        String second=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","l2","fromStationId","b",
+            "station",mapper.readTree("""
+                {"id":"d","name":"D","x":110,"y":0,"labelOffsetX":14,"labelOffsetY":-14}
+                """),
+            "relation",mapper.readTree("""
+                {"id":"rd","lineId":"l2","stationId":"d"}
+                """),
+            "segment",mapper.readTree("""
+                {"id":"bd","lineId":"l2","fromStationId":"b","toStationId":"d",
+                 "mode":"straight","structureType":"underground","waypoints":[]}
+                """)));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(first),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(second),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4))
+            .andExpect(jsonPath("$.document.lines[0].stationSequence.length()").value(2))
+            .andExpect(jsonPath("$.document.lines[1].stationSequence.length()").value(2))
+            .andExpect(jsonPath("$.document.stations.length()").value(4));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(second),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4));
+        String overlapping=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","l1","fromStationId","c",
+            "station",mapper.readTree("""
+                {"id":"e","name":"E","x":20,"y":0,"labelOffsetX":14,"labelOffsetY":-14}
+                """),
+            "relation",mapper.readTree("""
+                {"id":"re","lineId":"l1","stationId":"e"}
+                """),
+            "segment",mapper.readTree("""
+                {"id":"ce","lineId":"l1","fromStationId":"c","toStationId":"e",
+                 "mode":"straight","structureType":"underground","waypoints":[]}
+                """)));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(overlapping),owner)).andExpect(status().isConflict());
+
+        // A strict full save is a boundary even when another line is edited.
+        mvc.perform(authorized(put("/api/projects/"+id).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Two Lines","document",doc,"expectedRevision",4))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(5));
+        String afterSave=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",4,
+            "lineId","l2","fromStationId","d",
+            "station",mapper.readTree("""
+                {"id":"f","name":"F","x":120,"y":0,"labelOffsetX":14,"labelOffsetY":-14}
+                """),
+            "relation",mapper.readTree("""
+                {"id":"rf","lineId":"l2","stationId":"f"}
+                """),
+            "segment",mapper.readTree("""
+                {"id":"df","lineId":"l2","fromStationId":"d","toStationId":"f",
+                 "mode":"straight","structureType":"underground","waypoints":[]}
+                """)));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(afterSave),owner)).andExpect(status().isConflict());
+    }
+
+    @Test
     void canvasContinuousStationDrawingIsAtomicAndIdempotent() throws Exception {
         Session owner=account("canvasDraw");
         String id=createProject(owner);

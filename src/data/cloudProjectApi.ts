@@ -41,6 +41,8 @@ export interface CloudSegmentSplit {
   stationName: string;
   x: number;
   y: number;
+  labelOffsetX?: number;
+  labelOffsetY?: number;
   beforeSegmentId: string;
   afterSegmentId: string;
   relationId: string;

@@ -397,13 +397,19 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   // visit a second set of drawing controls in the collaboration toolbar.
   useEffect(() => {
     if (busy || working.current || fetching.current || permissionLost ||
-        draftActive || remoteRevision > session.revision || !dirty) return;
+        draftActive || !dirty) return;
     if (detectStationOperation(session.baseJson, project) ||
         detectWaypointMove(session.baseJson, project)) return;
     const newLineStation = detectCanvasNewLineStation(session.baseJson, project);
     const lineAppend = newLineStation ? null : detectCanvasLineAppend(session.baseJson, project);
     const segmentSplit = newLineStation || lineAppend ? null : detectCanvasSegmentSplit(session.baseJson, project);
     const middleRemoval = newLineStation || lineAppend || segmentSplit ? null : detectCanvasMiddleStationRemoval(session.baseJson, project);
+    // A later WebSocket revision may come from a DIFFERENT line. The Java
+    // journal validates that disjointness, so do not suppress a safe operation
+    // solely because the advertised global revision advanced. Full-document
+    // fallback remains strictly version-checked and must stop.
+    if (remoteRevision > session.revision &&
+        !newLineStation && !lineAppend && !segmentSplit && !middleRemoval) return;
     const snapshot = serializeProject(project);
     const attemptKey = session.id + ':' + session.revision + ':' + snapshot;
     if (lastAutoAttempt.current === attemptKey) return;
@@ -459,6 +465,8 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
           activeSession.current = next;
           latest.current = saved.document;
           onLoadRef.current(saved.document, next);
+          setRecoveryOpen(false);
+          setError('');
           setLiveStatus((newLineStation ? '连续绘制新站' : lineAppend ? '线路接站' : segmentSplit ? '区间插站' : '删除中间站') + '已按操作级协议同步至 v' + saved.revision);
           return;
         }

@@ -358,3 +358,31 @@ line topology, arbitrary control-point operations, multiuser
 global undo and historic snapshot rewinds are **not** supported as
 compensatable operations. The UI keeps the unrelated single-user
 local history concept separate from these cloud compensations.
+
+## Collaborative operation history and conflict recovery (Flyway V15)
+
+The editable collaboration panel now provides an attributed operation
+history and a read-only local/cloud comparison. The endpoint
+`GET /api/projects/{id}/operations/history?limit=50` is edit-permission
+protected (1..100 rows) and returns only operation ID, committed revision,
+actor username, action kind, resource ID and timestamp — never the raw
+operation payload. It includes station edits, waypoint/topology commands,
+undo/redo, and **newly journaled** full-project saves and restores.
+Historical full saves made before V15 did not record an actor, so they
+cannot be retrospectively attributed.
+
+Full saves and restores are now recorded in the same database transaction
+as the immutable project revision, with action types `project.save` and
+`project.restore`. This preserves the existing conservative concurrency
+policy: they are project-wide conflict barriers, not independent station
+operations. Existing history snapshots are still pruned to ten versions,
+but the lightweight operation feed is retained.
+
+On a remote/local conflict the panel preserves the local editor state.
+The user can explicitly fetch a cloud preview, view per-resource changed
+counts relative to their loaded baseline (stations, lines, segments,
+memberships and other project fields), export the current full editor
+document as a JSON file, or intentionally reload the cloud version.
+Station overlap hints are *not* a complete topology merge algorithm.
+The comparison itself does not write, merge, restore, or replace either
+copy. Reloading a dirty local document still requires confirmation.

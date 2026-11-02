@@ -877,8 +877,10 @@ public class ProjectController {
         payload.put("stationName",input.stationName());
         payload.put("x",input.x());
         payload.put("y",input.y());
-        payload.put("labelOffsetX",input.labelOffsetX()==null ? 0d : input.labelOffsetX());
-        payload.put("labelOffsetY",input.labelOffsetY()==null ? 0d : input.labelOffsetY());
+        // Leave omitted fields absent in the idempotency payload so requests
+        // issued before this optional extension still replay identically.
+        if(input.labelOffsetX()!=null)payload.put("labelOffsetX",input.labelOffsetX());
+        if(input.labelOffsetY()!=null)payload.put("labelOffsetY",input.labelOffsetY());
         payload.put("beforeSegmentId",input.beforeSegmentId());
         payload.put("afterSegmentId",input.afterSegmentId());
         payload.put("relationId",input.relationId());

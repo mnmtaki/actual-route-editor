@@ -100,8 +100,11 @@ public class ProjectSocketHub extends TextWebSocketHandler implements HandshakeI
             return;
         }
         UUID project = (UUID) session.getAttributes().get("project");
-        rooms.computeIfAbsent(project, ignored -> new ConcurrentHashMap<>())
-            .put(session.getId(), session);
+        rooms.compute(project, (ignored, room) -> {
+            if (room == null) room = new ConcurrentHashMap<>();
+            room.put(session.getId(), session);
+            return room;
+        });
         send(session, mapper.writeValueAsString(Map.of("type", "ready")));
     }
 
@@ -126,11 +129,12 @@ public class ProjectSocketHub extends TextWebSocketHandler implements HandshakeI
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         UUID project = (UUID) session.getAttributes().get("project");
         if (project != null) {
-            var room = rooms.get(project);
-            if (room != null) {
+            // Serialize the removal of the last session with new registrations
+            // for the same project, avoiding an orphaned room during a race.
+            rooms.computeIfPresent(project, (ignored, room) -> {
                 room.remove(session.getId());
-                if (room.isEmpty()) rooms.remove(project, room);
-            }
+                return room.isEmpty() ? null : room;
+            });
         }
     }
 

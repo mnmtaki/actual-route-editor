@@ -415,17 +415,25 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       setBusy(true);
       setLiveStatus(lineAppend ? '正在同步线路接站…' : segmentSplit ? '正在同步区间插站…' : '正在同步画布修改…');
       setError('');
-      const submitted = lineAppend
+      const operationId = crypto.randomUUID();
+      const sendTopology = () => lineAppend
         ? cloudApi.appendExistingStation(session.id, {
-            ...lineAppend, operationId: crypto.randomUUID(),
-            expectedRevision: session.revision,
+            ...lineAppend, operationId, expectedRevision: session.revision,
           })
-        : segmentSplit
-          ? cloudApi.splitSegment(session.id, {
-              ...segmentSplit, operationId: crypto.randomUUID(),
-              expectedRevision: session.revision,
-            })
-          : cloudApi.update(session.id, session.revision, project);
+        : cloudApi.splitSegment(session.id, {
+            ...segmentSplit!, operationId, expectedRevision: session.revision,
+          });
+      const submitted = lineAppend || segmentSplit
+        ? sendTopology().catch(async error => {
+            // Only retry an ambiguous transport failure. Java operationId
+            // idempotency ensures a committed-but-unacknowledged mutation
+            // cannot be applied twice. HTTP 409/403/etc must not be retried.
+            if (error instanceof CloudApiError) throw error;
+            await new Promise<void>(resolve => window.setTimeout(resolve, 800));
+            return sendTopology();
+          })
+        // Full-document PUT has no idempotency key: never blind-retry it.
+        : cloudApi.update(session.id, session.revision, project);
       void submitted.then(saved => {
         setRemoteRevision(previous => Math.max(previous, saved.revision));
         if (lineAppend || segmentSplit) {

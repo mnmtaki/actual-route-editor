@@ -56,6 +56,14 @@ export interface CloudMiddleStationRemoval {
   mergedSegmentId: string;
   preservedWaypointId: string;
 }
+export interface CloudOperationHistoryItem {
+  operationId: string;
+  revision: number;
+  actorName: string;
+  action: string;
+  resourceId: string;
+  createdAt: string;
+}
 export interface CloudUndoEntry {
   operationId: string;
   stationId: string;
@@ -202,6 +210,8 @@ export const cloudApi = {
     );
     return { ...raw, document: parseProjectJson(JSON.stringify(raw.document)) } as CloudProject;
   },
+  operationHistory: (id: string, limit = 50) =>
+    api<CloudOperationHistoryItem[]>(`/api/projects/${encodeURIComponent(id)}/operations/history?limit=${limit}`),
   myUndo: (id: string) =>
     api<CloudUndoEntry[]>(`/api/projects/${encodeURIComponent(id)}/operations/my-undo`),
   compensate: async (id: string, operation: CloudCompensation) => {

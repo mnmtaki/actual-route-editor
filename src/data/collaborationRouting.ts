@@ -296,7 +296,7 @@ export function detectCanvasNewLineStation(baseJson: string, project: ActualRout
   if(changedLines.length!==1) return null;
   const line=changedLines[0],previous=before.lines.find(value=>value.id===line.id);
   if(!previous || relation.lineId!==line.id || previous.locked ||
-     previous.isFake || previous.source || previous.operationHistory?.length ||
+     previous.isFake || previous.parentLineId || previous.source || previous.operationHistory?.length ||
      !equal({...previous,stationSequence:[]},{...line,stationSequence:[]})) return null;
   const oldSequence=previous.stationSequence;
   if(!equal(line.stationSequence,[...oldSequence,station.id]) ||

@@ -63,7 +63,7 @@ class ProjectSocketHubConcurrencyTest {
             publish.invoke(hub, project, (long) i + 2);
             verify(incoming, atLeastOnce()).sendMessage(argThat(message ->
                 message instanceof TextMessage text &&
-                text.getPayload().contains("\\"revision\\":" + ((long) i + 2))));
+                text.getPayload().contains("\"revision\":" + ((long) i + 2))));
             hub.afterConnectionClosed(incoming,
                 org.springframework.web.socket.CloseStatus.NORMAL);
         }

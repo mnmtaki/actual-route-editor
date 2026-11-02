@@ -336,6 +336,9 @@ public class ProjectController {
         for (int i=0; i<stations.size(); i++) {
             if (stationId.equals(stations.get(i).path("id").asText())) { index=i; break; }
         }
+        // Persist undo snapshots only for bounded rename/move actions. The
+        // complete station snapshot guards against partial/hidden field loss.
+        JsonNode beforeStation = index >= 0 ? stations.get(index).deepCopy() : null;
         switch(input.type()) {
             case "station.create" -> {
                 if (index != -1)
@@ -387,6 +390,142 @@ public class ProjectController {
             INSERT INTO cloud_project_operations(project_id,operation_id,revision,actor_id,action,station_id,payload)
             VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
             """, id,input.operationId(),result.revision(),user,input.type(),stationId,station.toString());
+        if(beforeStation != null &&
+            ("station.rename".equals(input.type()) || "station.move".equals(input.type()))) {
+            jdbc.update("""
+                INSERT INTO cloud_station_undo_entries(
+                    project_id,operation_id,actor_id,station_id,action,
+                    before_station,after_station,state_revision)
+                VALUES (?,?,?,?,?,CAST(? AS jsonb),CAST(? AS jsonb),?)
+                """, id,input.operationId(),user,stationId,input.type(),
+                    beforeStation.toString(),stations.get(index).toString(),result.revision());
+        }
+        return result;
+    }
+
+    public record UndoEntry(UUID operationId, String stationId, String action,
+                            boolean undone, long stateRevision) {}
+    public record CompensationRequest(@NotNull UUID operationId,
+                                      @NotNull UUID targetOperationId,
+                                      @NotNull Long expectedRevision,
+                                      @NotBlank String direction) {}
+
+    @GetMapping("/{id}/operations/my-undo")
+    public List<UndoEntry> myUndo(@AuthenticationPrincipal UUID user,@PathVariable UUID id) {
+        requireWritable(user,id);
+        return jdbc.query("""
+            SELECT operation_id,station_id,action,undone,state_revision
+            FROM cloud_station_undo_entries
+            WHERE project_id=? AND actor_id=?
+            ORDER BY state_revision DESC LIMIT 25
+            """,(rs,n)->new UndoEntry(rs.getObject("operation_id",UUID.class),
+                rs.getString("station_id"),rs.getString("action"),
+                rs.getBoolean("undone"),rs.getLong("state_revision")),id,user);
+    }
+
+    /**
+     * Inverse compensation is a NEW project revision, never a destructive
+     * rollback of a shared document. Only the original actor can revert.
+     * Strictly reject all same-station changes and any non-journaled revision
+     * since the previous state of this operation.
+     */
+    @PostMapping("/{id}/operations/compensate")
+    @Transactional
+    public ProjectView compensate(@AuthenticationPrincipal UUID user,@PathVariable UUID id,
+                                  @Valid @RequestBody CompensationRequest request) {
+        requireWritable(user,id);
+        if(request.expectedRevision()<1 ||request.expectedRevision()==Long.MAX_VALUE
+           || !List.of("undo","redo").contains(request.direction()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效撤销或重做请求");
+        var locked=jdbc.query("""
+            SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
+            """,(rs,n)->new Object[]{rs.getLong("revision"),rs.getString("name"),
+                rs.getString("document")},id);
+        if(locked.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
+        ObjectNode payload=mapper.createObjectNode();
+        payload.put("targetOperationId",request.targetOperationId().toString());
+        payload.put("direction",request.direction());
+        var existing=jdbc.query("""
+            SELECT action,station_id,payload FROM cloud_project_operations
+            WHERE project_id=? AND operation_id=?
+            """,(rs,n)->new String[]{rs.getString("action"),rs.getString("station_id"),
+                rs.getString("payload")},id,request.operationId());
+        if(!existing.isEmpty()) {
+            String[] saved=existing.get(0);
+            try {
+                if(!("station."+request.direction()).equals(saved[0]) ||
+                   !mapper.readTree(saved[2]).equals(payload))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"补偿操作 ID 已被其他操作占用");
+            }catch(com.fasterxml.jackson.core.JsonProcessingException error){
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"操作日志损坏");
+            }
+            return get(user,id);
+        }
+        var entry=jdbc.query("""
+            SELECT station_id,action,before_station,after_station,undone,state_revision
+            FROM cloud_station_undo_entries
+            WHERE project_id=? AND operation_id=? AND actor_id=? FOR UPDATE
+            """,(rs,n)->new Object[]{rs.getString("station_id"),rs.getString("action"),
+                rs.getString("before_station"),rs.getString("after_station"),
+                rs.getBoolean("undone"),rs.getLong("state_revision")},
+            id,request.targetOperationId(),user);
+        if(entry.isEmpty())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"没有可撤销的本人操作");
+        Object[] record=entry.get(0);
+        boolean undone=(boolean)record[4];
+        if(undone != "redo".equals(request.direction()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"当前操作状态不允许该补偿");
+        long revision=(long)((Object[])locked.get(0))[0];
+        long previousRevision=(long)record[5];
+        if(request.expectedRevision()!=revision)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"工程已更新，请先同步");
+        Long count=jdbc.queryForObject("""
+            SELECT count(*) FROM cloud_project_operations
+            WHERE project_id=? AND revision>? AND revision<=?
+            """,Long.class,id,previousRevision,revision);
+        Long overlaps=jdbc.queryForObject("""
+            SELECT count(*) FROM cloud_project_operations
+            WHERE project_id=? AND revision>? AND revision<=?
+                AND station_id=?
+            """,Long.class,id,previousRevision,revision,(String)record[0]);
+        // Every intermediate revision must be explicitly recorded, and none
+        // may touch this station. Full-document PUT / restore lack such logs.
+        if(count==null || count!=revision-previousRevision ||
+           overlaps==null || overlaps>0)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "其他操作已经影响该站或存在整图修改，不能安全撤销/重做");
+        ObjectNode document;
+        JsonNode expected;
+        JsonNode target;
+        try {
+            document=(ObjectNode)mapper.readTree((String)((Object[])locked.get(0))[2]);
+            expected=mapper.readTree((String)record[undone?2:3]);
+            target=mapper.readTree((String)record[undone?3:2]);
+        }catch(Exception error) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"撤销快照无效");
+        }
+        if(!(document.path("stations") instanceof ArrayNode stations))
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"车站数据损坏");
+        int index=-1;
+        for(int i=0;i<stations.size();i++)
+            if(record[0].equals(stations.get(i).path("id").asText())) {
+                if(index>=0)throw new ResponseStatusException(HttpStatus.CONFLICT,"车站 ID 重复");
+                index=i;
+            }
+        if(index<0 || !stations.get(index).equals(expected))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"车站内容已变化，禁止覆盖");
+        stations.set(index,target.deepCopy());
+        ProjectView result=saveRevision(user,id,revision,(String)((Object[])locked.get(0))[1],json(document));
+        jdbc.update("""
+            UPDATE cloud_station_undo_entries SET undone=?,state_revision=?
+            WHERE project_id=? AND operation_id=? AND actor_id=?
+            """,!undone,result.revision(),id,request.targetOperationId(),user);
+        jdbc.update("""
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,actor_id,
+                                                 action,station_id,payload)
+            VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
+            """,id,request.operationId(),result.revision(),user,
+                "station."+request.direction(),record[0],payload.toString());
         return result;
     }
 

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyProject } from './storage';
 import { serializeProject } from '../import-export/projectJson';
-import { connectExistingStation } from './operations';
-import { canUseLiveLineAppend, detectCanvasLineAppend } from './collaborationRouting';
+import { connectExistingStation, insertStationIntoSegment } from './operations';
+import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit } from './collaborationRouting';
 import type { ActualRouteProject } from './model';
 
 function makeProject(): ActualRouteProject {
@@ -65,6 +65,27 @@ describe('ordinary canvas collaboration routing', () => {
     expect(detectCanvasLineAppend(serializeProject(before), mixed)).toBeNull();
     expect(canUseLiveLineAppend(before, 'line-1', 'a', 'c')).toBe(false);
     expect(canUseLiveLineAppend(before, 'line-1', 'b', 'a')).toBe(false);
+  });
+
+  it('routes a normal-canvas station insertion only for simple segments', () => {
+    const before = makeProject();
+    const result = insertStationIntoSegment(before, 'seg-ab', { x: 5, y: 0 });
+    expect(result.stationId).toBeTruthy();
+    const split = detectCanvasSegmentSplit(serializeProject(before), result.project);
+    expect(split).toMatchObject({
+      segmentId: 'seg-ab', stationId: result.stationId,
+      splitWaypointIndex: 0,
+    });
+    const mixed = structuredClone(result.project);
+    mixed.stations[0].name = 'Concurrent local change';
+    expect(detectCanvasSegmentSplit(serializeProject(before), mixed)).toBeNull();
+    const phased = structuredClone(before);
+    phased.openingPhases.push({
+      id: 'phase-1', lineId: 'line-1', openedAt: '2026-01-01',
+      stationRelationIds: [], segmentIds: [],
+    });
+    expect(detectCanvasSegmentSplit(serializeProject(phased),
+      insertStationIntoSegment(phased, 'seg-ab', { x: 5, y: 0 }).project)).toBeNull();
   });
 
   it('does not route phase-owned, branched or historical lines', () => {

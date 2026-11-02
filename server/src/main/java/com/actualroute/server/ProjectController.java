@@ -403,6 +403,32 @@ public class ProjectController {
         return result;
     }
 
+    public record OperationFeedItem(UUID operationId,long revision,String actorName,
+                                    String action,String resourceId,OffsetDateTime createdAt) {}
+    @GetMapping("/{id}/operations/history")
+    public List<OperationFeedItem> operationHistory(@AuthenticationPrincipal UUID user,
+                                                     @PathVariable UUID id,
+                                                     @RequestParam(defaultValue = "50") int limit) {
+        // The audit trail is deliberately available to editors only: it
+        // exposes collaborator usernames, never raw operation payloads.
+        requireWritable(user,id);
+        if(limit<1 || limit>100)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效的历史条数");
+        return jdbc.query("""
+            SELECT o.operation_id,o.revision,u.username AS actor_name,
+                   o.action,o.station_id,o.created_at
+            FROM cloud_project_operations o
+            JOIN app_users u ON u.id=o.actor_id
+            WHERE o.project_id=?
+            ORDER BY o.revision DESC, o.created_at DESC
+            LIMIT ?
+            """,(rs,n)->new OperationFeedItem(
+                rs.getObject("operation_id",UUID.class),rs.getLong("revision"),
+                rs.getString("actor_name"),rs.getString("action"),
+                rs.getString("station_id"),
+                rs.getObject("created_at",OffsetDateTime.class)),id,limit);
+    }
+
     public record UndoEntry(UUID operationId, String stationId, String action,
                             boolean undone, long stateRevision) {}
     public record CompensationRequest(@NotNull UUID operationId,

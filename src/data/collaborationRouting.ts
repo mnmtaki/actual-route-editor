@@ -1,5 +1,5 @@
 import type { ActualRouteProject } from './model';
-import { parseProjectJson, serializeProject } from '../import-export/projectJson';
+import { serializeProject } from '../import-export/projectJson';
 import type { CloudLineAppend, CloudSegmentSplit } from './cloudProjectApi';
 
 /**
@@ -45,7 +45,7 @@ function equal(a: unknown, b: unknown): boolean {
 export function detectCanvasLineAppend(baseJson: string, project: ActualRouteProject):
   Omit<CloudLineAppend, 'operationId' | 'expectedRevision'> | null {
   let before: ActualRouteProject;
-  try { before = parseProjectJson(baseJson); } catch { return null; }
+  try { before = JSON.parse(baseJson) as ActualRouteProject; } catch { return null; }
   const after = JSON.parse(serializeProject(project)) as ActualRouteProject;
   if (!equal({ ...before, lines: [], stationLineRelations: [], geometry: { ...before.geometry, segments: [] } },
              { ...after, lines: [], stationLineRelations: [], geometry: { ...after.geometry, segments: [] } })) return null;
@@ -90,7 +90,7 @@ export function detectCanvasLineAppend(baseJson: string, project: ActualRoutePro
 export function detectCanvasSegmentSplit(baseJson: string, project: ActualRouteProject):
   Omit<CloudSegmentSplit, 'operationId' | 'expectedRevision'> | null {
   let before: ActualRouteProject;
-  try { before = parseProjectJson(baseJson); } catch { return null; }
+  try { before = JSON.parse(baseJson) as ActualRouteProject; } catch { return null; }
   const after = JSON.parse(serializeProject(project)) as ActualRouteProject;
   if (!equal({ ...before, stations: [], lines: [], stationLineRelations: [], geometry: { ...before.geometry, segments: [] } },
              { ...after, stations: [], lines: [], stationLineRelations: [], geometry: { ...after.geometry, segments: [] } })) return null;

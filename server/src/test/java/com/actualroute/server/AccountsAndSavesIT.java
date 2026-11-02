@@ -900,6 +900,53 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void appendExistingStationUpdatesExactlyOneOpeningPhase() throws Exception {
+        Session owner=account("phaseAppend");
+        String id=createProject(owner);
+        JsonNode original=mapper.readTree("""
+            {"version":1,"name":"Phased",
+             "stations":[{"id":"a","name":"A","x":0,"y":0},
+                         {"id":"b","name":"B","x":100,"y":0}],
+             "lines":[{"id":"line","name":"L","color":"#123456",
+                       "stationSequence":["a"],"lineOrder":0,"visible":true,"locked":false}],
+             "stationLineRelations":[{"id":"ra","stationId":"a","lineId":"line"}],
+             "geometry":{"segments":[]},
+             "openingPhases":[{"id":"phase-1","lineId":"line","name":"一期",
+                               "openedAt":"2026-01-01",
+                               "segmentIds":[],"stationRelationIds":["ra"]}],
+             "timeline":{"currentDate":"2026-01-01"}}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Phased","document",original,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        String path="/api/projects/"+id+"/operations/line-append";
+        String body=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","line","fromStationId","a","toStationId","b",
+            "segmentId","ab","relationId","rb","openingPhaseId","phase-1"));
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(body),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.openingPhases[0].segmentIds[0]").value("ab"))
+            .andExpect(jsonPath("$.document.openingPhases[0].stationRelationIds[1]").value("rb"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].openedAt").value("2026-01-01"))
+            .andExpect(jsonPath("$.document.stationLineRelations[1].openedAt").value("2026-01-01"));
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(body),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+
+        // The same project refuses any further ambiguous phase-owned append.
+        String other=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",3,
+            "lineId","line","fromStationId","b","toStationId","a",
+            "segmentId","ba","relationId","rc"));
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(other),owner)).andExpect(status().isConflict());
+    }
+
+    @Test
     void appendExistingStationUpdatesAllTopologyAndRejectsInvalidOrConcurrentReplays() throws Exception {
         Session owner=account("connectOwner");
         Session peer=account("connectPeer");

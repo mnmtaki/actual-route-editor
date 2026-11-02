@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyProject } from './storage';
 import { serializeProject } from '../import-export/projectJson';
+import { connectExistingStation } from './operations';
 import { canUseLiveLineAppend, detectCanvasLineAppend } from './collaborationRouting';
 import type { ActualRouteProject } from './model';
 
@@ -44,6 +45,17 @@ describe('ordinary canvas collaboration routing', () => {
     expect(detectCanvasLineAppend(serializeProject(before), appended(before)))
       .toEqual({ lineId: 'line-1', fromStationId: 'b', toStationId: 'c',
         segmentId: 'seg-bc', relationId: 'rel-c' });
+  });
+
+  it('recognizes the actual normal-canvas connectExistingStation command', () => {
+    const before = makeProject();
+    const after = connectExistingStation(before, 'line-1', 'c', 'b');
+    const operation = detectCanvasLineAppend(serializeProject(before), after);
+    expect(operation).toMatchObject({
+      lineId: 'line-1', fromStationId: 'b', toStationId: 'c',
+    });
+    expect(operation?.segmentId).toBeTruthy();
+    expect(operation?.relationId).toBeTruthy();
   });
 
   it('rejects mixed changes and non-terminal connections', () => {

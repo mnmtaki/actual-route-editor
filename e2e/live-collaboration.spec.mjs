@@ -433,13 +433,23 @@ test('collaboration history and conflict recovery preserve the local canvas and 
     await a.getByLabel('新车站名称').fill('尚未发布的本地站');
     let intercepted=false;
     await a.route('**/api/projects/*/operations',async route=>{
-      if(intercepted) return route.continue();
+      if(route.request().method() !== 'POST' || intercepted) return route.continue();
       intercepted=true;
       const remoteCopy={...seed,name:'云端修改了项目名称'};
       await write(peer,peerCsrf,'/api/projects/'+id,{
         name:'远端保存',document:remoteCopy,expectedRevision:1,
       },'PUT');
-      await route.continue();
+      // Test the UI on an explicit stale-write response; real server-side
+      // 409 rejection is independently covered by PostgreSQL integration tests.
+      await route.fulfill({
+        status:409,
+        headers:{
+          'access-control-allow-origin':SITE,
+          'access-control-allow-credentials':'true',
+          'content-type':'application/json',
+        },
+        body:JSON.stringify({detail:'工程版本冲突'}),
+      });
     });
     await a.getByRole('button',{name:'新增独立车站',exact:true}).click();
     const recovery=a.getByLabel('协同冲突处理');

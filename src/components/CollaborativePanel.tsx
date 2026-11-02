@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ActualRouteProject } from '../data/model';
 import { serializeProject } from '../import-export/projectJson';
 import { cloudApi, cloudSocketUrl, CloudApiError } from '../data/cloudProjectApi';
+import type { CloudUndoEntry } from '../data/cloudProjectApi';
 import { detectStationOperation } from '../data/stationLiveOperations';
 import { detectWaypointMove } from '../data/waypointLiveOperations';
 
@@ -36,6 +37,8 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   const [splitWaypointIndex, setSplitWaypointIndex] = useState('0');
   const [removeLineId, setRemoveLineId] = useState('');
   const [removeStationId, setRemoveStationId] = useState('');
+  const [undoEntries, setUndoEntries] = useState<CloudUndoEntry[]>([]);
+  const [undoOperationId, setUndoOperationId] = useState('');
 
   const draftInProgress = useRef(draftActive);
   const latest = useRef(project);
@@ -188,6 +191,61 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       socket?.close();
     };
   }, [session.id]);
+
+  useEffect(() => {
+    let active = true;
+    void cloudApi.myUndo(session.id).then(entries => {
+      if (!active) return;
+      setUndoEntries(entries);
+      setUndoOperationId(selected => entries.some(entry => entry.operationId === selected)
+        ? selected : (entries[0]?.operationId ?? ''));
+    }).catch(() => {
+      if (active) { setUndoEntries([]); setUndoOperationId(''); }
+    });
+    return () => { active = false; };
+  }, [session.id, session.revision]);
+
+  const selectedUndo = undoEntries.find(entry => entry.operationId === undoOperationId);
+  async function compensate(direction: 'undo' | 'redo') {
+    if (!selectedUndo || selectedUndo.undone !== (direction === 'redo') ||
+        busy || working.current || fetching.current || permissionLost ||
+        dirty || draftActive || remoteRevision > session.revision) return;
+    working.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const saved = await cloudApi.compensate(session.id, {
+        operationId: crypto.randomUUID(),
+        targetOperationId: selectedUndo.operationId,
+        expectedRevision: session.revision,
+        direction,
+      });
+      setRemoteRevision(value => Math.max(value, saved.revision));
+      if (serializeProject(latest.current) !== session.baseJson || draftInProgress.current) {
+        setError('补偿操作已提交，但当前画布出现新修改；已保留本地编辑，请同步云端最新版。');
+        return;
+      }
+      const next = {
+        id: session.id, name: saved.name, revision: saved.revision,
+        baseJson: serializeProject(saved.document),
+      };
+      activeSession.current = next;
+      latest.current = saved.document;
+      onLoadRef.current(saved.document, next);
+      setMessage((direction === 'undo' ? '已撤销本人操作' : '已重做本人操作') +
+        '，云端 v' + saved.revision);
+    } catch (e) {
+      if (e instanceof CloudApiError && (e.status === 409 || e.status === 404))
+        setError('补偿被拒绝：该站可能已被其他人修改，或工程经历整图/拓扑更新。当前画布未覆盖；请加载最新版后再检查。');
+      else {
+        if (e instanceof CloudApiError && e.status === 403) setPermissionLost(true);
+        setError(e instanceof Error ? e.message : '补偿操作失败');
+      }
+    } finally {
+      working.current = false;
+      setBusy(false);
+    }
+  }
 
   // Stage-one operation protocol: auto-send only changes provably isolated
   // to a single station. Complex topology and compound edits keep manual CAS.
@@ -567,12 +625,29 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     <button type="button" disabled={busy || permissionLost || dirty || draftActive
       || remoteRevision > session.revision || !selectedRemoval}
       onClick={() => void removeMiddleStation()}>删除中间站并合并区间</button>
+    <label>我的可补偿操作
+      <select aria-label="我的撤销重做操作" value={undoOperationId}
+        onChange={event => setUndoOperationId(event.target.value)}>
+        <option value="">选择操作</option>
+        {undoEntries.map(entry => <option key={entry.operationId} value={entry.operationId}>
+          {entry.action === 'station.move' ? '移动' : '改名'} ·
+          {project.stations.find(station => station.id === entry.stationId)?.name || entry.stationId} ·
+          v{entry.stateRevision}{entry.undone ? '（已撤销）' : ''}
+        </option>)}
+      </select>
+    </label>
+    <button type="button" disabled={busy || permissionLost || dirty || draftActive ||
+      remoteRevision > session.revision || !selectedUndo || selectedUndo.undone}
+      onClick={() => void compensate('undo')}>撤销本人操作</button>
+    <button type="button" disabled={busy || permissionLost || dirty || draftActive ||
+      remoteRevision > session.revision || !selectedUndo || !selectedUndo.undone}
+      onClick={() => void compensate('redo')}>重做本人操作</button>
     <button type="button" disabled={busy || permissionLost || !dirty || remoteRevision > session.revision} onClick={() => void publish()}>发布当前画布</button>
     <button type="button" disabled={busy} onClick={() => void pull()}>加载云端最新版</button>
     <button type="button" disabled={busy} onClick={onExit}>退出协同模式</button>
     {error && <p role="alert" style={{ width: '100%' }}>{error}</p>}
     {message && <p role="status" style={{ width: '100%' }}>{message}</p>}
     {liveStatus && <p role="status" style={{ width: '100%' }}>{liveStatus}</p>}
-    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。支持受控线路末端连接和简单连续区间的插站拆分；简单连续中间站可受控删除并合并区间；复杂结构、分期、其他删除、分叉和环线仍需整图发布。</small>
+    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。支持受控线路末端连接和简单连续区间的插站拆分；简单连续中间站可受控删除并合并区间；仅支持本人站名和移动操作的安全撤销/重做，发生同站或拓扑冲突时会拒绝；复杂结构、分期、其他删除、分叉和环线仍需整图发布。</small>
   </section>;
 }

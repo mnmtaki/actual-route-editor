@@ -390,6 +390,59 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     return () => window.clearTimeout(timer);
   }, [project, session.id, session.baseJson, session.revision, busy, permissionLost, draftActive]);
 
+  // All ordinary editor tools share the same history/project state. Prefer
+  // resource-level operations above; for mutations they cannot express, use
+  // the server's strict expectedRevision CAS rather than requiring users to
+  // visit a second set of drawing controls in the collaboration toolbar.
+  useEffect(() => {
+    if (busy || working.current || fetching.current || permissionLost ||
+        draftActive || remoteRevision > session.revision || !dirty) return;
+    if (detectStationOperation(session.baseJson, project) ||
+        detectWaypointMove(session.baseJson, project)) return;
+    const snapshot = serializeProject(project);
+    const attemptKey = session.id + ':' + session.revision + ':' + snapshot;
+    if (lastAutoAttempt.current === attemptKey) return;
+    const timer = window.setTimeout(() => {
+      if (working.current || fetching.current || draftInProgress.current ||
+          activeSession.current.id !== session.id ||
+          activeSession.current.revision !== session.revision ||
+          serializeProject(latest.current) !== snapshot) return;
+      lastAutoAttempt.current = attemptKey;
+      working.current = true;
+      setBusy(true);
+      setLiveStatus('正在同步画布修改…');
+      setError('');
+      void cloudApi.update(session.id, session.revision, project).then(saved => {
+        const next = { id: session.id, name: saved.name,
+          revision: saved.revision, baseJson: snapshot };
+        activeSession.current = next;
+        setRemoteRevision(previous => Math.max(previous, saved.revision));
+        // Advance the acknowledged baseline without resetting the editor;
+        // further local changes made in flight must remain on the canvas.
+        onUpdate(next);
+        setLiveStatus(serializeProject(latest.current) === snapshot
+          ? '画布已自动同步至 v' + saved.revision
+          : '已同步 v' + saved.revision + '；后续画布修改仍保留');
+      }).catch(e => {
+        if (e instanceof CloudApiError && e.status === 409) {
+          setRemoteRevision(previous => Math.max(previous, session.revision + 1));
+          setRecoveryOpen(true);
+          setError('画布自动同步遇到版本冲突；本地编辑已保留，请先比较云端差异。');
+        } else {
+          if (e instanceof CloudApiError && (e.status === 403 || e.status === 404))
+            setPermissionLost(true);
+          setError(e instanceof Error ? e.message : '自动同步失败，画布仍保存在本地');
+        }
+        setLiveStatus('自动同步未完成');
+      }).finally(() => {
+        working.current = false;
+        setBusy(false);
+      });
+    }, 1200);
+    return () => window.clearTimeout(timer);
+  }, [project, session.id, session.baseJson, session.revision,
+      busy, permissionLost, draftActive, dirty, remoteRevision, onUpdate]);
+
   const eligibleLines = project.lines.filter(line =>
     !line.locked && !line.isFake && line.source?.format !== 'aarc'
     && line.stationSequence.length > 0);
@@ -635,7 +688,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
 
   return <section aria-label="协同工作区" className="creation-banner"
     style={{ position: 'relative', margin: '8px', padding: '10px', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-    <strong>协同编辑 · {session.name}</strong>
+    <strong>协同编辑 · {session.name}（普通绘制工具自动同步）</strong>
     <span>本地基线 v{session.revision} · 远端 v{remoteRevision}</span>
     <span>{dirty ? '● 未发布修改' : draftActive ? '绘制操作进行中' : '✓ 与已加载版本一致'}</span>
     <span>{permissionLost ? '协作权限已失效' : connected ? 'WebSocket 已连接' : '实时连接中断 · 30 秒兜底检查'}</span>
@@ -724,7 +777,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     <button type="button" disabled={busy || permissionLost || dirty || draftActive ||
       remoteRevision > session.revision || !selectedUndo || !selectedUndo.undone}
       onClick={() => void compensate('redo')}>重做本人操作</button>
-    <button type="button" disabled={busy || permissionLost || !dirty || remoteRevision > session.revision} onClick={() => void publish()}>发布当前画布</button>
+    <button type="button" disabled={busy || permissionLost || !dirty || remoteRevision > session.revision} onClick={() => void publish()}>手动重试发布画布</button>
     <button type="button" disabled={busy} onClick={() => void pull()}>加载云端最新版</button>
     <button type="button" onClick={() => setHistoryOpen(open => !open)}>
       {historyOpen ? '收起操作历史' : '查看操作历史'}
@@ -775,6 +828,6 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     {error && <p role="alert" style={{ width: '100%' }}>{error}</p>}
     {message && <p role="status" style={{ width: '100%' }}>{message}</p>}
     {liveStatus && <p role="status" style={{ width: '100%' }}>{liveStatus}</p>}
-    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。支持受控线路末端连接和简单连续区间的插站拆分；简单连续中间站可受控删除并合并区间；仅支持本人站名和移动操作的安全撤销/重做，发生同站或拓扑冲突时会拒绝；复杂结构、分期、其他删除、分叉和环线仍需整图发布。</small>
+    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。支持受控线路末端连接和简单连续区间的插站拆分；简单连续中间站可受控删除并合并区间；仅支持本人站名和移动操作的安全撤销/重做，发生同站或拓扑冲突时会拒绝；复杂结构、分期、其他删除、分叉和环线将使用严格版本校验的整图自动保存，冲突时停止同步并保留本地草稿。</small>
   </section>;
 }

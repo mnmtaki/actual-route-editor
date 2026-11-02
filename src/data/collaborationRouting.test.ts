@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyProject } from './storage';
 import { serializeProject } from '../import-export/projectJson';
-import { connectExistingStation, insertStationIntoSegment } from './operations';
+import { connectExistingStation, insertStationIntoSegment, appendStationToLineWithWaypoints } from './operations';
 import { deleteStationPreservingNetwork } from './stationDeletion';
 import { createOpeningPhase } from './openingPhases';
-import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval } from './collaborationRouting';
+import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation } from './collaborationRouting';
 import type { ActualRouteProject } from './model';
 
 function makeProject(): ActualRouteProject {
@@ -78,6 +78,44 @@ describe('ordinary canvas collaboration routing', () => {
     });
     expect(detectCanvasLineAppend(serializeProject(ambiguous),
       connectExistingStation(ambiguous,'line-1','c','b',created.phaseId))).toBeNull();
+  });
+
+  it('routes the first normally drawn station without a segment', () => {
+    const base=makeProject();
+    base.lines[0].stationSequence=[];
+    base.stationLineRelations=[];
+    base.geometry.segments=[];
+    const phased=createOpeningPhase(base,{lineId:'line-1',openedAt:'2026-05-01',name:'一期'});
+    const created=appendStationToLineWithWaypoints(phased.project,'line-1',{x:30,y:20},
+      [],null,phased.phaseId);
+    const routed=detectCanvasNewLineStation(serializeProject(phased.project),created.project);
+    expect(routed).toMatchObject({
+      lineId:'line-1',fromStationId:null,openingPhaseId:phased.phaseId,
+      station:{id:created.stationId},relation:{stationId:created.stationId},
+    });
+    expect(routed?.segment).toBeUndefined();
+  });
+
+  it('routes ordinary continuous drawing with draft waypoints and one phase', () => {
+    const before=makeProject();
+    const phased=createOpeningPhase(before,{lineId:'line-1',openedAt:'2026-06-01',name:'一期'});
+    const created=appendStationToLineWithWaypoints(phased.project,'line-1',{x:60,y:30},
+      [{id:'draft-1',x:35,y:18}], 'b',phased.phaseId);
+    const routed=detectCanvasNewLineStation(serializeProject(phased.project),created.project);
+    expect(routed).toMatchObject({
+      lineId:'line-1',fromStationId:'b',openingPhaseId:phased.phaseId,
+      station:{id:created.stationId},
+      segment:{waypoints:[{id:'draft-1',x:35,y:18}]},
+    });
+    const dirty=structuredClone(created.project);
+    dirty.stations[0].name='unrelated';
+    expect(detectCanvasNewLineStation(serializeProject(phased.project),dirty)).toBeNull();
+    const ambiguous=structuredClone(phased.project);
+    ambiguous.openingPhases.push({id:'other',lineId:'line-1',openedAt:'2026-07-01',
+      segmentIds:[],stationRelationIds:[]});
+    const more=appendStationToLineWithWaypoints(ambiguous,'line-1',{x:65,y:30},[],
+      'b',phased.phaseId);
+    expect(detectCanvasNewLineStation(serializeProject(ambiguous),more.project)).toBeNull();
   });
 
   it('rejects mixed changes and non-terminal connections', () => {

@@ -32,6 +32,7 @@ export interface CloudLineAppend {
   toStationId: string;
   segmentId: string;
   relationId: string;
+  openingPhaseId?: string;
 }
 export interface CloudSegmentSplit {
   operationId: string;

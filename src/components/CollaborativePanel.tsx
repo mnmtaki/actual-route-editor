@@ -310,10 +310,10 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       setMessage((direction === 'undo' ? '已撤销本人操作' : '已重做本人操作') +
         '，云端 v' + saved.revision);
     } catch (e) {
-      if (e instanceof CloudApiError && (e.status === 409 || e.status === 404))
+      if (e instanceof CloudApiError && (e.status === 409 || e.status === 404)) {
         setError('补偿被拒绝：该站可能已被其他人修改，或工程经历整图/拓扑更新。当前画布未覆盖；请加载最新版后再检查。');
         setRecoveryOpen(true);
-      else {
+      } else {
         if (e instanceof CloudApiError && e.status === 403) setPermissionLost(true);
         setError(e instanceof Error ? e.message : '补偿操作失败');
       }

@@ -420,7 +420,7 @@ test('collaboration history and conflict recovery preserve the local canvas and 
     const peerCsrf=await registerAndLogin(peer,USERS.peer);
     const bootstrap=await owner.newPage();
     await bootstrap.goto(SITE);
-    const seed=await bootstrap.evaluate(async ()=>(await import('/src/data/demo.ts')).demoProject);
+    const seed=await bootstrap.evaluate(async ()=>(await import('/src/data/storage.ts')).createEmptyProject());
     await bootstrap.close();
     const created=await write(owner,ownerCsrf,'/api/projects',{
       name:'Recovery Preview Project',document:seed,
@@ -443,7 +443,16 @@ test('collaboration history and conflict recovery preserve the local canvas and 
     });
     await a.getByRole('button',{name:'新增独立车站',exact:true}).click();
     const recovery=a.getByLabel('协同冲突处理');
-    await expect(recovery).toBeVisible({timeout:20000});
+    try {
+      await expect(recovery).toBeVisible({timeout:20000});
+    } catch (failure) {
+      console.error('RECOVERY DEBUG', {
+        intercepted,
+        body: (await a.locator('body').innerText()).slice(0,5000),
+        revision: (await (await owner.request.get(API+'/api/projects/'+id)).json()).revision,
+      });
+      throw failure;
+    }
     await expect(a.getByRole('alert')).toContainText('冲突');
     await recovery.getByRole('button',{name:'刷新云端差异'}).click();
     await expect(recovery.getByText(/云端相对基线：车站 0/)).toBeVisible();

@@ -574,6 +574,8 @@ public class ProjectController {
         if (input.expectedRevision()<1 || input.expectedRevision()==Long.MAX_VALUE
             || !Double.isFinite(input.x()) || !Double.isFinite(input.y())
             || Math.abs(input.x())>1_000_000 || Math.abs(input.y())>1_000_000
+            || (input.labelOffsetX()!=null && (!Double.isFinite(input.labelOffsetX()) || Math.abs(input.labelOffsetX())>1_000_000))
+            || (input.labelOffsetY()!=null && (!Double.isFinite(input.labelOffsetY()) || Math.abs(input.labelOffsetY())>1_000_000))
             || input.segmentId().length()>120 || input.waypointId().length()>128)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效控制点操作");
         String resource="segment:"+input.segmentId();
@@ -847,6 +849,7 @@ public class ProjectController {
         @NotNull UUID operationId, @NotNull Long expectedRevision,
         @NotBlank String segmentId, @NotBlank String stationId,
         @NotBlank String stationName, @NotNull Double x, @NotNull Double y,
+        Double labelOffsetX, Double labelOffsetY,
         @NotBlank String beforeSegmentId, @NotBlank String afterSegmentId,
         @NotBlank String relationId, @NotNull Integer splitWaypointIndex
     ) {}
@@ -874,6 +877,8 @@ public class ProjectController {
         payload.put("stationName",input.stationName());
         payload.put("x",input.x());
         payload.put("y",input.y());
+        payload.put("labelOffsetX",input.labelOffsetX()==null ? 0d : input.labelOffsetX());
+        payload.put("labelOffsetY",input.labelOffsetY()==null ? 0d : input.labelOffsetY());
         payload.put("beforeSegmentId",input.beforeSegmentId());
         payload.put("afterSegmentId",input.afterSegmentId());
         payload.put("relationId",input.relationId());
@@ -1030,8 +1035,8 @@ public class ProjectController {
         station.put("name",input.stationName().trim());
         station.put("x",input.x());
         station.put("y",input.y());
-        station.put("labelOffsetX",0);
-        station.put("labelOffsetY",0);
+        station.put("labelOffsetX",input.labelOffsetX()==null ? 0d : input.labelOffsetX());
+        station.put("labelOffsetY",input.labelOffsetY()==null ? 0d : input.labelOffsetY());
 
         ObjectNode relation=mapper.createObjectNode();
         relation.put("id",input.relationId());

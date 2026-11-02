@@ -326,3 +326,35 @@ confirmation. Deleting terminal stations, arbitrary segments, branching
 or historical topology, bulk deletion, and cross-user undo/redo remain
 out of scope. The implementation is intentionally narrower than the
 legacy local editor's general-purpose delete operation.
+
+## Server-verified collaborative station undo/redo (Flyway V14)
+
+The bounded compensation workflow is deliberately separate from local
+editor Undo/Redo. Each successful authenticated `station.rename` or
+`station.move` now retains both the complete before- and after-station
+snapshots in `cloud_station_undo_entries` (not tied to the 10-revision
+project snapshot retention limit), keyed by its operation UUID and actor.
+The owner of a different person's project cannot silently undo that
+person's changes: **only the original operation actor** can compensate.
+
+`GET /api/projects/{id}/operations/my-undo` lists up to 25 of the
+current account's stored reversible station edits. The React
+collaboration toolbar lets the user select one and request undo or redo.
+
+`POST /api/projects/{id}/operations/compensate` accepts a fresh
+`operationId`, `targetOperationId`, strict `expectedRevision` and
+`direction: "undo" | "redo"`. The server locks the project row and
+target undo record, verifies actor, state, exact full-station snapshot
+and **every intervening revision**. Only unrelated station operations
+on other stations may intervene. Same-station mutations, any
+topology/waypoint operation, history restoration, an unjournaled full
+save or stale version cause HTTP 409. The inverse operation becomes
+a NEW project revision and broadcast; the original revision remains
+auditable. Retrying the exact compensation UUID is idempotent.
+Redo is allowed only after undo and subject to the same protections.
+
+Current scope is station rename and move only. Creation, deletion,
+line topology, arbitrary control-point operations, multiuser
+global undo and historic snapshot rewinds are **not** supported as
+compensatable operations. The UI keeps the unrelated single-user
+local history concept separate from these cloud compensations.

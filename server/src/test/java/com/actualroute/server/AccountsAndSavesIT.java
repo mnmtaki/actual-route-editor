@@ -280,6 +280,49 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void operationIdempotencySurvivesFullSnapshotPruning() throws Exception {
+        Session owner = account("prunedOperation");
+        String id = createProject(owner);
+        UUID operationId = UUID.randomUUID();
+        String endpoint = "/api/projects/" + id + "/operations";
+        String operation = mapper.writeValueAsString(Map.of(
+            "operationId", operationId, "expectedRevision", 1,
+            "type", "station.create",
+            "station", Map.of("id", "kept-station", "name", "Retained", "x", 10, "y", 20)));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(operation), owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+
+        // Advance the project beyond its ten retained document snapshots.
+        for (int current = 2; current <= 12; current++) {
+            mvc.perform(authorized(put("/api/projects/" + id)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of(
+                    "name", "Saved-" + current, "document", document(),
+                    "expectedRevision", current))), owner))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.revision").value(current + 1));
+        }
+        mvc.perform(get("/api/projects/" + id + "/revisions/2").cookie(owner.cookies()))
+            .andExpect(status().isNotFound());
+
+        // The original operation ID must remain known after v2 was pruned.
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(operation), owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(13));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId", operationId, "expectedRevision", 1,
+                "type", "station.create",
+                "station", Map.of("id", "kept-station", "name", "Altered", "x", 10, "y", 20)))), owner))
+            .andExpect(status().isConflict());
+        Integer journalCount = jdbc.queryForObject(
+            "SELECT count(*) FROM cloud_project_operations WHERE project_id=? AND operation_id=?",
+            Integer.class, UUID.fromString(id), operationId);
+        assertEquals(1, journalCount);
+    }
+
+    @Test
     void publicVisibilitySupportsAnonymousViewingAndLoggedInEditingWithoutInvites() throws Exception {
         Session owner = account("publicowner");
         Session visitor = account("publiceditor");

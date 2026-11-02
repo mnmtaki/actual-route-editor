@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ActualRouteProject } from '../data/model';
-import { serializeProject } from '../import-export/projectJson';
+import { serializeProject, parseProjectJson, downloadText } from '../import-export/projectJson';
+import { summarizeProjectChanges } from '../data/cloudConflictSummary';
 import { cloudApi, cloudSocketUrl, CloudApiError } from '../data/cloudProjectApi';
-import type { CloudUndoEntry } from '../data/cloudProjectApi';
+import type { CloudUndoEntry, CloudOperationHistoryItem } from '../data/cloudProjectApi';
 import { detectStationOperation } from '../data/stationLiveOperations';
 import { detectWaypointMove } from '../data/waypointLiveOperations';
 
@@ -39,6 +40,12 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   const [removeStationId, setRemoveStationId] = useState('');
   const [undoEntries, setUndoEntries] = useState<CloudUndoEntry[]>([]);
   const [undoOperationId, setUndoOperationId] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [operationHistory, setOperationHistory] = useState<CloudOperationHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [remotePreview, setRemotePreview] = useState<{ revision: number; document: ActualRouteProject } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const draftInProgress = useRef(draftActive);
   const latest = useRef(project);
@@ -75,6 +82,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       // Never replace local unsaved drawings, even for disjoint changes.
       if (draftInProgress.current || serializeProject(latest.current) !== current.baseJson) {
         setMessage('云端有新版本；当前画布有未发布修改，已保留，请手动处理冲突');
+        setRecoveryOpen(true);
         return;
       }
       fetching.current = true;
@@ -89,6 +97,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
         // Recheck after the async request: the user may have started drawing.
         if (working.current || draftInProgress.current || serializeProject(latest.current) !== newest.baseJson) {
           setMessage('云端有新版本；加载期间画布发生变化，未覆盖本地');
+          setRecoveryOpen(true);
           return;
         }
         const next = {
@@ -205,6 +214,72 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     return () => { active = false; };
   }, [session.id, session.revision]);
 
+  useEffect(() => {
+    if (!historyOpen) return;
+    let alive = true;
+    setHistoryLoading(true);
+    void cloudApi.operationHistory(session.id).then(entries => {
+      if (alive) setOperationHistory(entries);
+    }).catch(e => {
+      if (alive) setError(e instanceof Error ? e.message : '读取协作历史失败');
+    }).finally(() => { if (alive) setHistoryLoading(false); });
+    return () => { alive = false; };
+  }, [session.id, session.revision, historyOpen]);
+
+  async function refreshHistory() {
+    if (historyLoading) return;
+    setHistoryLoading(true);
+    try { setOperationHistory(await cloudApi.operationHistory(session.id)); }
+    catch(e) { setError(e instanceof Error ? e.message : '刷新历史失败'); }
+    finally { setHistoryLoading(false); }
+  }
+
+  async function previewConflict() {
+    if (previewLoading) return;
+    setRecoveryOpen(true);
+    setPreviewLoading(true);
+    try {
+      const current = await cloudApi.get(session.id);
+      setRemotePreview({ revision: current.revision, document: current.document });
+      setRemoteRevision(previous => Math.max(previous, current.revision));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '无法获取云端对比版本');
+    } finally { setPreviewLoading(false); }
+  }
+
+  function backupLocal() {
+    // Export exactly the current editor state, including unpublished changes.
+    const filename = `actual-route-${session.id}-local-v${session.revision}-backup.json`;
+    downloadText(filename, serializeProject(latest.current), 'application/json');
+    setMessage('已触发完整本地工程 JSON 导出；请确认浏览器已保存文件');
+  }
+  const baselineProject = recoveryOpen ? (() => {
+    try { return parseProjectJson(session.baseJson); } catch { return null; }
+  })() : null;
+  const localChanges = baselineProject ? summarizeProjectChanges(baselineProject, project) : null;
+  const remoteChanges = baselineProject && remotePreview
+    ? summarizeProjectChanges(baselineProject, remotePreview.document) : null;
+  const conflictingStationIds = baselineProject && remotePreview ? (() => {
+    const baseline = new Map(baselineProject.stations.map(station => [station.id, station]));
+    const mine = new Map(project.stations.map(station => [station.id, station]));
+    const theirs = new Map(remotePreview.document.stations.map(station => [station.id, station]));
+    const ids = new Set([...baseline.keys(), ...mine.keys(), ...theirs.keys()]);
+    return [...ids].filter(id => {
+      const original = JSON.stringify(baseline.get(id));
+      return JSON.stringify(mine.get(id)) !== original &&
+        JSON.stringify(theirs.get(id)) !== original &&
+        JSON.stringify(mine.get(id)) !== JSON.stringify(theirs.get(id));
+    });
+  })() : [];
+
+  const operationLabels: Record<string,string> = {
+    'station.create':'新增车站','station.rename':'修改站名','station.move':'移动车站',
+    'segment.waypoint.move':'移动区间控制点','line.append-existing':'线路末端接站',
+    'segment.split-station':'区间插站','line.remove-middle-station':'删除中间站',
+    'station.undo':'撤销','station.redo':'重做',
+    'project.save':'完整工程保存','project.restore':'恢复历史版本',
+  };
+
   const selectedUndo = undoEntries.find(entry => entry.operationId === undoOperationId);
   async function compensate(direction: 'undo' | 'redo') {
     if (!selectedUndo || selectedUndo.undone !== (direction === 'redo') ||
@@ -237,6 +312,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     } catch (e) {
       if (e instanceof CloudApiError && (e.status === 409 || e.status === 404))
         setError('补偿被拒绝：该站可能已被其他人修改，或工程经历整图/拓扑更新。当前画布未覆盖；请加载最新版后再检查。');
+        setRecoveryOpen(true);
       else {
         if (e instanceof CloudApiError && e.status === 403) setPermissionLost(true);
         setError(e instanceof Error ? e.message : '补偿操作失败');
@@ -296,6 +372,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
         if (e instanceof CloudApiError && e.status === 409) {
           setRemoteRevision(current => Math.max(current, session.revision + 1));
           setError('操作与另一位用户的修改冲突（可能是同站、整图保存或数据版本缺口）。已保留本地，请导出备份后再加载最新版。');
+          setRecoveryOpen(true);
         } else {
           if (e instanceof CloudApiError && (e.status === 403 || e.status === 404)) setPermissionLost(true);
           setError(e instanceof Error ? e.message : '车站操作同步失败，请手动处理');
@@ -517,6 +594,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       if (e instanceof CloudApiError && e.status === 409) {
         setRemoteRevision(previous => Math.max(previous, session.revision + 1));
         setError('发布冲突：已有其他人保存新版本。本地修改已保留，请先导出备份，或手动加载云端最新版。');
+        setRecoveryOpen(true);
       } else {
         if (e instanceof CloudApiError && (e.status === 403 || e.status === 404))
           setPermissionLost(true);
@@ -644,6 +722,51 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       onClick={() => void compensate('redo')}>重做本人操作</button>
     <button type="button" disabled={busy || permissionLost || !dirty || remoteRevision > session.revision} onClick={() => void publish()}>发布当前画布</button>
     <button type="button" disabled={busy} onClick={() => void pull()}>加载云端最新版</button>
+    <button type="button" onClick={() => setHistoryOpen(open => !open)}>
+      {historyOpen ? '收起操作历史' : '查看操作历史'}
+    </button>
+    <button type="button" onClick={() => { setRecoveryOpen(true); void previewConflict(); }}>
+      查看云端差异
+    </button>
+    <button type="button" onClick={backupLocal}>导出本地工程备份</button>
+    {historyOpen && <div aria-label="协同操作历史" style={{ width:'100%', padding:8, border:'1px solid #8885' }}>
+      <strong>最近 50 条操作记录</strong>
+      <button type="button" disabled={historyLoading} onClick={() => void refreshHistory()}>刷新操作历史</button>
+      {historyLoading && <span>加载历史中…</span>}
+      {!historyLoading && operationHistory.length===0 && <p>暂无操作记录。旧版完整保存可能没有操作者日志。</p>}
+      <ol style={{ maxHeight:220, overflowY:'auto', paddingLeft:26 }}>
+        {operationHistory.map(entry => <li key={entry.operationId}>
+          v{entry.revision} · {entry.actorName} · {operationLabels[entry.action] || entry.action}
+          {entry.resourceId !== 'project' && <> · {entry.resourceId}</>}
+          {' · '}{new Date(entry.createdAt).toLocaleString()}
+        </li>)}
+      </ol>
+    </div>}
+    {recoveryOpen && <div aria-label="协同冲突处理" style={{ width:'100%', padding:8, border:'1px solid #8885' }}>
+      <strong>本地与云端差异（只读预览）</strong>
+      <p>本地基线 v{session.revision}，云端{remotePreview ? '预览 v'+remotePreview.revision : '尚未获取'}。
+        预览不会修改画布，也不会自动合并。</p>
+      <button type="button" disabled={previewLoading} onClick={() => void previewConflict()}>
+        {previewLoading ? '获取中…' : '刷新云端差异'}
+      </button>
+      {localChanges && <p>本地相对基线：车站 {localChanges.stations}、线路 {localChanges.lines}、
+        区间 {localChanges.segments}、成员关系 {localChanges.relations} 处变化；
+        其他设置{localChanges.otherChanged ? '有变化' : '无变化'}。
+        {localChanges.stationDetails.length > 0 && <> 涉及车站：{localChanges.stationDetails.join('、')}</>}</p>}
+      {remoteChanges && <p>云端相对基线：车站 {remoteChanges.stations}、线路 {remoteChanges.lines}、
+        区间 {remoteChanges.segments}、成员关系 {remoteChanges.relations} 处变化；
+        其他设置{remoteChanges.otherChanged ? '有变化' : '无变化'}。
+        {remoteChanges.stationDetails.length > 0 && <> 涉及车站：{remoteChanges.stationDetails.join('、')}</>}</p>}
+      {remotePreview && <p>双方不同修改的同一车站：{conflictingStationIds.length} 个
+        {conflictingStationIds.length > 0 && <>（{conflictingStationIds.slice(0,5).map(id =>
+          project.stations.find(station=>station.id===id)?.name || id).join('、')}）</>}
+        。此为差异提示，不等同于完整拓扑冲突检测。</p>}
+      <button type="button" onClick={backupLocal}>先导出本地 JSON 备份</button>
+      <button type="button" disabled={busy || draftActive} onClick={() => void pull()}>
+        加载云端最新版（会替换当前画布）
+      </button>
+      <button type="button" onClick={() => setRecoveryOpen(false)}>关闭对比</button>
+    </div>}
     <button type="button" disabled={busy} onClick={onExit}>退出协同模式</button>
     {error && <p role="alert" style={{ width: '100%' }}>{error}</p>}
     {message && <p role="status" style={{ width: '100%' }}>{message}</p>}

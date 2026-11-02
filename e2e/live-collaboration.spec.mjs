@@ -296,3 +296,62 @@ test('two browser canvases display a split segment and inserted station', async 
     await peer.close();
   }
 });
+
+test('two browser canvases converge after middle-station deletion and segment merge', async ({ browser }) => {
+  const owner=await browser.newContext();
+  const peer=await browser.newContext();
+  try {
+    const ownerCsrf=await registerAndLogin(owner,USERS.owner);
+    await registerAndLogin(peer,USERS.peer);
+    const bootstrap=await owner.newPage();
+    await bootstrap.goto(SITE);
+    const seed=await bootstrap.evaluate(async ()=>(await import('/src/data/demo.ts')).demoProject);
+    await bootstrap.close();
+    const created=await write(owner,ownerCsrf,'/api/projects',{
+      name:'Middle Station Removal',document:seed,
+    });
+    const id=created.id;
+    await write(owner,ownerCsrf,'/api/projects/'+id+'/access-rules',{
+      username:USERS.peer,action:'edit',allowed:true,
+    });
+    const a=await openCanvas(owner,id);
+    const b=await openCanvas(peer,id);
+    await a.getByLabel('待合并线路').selectOption('line-a');
+    await a.getByLabel('待移除中间车站').selectOption('s3');
+    a.once('dialog', dialog=>void dialog.accept());
+    await a.getByRole('button',{name:'删除中间站并合并区间'}).click();
+    await expect.poll(async()=>{
+      const response=await owner.request.get(API+'/api/projects/'+id);
+      const project=await response.json();
+      const line=project.document.lines.find(line=>line.id==='line-a');
+      const segments=project.document.geometry.segments;
+      const merged=segments.find(segment=>
+        segment.fromStationId==='s2' && segment.toStationId==='s4');
+      return {
+        revision:project.revision,
+        stations:project.document.stations.length,
+        segmentCount:segments.length,
+        sequence:line.stationSequence,
+        memberRemoved:!project.document.stationLineRelations.some(
+          relation=>relation.stationId==='s3' && relation.lineId==='line-a'),
+        oldSegmentsAbsent:!segments.some(segment=>segment.id==='a-2' || segment.id==='a-3'),
+        mergedWaypoints:merged?.waypoints?.map(point=>[point.x,point.y]),
+      };
+    },{timeout:20000}).toEqual({
+      revision:2,stations:7,segmentCount:6,sequence:['s1','s2','s4'],
+      memberRemoved:true,oldSegmentsAbsent:true,
+      mergedWaypoints:[[500,300],[620,430],[760,430]],
+    });
+    for(const page of [a,b]){
+      await expect(page.getByRole('region',{name:'协同工作区'})
+        .getByText(/本地基线 v2 · 远端 v2/)).toBeVisible({timeout:20000});
+      await expect(page.locator('svg').getByText('青塔')).toHaveCount(0);
+      await expect(page.locator('[data-layer="segments"] path.segment-main'))
+        .toHaveCount(6,{timeout:20000});
+      await expect(page.getByText('WebSocket 已连接')).toBeVisible();
+    }
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});

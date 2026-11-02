@@ -34,6 +34,8 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   const [splitSegmentId, setSplitSegmentId] = useState('');
   const [splitName, setSplitName] = useState('新车站');
   const [splitWaypointIndex, setSplitWaypointIndex] = useState('0');
+  const [removeLineId, setRemoveLineId] = useState('');
+  const [removeStationId, setRemoveStationId] = useState('');
 
   const draftInProgress = useRef(draftActive);
   const latest = useRef(project);
@@ -325,6 +327,76 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     }
   }
 
+  const selectedRemovalLine = eligibleLines.find(line => line.id === removeLineId);
+  const removableMiddleStations = selectedRemovalLine
+    ? selectedRemovalLine.stationSequence.slice(1, -1).map((stationId, index) => {
+        const previous = selectedRemovalLine.stationSequence[index];
+        const following = selectedRemovalLine.stationSequence[index + 2];
+        const before = project.geometry.segments.find(seg => seg.lineId === selectedRemovalLine.id
+          && seg.fromStationId === previous && seg.toStationId === stationId);
+        const after = project.geometry.segments.find(seg => seg.lineId === selectedRemovalLine.id
+          && seg.fromStationId === stationId && seg.toStationId === following);
+        if (!before || !after || before.source || after.source
+            || before.structureNodes?.length || after.structureNodes?.length
+            || before.operationHistory?.length || after.operationHistory?.length
+            || before.lineHistory?.length || after.lineHistory?.length
+            || before.mode !== after.mode
+            || before.structureType !== after.structureType
+            || before.lineStyleId !== after.lineStyleId
+            || before.cornerRadius !== after.cornerRadius
+            || before.openedAt !== after.openedAt || before.closedAt !== after.closedAt)
+          return null;
+        return { stationId, before, after };
+      }).filter((value): value is NonNullable<typeof value> => value !== null)
+    : [];
+  const selectedRemoval = removableMiddleStations.find(item => item.stationId === removeStationId);
+
+  async function removeMiddleStation() {
+    if (!selectedRemovalLine || !selectedRemoval || busy || working.current || fetching.current
+        || permissionLost || dirty || draftActive || remoteRevision > session.revision) return;
+    if (!window.confirm('将从此线路移除中间站并合并两段相邻区间。站点为换乘站时会保留在其他线路上。确认继续吗？')) return;
+    working.current = true;
+    setBusy(true);
+    setError('');
+    try {
+      const saved = await cloudApi.removeMiddleStation(session.id, {
+        operationId: crypto.randomUUID(), expectedRevision: session.revision,
+        lineId: selectedRemovalLine.id, stationId: selectedRemoval.stationId,
+        beforeSegmentId: selectedRemoval.before.id,
+        afterSegmentId: selectedRemoval.after.id,
+        mergedSegmentId: crypto.randomUUID(),
+        preservedWaypointId: crypto.randomUUID(),
+      });
+      if (serializeProject(latest.current) !== session.baseJson || draftInProgress.current) {
+        setRemoteRevision(previous => Math.max(previous, saved.revision));
+        setError('删除已提交，但请求期间本地画布发生变化；已保留本地状态，请检查云端最新版。');
+        return;
+      }
+      const next = {
+        id: session.id, name: saved.name, revision: saved.revision,
+        baseJson: serializeProject(saved.document),
+      };
+      activeSession.current = next;
+      latest.current = saved.document;
+      onLoadRef.current(saved.document, next);
+      setRemoteRevision(saved.revision);
+      setRemoveStationId('');
+      setMessage('已安全合并相邻区间，云端 v' + saved.revision);
+    } catch (e) {
+      if (e instanceof CloudApiError && e.status === 409) {
+        setRemoteRevision(previous => Math.max(previous, session.revision + 1));
+        setError('删除被拒绝：工程版本已变化，或线路拓扑、样式、历史关系存在冲突。请同步最新版后处理。');
+      } else {
+        if (e instanceof CloudApiError && (e.status === 403 || e.status === 404))
+          setPermissionLost(true);
+        setError(e instanceof Error ? e.message : '删除中间站失败');
+      }
+    } finally {
+      working.current = false;
+      setBusy(false);
+    }
+  }
+
   async function appendExisting() {
     if (busy || working.current || fetching.current || permissionLost || dirty ||
         draftActive || remoteRevision > session.revision || !selectedAppendLine ||
@@ -475,12 +547,32 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     <button type="button" disabled={busy || permissionLost || dirty || draftActive
       || remoteRevision > session.revision || !splitCanApply}
       onClick={() => void insertStationIntoSegment()}>在区间中插入车站</button>
+    <label>移除中间站的线路
+      <select aria-label="待合并线路" value={removeLineId}
+        onChange={event => { setRemoveLineId(event.target.value); setRemoveStationId(''); }}>
+        <option value="">选择线路</option>
+        {eligibleLines.filter(line => line.stationSequence.length >= 3).map(line =>
+          <option key={line.id} value={line.id}>{line.name || line.id}</option>)}
+      </select>
+    </label>
+    <label>待移除中间站
+      <select aria-label="待移除中间车站" value={removeStationId}
+        onChange={event => setRemoveStationId(event.target.value)}>
+        <option value="">选择车站</option>
+        {removableMiddleStations.map(item => <option key={item.stationId} value={item.stationId}>
+          {project.stations.find(station => station.id === item.stationId)?.name || item.stationId}
+        </option>)}
+      </select>
+    </label>
+    <button type="button" disabled={busy || permissionLost || dirty || draftActive
+      || remoteRevision > session.revision || !selectedRemoval}
+      onClick={() => void removeMiddleStation()}>删除中间站并合并区间</button>
     <button type="button" disabled={busy || permissionLost || !dirty || remoteRevision > session.revision} onClick={() => void publish()}>发布当前画布</button>
     <button type="button" disabled={busy} onClick={() => void pull()}>加载云端最新版</button>
     <button type="button" disabled={busy} onClick={onExit}>退出协同模式</button>
     {error && <p role="alert" style={{ width: '100%' }}>{error}</p>}
     {message && <p role="status" style={{ width: '100%' }}>{message}</p>}
     {liveStatus && <p role="status" style={{ width: '100%' }}>{liveStatus}</p>}
-    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。支持受控线路末端连接和简单连续区间的插站拆分；复杂结构、分期、删除、分叉和环线仍需整图发布。</small>
+    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。支持受控线路末端连接和简单连续区间的插站拆分；简单连续中间站可受控删除并合并区间；复杂结构、分期、其他删除、分叉和环线仍需整图发布。</small>
   </section>;
 }

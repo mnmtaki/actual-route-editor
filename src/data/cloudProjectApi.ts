@@ -46,6 +46,16 @@ export interface CloudSegmentSplit {
   relationId: string;
   splitWaypointIndex: number;
 }
+export interface CloudMiddleStationRemoval {
+  operationId: string;
+  expectedRevision: number;
+  lineId: string;
+  stationId: string;
+  beforeSegmentId: string;
+  afterSegmentId: string;
+  mergedSegmentId: string;
+  preservedWaypointId: string;
+}
 export interface CloudProjectStatus { id: string; name: string; revision: number; visibility: CloudProjectSummary['visibility']; canEdit: boolean }
 export function cloudSocketUrl(id: string): string {
   return API_BASE.replace(/^http/i, 'ws') + '/ws/projects/' + encodeURIComponent(id);
@@ -166,6 +176,14 @@ export const cloudApi = {
   splitSegment: async (id: string, operation: CloudSegmentSplit) => {
     const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
       `/api/projects/${encodeURIComponent(id)}/operations/segment-split`, {
+        method: 'POST', body: JSON.stringify(operation),
+      },
+    );
+    return { ...raw, document: parseProjectJson(JSON.stringify(raw.document)) } as CloudProject;
+  },
+  removeMiddleStation: async (id: string, operation: CloudMiddleStationRemoval) => {
+    const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
+      `/api/projects/${encodeURIComponent(id)}/operations/remove-middle-station`, {
         method: 'POST', body: JSON.stringify(operation),
       },
     );

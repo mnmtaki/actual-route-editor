@@ -851,7 +851,7 @@ class AccountsAndSavesIT {
                 "waypointId","w2","x",1.0e30,"y",8))),guest))
             .andExpect(status().isBadRequest());
         Integer rows=jdbc.queryForObject(
-            "SELECT count(*) FROM cloud_project_operations WHERE project_id=?",
+            "SELECT count(*) FROM cloud_project_operations WHERE project_id=? AND action='segment.waypoint.move'",
             Integer.class,UUID.fromString(id));
         assertEquals(2,rows);
     }

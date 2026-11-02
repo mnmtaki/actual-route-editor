@@ -608,10 +608,12 @@ test('two browser sessions converge after simultaneous independent line topology
         x: line === 'line-a' ? 240 : 650,
         y: line === 'line-a' ? 120 : 440,
         labelOffsetX: 14, labelOffsetY: -14 },
-      relation: { id: relation, stationId: target, lineId: line },
+      relation: { id: relation, stationId: target, lineId: line,
+        openedAt: seed.timeline.currentDate, closedAt: null },
       segment: { id: segment, lineId: line, fromStationId: from,
         toStationId: target, mode: 'straight', structureType: 'underground',
-        structureNodes: [], waypoints: [] },
+        structureNodes: [], waypoints: [],
+        openedAt: seed.timeline.currentDate, closedAt: null },
     });
     const endpoint = '/api/projects/' + id + '/operations/line-append-new';
     const [first, second] = await Promise.all([

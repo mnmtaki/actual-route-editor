@@ -6,7 +6,7 @@ import { cloudApi, cloudSocketUrl, CloudApiError } from '../data/cloudProjectApi
 import type { CloudUndoEntry, CloudOperationHistoryItem } from '../data/cloudProjectApi';
 import { detectStationOperation } from '../data/stationLiveOperations';
 import { detectWaypointMove } from '../data/waypointLiveOperations';
-import { detectCanvasLineAppend } from '../data/collaborationRouting';
+import { detectCanvasLineAppend, detectCanvasSegmentSplit } from '../data/collaborationRouting';
 
 export interface CollaborativeSession {
   id: string;
@@ -401,6 +401,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     if (detectStationOperation(session.baseJson, project) ||
         detectWaypointMove(session.baseJson, project)) return;
     const lineAppend = detectCanvasLineAppend(session.baseJson, project);
+    const segmentSplit = lineAppend ? null : detectCanvasSegmentSplit(session.baseJson, project);
     const snapshot = serializeProject(project);
     const attemptKey = session.id + ':' + session.revision + ':' + snapshot;
     if (lastAutoAttempt.current === attemptKey) return;
@@ -412,21 +413,26 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       lastAutoAttempt.current = attemptKey;
       working.current = true;
       setBusy(true);
-      setLiveStatus(lineAppend ? '正在同步线路接站…' : '正在同步画布修改…');
+      setLiveStatus(lineAppend ? '正在同步线路接站…' : segmentSplit ? '正在同步区间插站…' : '正在同步画布修改…');
       setError('');
       const submitted = lineAppend
         ? cloudApi.appendExistingStation(session.id, {
             ...lineAppend, operationId: crypto.randomUUID(),
             expectedRevision: session.revision,
           })
-        : cloudApi.update(session.id, session.revision, project);
+        : segmentSplit
+          ? cloudApi.splitSegment(session.id, {
+              ...segmentSplit, operationId: crypto.randomUUID(),
+              expectedRevision: session.revision,
+            })
+          : cloudApi.update(session.id, session.revision, project);
       void submitted.then(saved => {
         setRemoteRevision(previous => Math.max(previous, saved.revision));
-        if (lineAppend) {
+        if (lineAppend || segmentSplit) {
           if (serializeProject(latest.current) !== snapshot || draftInProgress.current) {
             // Remote topology succeeded; never reset a newer local drawing.
             // Keep the original baseline, forcing explicit conflict recovery.
-            setError('线路接站已保存，但提交期间还有本地修改。为防止丢失画布内容，请对比并同步云端版本。');
+            setError('拓扑修改已保存，但提交期间还有本地修改。为防止丢失画布内容，请对比并同步云端版本。');
             setRecoveryOpen(true);
             return;
           }
@@ -435,7 +441,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
           activeSession.current = next;
           latest.current = saved.document;
           onLoadRef.current(saved.document, next);
-          setLiveStatus('普通绘制工具接站已按操作级协议同步至 v' + saved.revision);
+          setLiveStatus((lineAppend ? '线路接站' : '区间插站') + '已按操作级协议同步至 v' + saved.revision);
           return;
         }
         const next = { id: session.id, name: saved.name,
@@ -852,6 +858,6 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     {error && <p role="alert" style={{ width: '100%' }}>{error}</p>}
     {message && <p role="status" style={{ width: '100%' }}>{message}</p>}
     {liveStatus && <p role="status" style={{ width: '100%' }}>{liveStatus}</p>}
-    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。支持受控线路末端连接和简单连续区间的插站拆分；简单连续中间站可受控删除并合并区间；仅支持本人站名和移动操作的安全撤销/重做，发生同站或拓扑冲突时会拒绝；简单连续线路的普通画布接站优先使用操作级协议；复杂结构、分期、其他删除、分叉和环线使用严格版本校验的整图自动保存，冲突时停止同步并保留本地草稿。</small>
+    <small style={{ width: '100%' }}>独立车站与既有区间的单个控制点坐标修改可自动提交；不同站点或不同区间可保守合并，重叠修改仍会冲突。支持受控线路末端连接和简单连续区间的插站拆分；简单连续中间站可受控删除并合并区间；仅支持本人站名和移动操作的安全撤销/重做，发生同站或拓扑冲突时会拒绝；简单连续线路的普通画布接站、简单区间插站优先使用操作级协议；复杂结构、分期、其他删除、分叉和环线使用严格版本校验的整图自动保存，冲突时停止同步并保留本地草稿。</small>
   </section>;
 }

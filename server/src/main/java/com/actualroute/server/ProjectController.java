@@ -718,8 +718,7 @@ public class ProjectController {
         }
         Object[] row=locked.get(0);
         long revision=(Long)row[0];
-        if(revision!=input.expectedRevision())
-            throw new ResponseStatusException(HttpStatus.CONFLICT,"线路拓扑已更新，请先同步最新版");
+        requireDisjointLineHistory(id,input.expectedRevision(),revision,input.lineId());
         ObjectNode document;
         try {
             document=(ObjectNode)mapper.readTree((String)row[2]);
@@ -929,8 +928,6 @@ public class ProjectController {
         }
         Object[] row=rows.get(0);
         long revision=(Long)row[0];
-        if(revision!=input.expectedRevision())
-            throw new ResponseStatusException(HttpStatus.CONFLICT,"线路拓扑版本冲突，请同步最新版");
         ObjectNode document;
         try {
             document=(ObjectNode)mapper.readTree((String)row[2]);
@@ -960,6 +957,8 @@ public class ProjectController {
         }
         if(source==null)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"待拆区间已不存在");
+        requireDisjointLineHistory(id,input.expectedRevision(),revision,
+            source.path("lineId").asText());
         for(JsonNode station:stations)
             if(input.stationId().equals(station.path("id").asText()))
                 throw new ResponseStatusException(HttpStatus.CONFLICT,"车站 ID 已存在");
@@ -1166,8 +1165,7 @@ public class ProjectController {
         }
         Object[] row=locked.get(0);
         long revision=(Long)row[0];
-        if(revision!=input.expectedRevision())
-            throw new ResponseStatusException(HttpStatus.CONFLICT,"线路拓扑版本冲突");
+        requireDisjointLineHistory(id,input.expectedRevision(),revision,input.lineId());
         ObjectNode document;
         try { document=(ObjectNode)mapper.readTree((String)row[2]); }
         catch(Exception e) {
@@ -1356,8 +1354,7 @@ public class ProjectController {
         }
         Object[] row=locked.get(0);
         long revision=(Long)row[0];
-        if(revision!=input.expectedRevision())
-            throw new ResponseStatusException(HttpStatus.CONFLICT,"拓扑版本已更新，请先同步");
+        requireDisjointLineHistory(id,input.expectedRevision(),revision,input.lineId());
 
         ObjectNode document;
         try {
@@ -1576,6 +1573,35 @@ public class ProjectController {
         var names=node.fieldNames();
         while(names.hasNext())if(!allowed.contains(names.next()))return false;
         return true;
+    }
+
+    /**
+     * Rebase only proven independent line-topology operations.
+     *
+     * A revision gap, full-document save, station/waypoint edit, or operation
+     * against the same line is a hard conflict boundary. Because callers hold
+     * the project's SELECT ... FOR UPDATE lock, the journal proof and the
+     * following CAS save are serialized with other topology transactions.
+     */
+    private void requireDisjointLineHistory(UUID projectId, long expected,
+                                            long current, String lineId) {
+        if(expected>current)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"操作基线版本超前");
+        if(expected==current)return;
+        Long total=jdbc.queryForObject("""
+            SELECT count(*) FROM cloud_project_operations
+            WHERE project_id=? AND revision>? AND revision<=?
+            """,Long.class,projectId,expected,current);
+        Long unsafe=jdbc.queryForObject("""
+            SELECT count(*) FROM cloud_project_operations
+            WHERE project_id=? AND revision>? AND revision<=?
+              AND (station_id=? OR station_id NOT LIKE 'line:%'
+                OR action NOT IN ('line.append-new','line.append-existing',
+                                  'line.remove-middle-station'))
+            """,Long.class,projectId,expected,current,"line:"+lineId);
+        if(total==null || total!=current-expected || unsafe==null || unsafe>0)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "同线修改、整图保存或操作日志缺口，无法安全合并");
     }
 
     private boolean validId(String id) {

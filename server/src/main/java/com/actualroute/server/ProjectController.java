@@ -766,13 +766,13 @@ public class ProjectController {
             if(!input.lineId().equals(phase.path("lineId").asText())) continue;
             if(input.openingPhaseId()==null
                 || !input.openingPhaseId().equals(phase.path("id").asText())
-                || targetPhase!=null || !(phase instanceof ObjectNode object)
+                || targetPhase!=null || !(phase instanceof ObjectNode)
                 || !(phase.path("segmentIds") instanceof ArrayNode)
                 || !(phase.path("stationRelationIds") instanceof ArrayNode)
                 || !phase.path("openedAt").isTextual())
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "分期线路必须指定唯一且完整的目标分期");
-            targetPhase=object;
+            targetPhase=(ObjectNode)phase;
         }
         if(input.openingPhaseId()!=null && targetPhase==null)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"指定分期不存在");

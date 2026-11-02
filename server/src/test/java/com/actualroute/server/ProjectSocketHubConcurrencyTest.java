@@ -60,10 +60,11 @@ class ProjectSocketHubConcurrencyTest {
             });
             start.countDown();
             CompletableFuture.allOf(leave, join).get(10, TimeUnit.SECONDS);
-            publish.invoke(hub, project, (long) i + 2);
+            final long expectedRevision = (long) i + 2;
+            publish.invoke(hub, project, expectedRevision);
             verify(incoming, atLeastOnce()).sendMessage(argThat(message ->
                 message instanceof TextMessage text &&
-                text.getPayload().contains("\"revision\":" + ((long) i + 2))));
+                text.getPayload().contains("\"revision\":" + expectedRevision)));
             hub.afterConnectionClosed(incoming,
                 org.springframework.web.socket.CloseStatus.NORMAL);
         }

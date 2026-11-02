@@ -1321,6 +1321,55 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void operationHistoryAttributesEditorsAndWholeSavesWithoutExposingPayloads() throws Exception {
+        Session owner=account("historyOwner");
+        Session editor=account("historyEditor");
+        Session outsider=account("historyOther");
+        String id=createProject(owner);
+        String path="/api/projects/"+id;
+        UUID editorId=auth.resolve(editor.sessionCookie().getValue());
+        String username=jdbc.queryForObject("SELECT username FROM app_users WHERE id=?",
+            String.class,editorId);
+        mvc.perform(authorized(post(path+"/access-rules")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",username,"action","edit","allowed",true))),owner))
+            .andExpect(status().isOk());
+        UUID stationOperation=UUID.randomUUID();
+        mvc.perform(authorized(post(path+"/operations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",stationOperation,"expectedRevision",1,
+                "type","station.create","station",Map.of(
+                    "id","st-1","name","Audit station","x",4,"y",5)))),editor))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        JsonNode snapshot=mapper.readTree(mvc.perform(get(path).cookie(owner.cookies()))
+            .andReturn().getResponse().getContentAsString()).path("document");
+        mvc.perform(authorized(put(path).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of("name","Audited",
+                "document",snapshot,"expectedRevision",2))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        mvc.perform(get(path+"/operations/history").cookie(outsider.cookies()))
+            .andExpect(status().isNotFound());
+        mvc.perform(get(path+"/operations/history?limit=0").cookie(owner.cookies()))
+            .andExpect(status().isBadRequest());
+        mvc.perform(get(path+"/operations/history?limit=101").cookie(owner.cookies()))
+            .andExpect(status().isBadRequest());
+        mvc.perform(get(path+"/operations/history").cookie(editor.cookies()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.length()").value(2))
+            .andExpect(jsonPath("$[0].action").value("project.save"))
+            .andExpect(jsonPath("$[0].resourceId").value("project"))
+            .andExpect(jsonPath("$[0].revision").value(3))
+            .andExpect(jsonPath("$[1].action").value("station.create"))
+            .andExpect(jsonPath("$[1].actorName").value(username))
+            .andExpect(jsonPath("$[1].operationId").value(stationOperation.toString()))
+            .andExpect(jsonPath("$[1].payload").doesNotExist());
+        mvc.perform(get(path+"/operations/history?limit=1").cookie(editor.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.length()").value(1));
+    }
+
+    @Test
     void rateLimitBlocksRepeatedFailedLogins() throws Exception {
         String user = "wrong" + UUID.randomUUID().toString().replace("-", "").substring(0, 15);
         String ip = "198.51.100.77";

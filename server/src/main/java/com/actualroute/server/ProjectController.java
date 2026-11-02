@@ -1346,7 +1346,9 @@ public class ProjectController {
     @Transactional
     public ProjectView update(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
                               @Valid @RequestBody SaveRequest input) {
-        return saveRevision(user, id, input.expectedRevision(), input.name(), json(input.document()));
+        ProjectView result=saveRevision(user, id, input.expectedRevision(), input.name(), json(input.document()));
+        journalDocumentChange(user,id,result.revision(),"project.save");
+        return result;
     }
 
     @PostMapping("/{id}/restore")
@@ -1358,7 +1360,17 @@ public class ProjectController {
         requireOwned(user, id);
         RevisionView source = revision(user, id, input.sourceRevision());
         // Restore is an append-only NEW revision, never a destructive historical overwrite.
-        return saveRevision(user, id, input.expectedRevision(), source.name(), json(source.document()));
+        ProjectView result=saveRevision(user, id, input.expectedRevision(), source.name(), json(source.document()));
+        journalDocumentChange(user,id,result.revision(),"project.restore");
+        return result;
+    }
+
+    private void journalDocumentChange(UUID user,UUID id,long revision,String action) {
+        jdbc.update("""
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,
+                                                 actor_id,action,station_id,payload)
+            VALUES(?,?,?,?,?,'project',CAST('{}' AS jsonb))
+            """,id,UUID.randomUUID(),revision,user,action);
     }
 
     private ProjectView saveRevision(UUID user, UUID id, Long expected, String name, String document) {

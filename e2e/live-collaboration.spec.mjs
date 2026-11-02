@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { test, expect, request } from '@playwright/test';
 
 const API = 'http://127.0.0.1:8080';
@@ -405,6 +406,65 @@ test('actor-only station compensation converges in two browser canvases', async 
     const state=await final.json();
     expect(state.revision).toBe(4);
     expect(state.document.stations.find(station=>station.id==='s3').name).toBe('协同改名站');
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});
+
+test('collaboration history and conflict recovery preserve the local canvas and export backup', async ({ browser }) => {
+  const owner = await browser.newContext({ acceptDownloads: true });
+  const peer = await browser.newContext();
+  try {
+    const ownerCsrf=await registerAndLogin(owner,USERS.owner);
+    const peerCsrf=await registerAndLogin(peer,USERS.peer);
+    const bootstrap=await owner.newPage();
+    await bootstrap.goto(SITE);
+    const seed=await bootstrap.evaluate(async ()=>(await import('/src/data/demo.ts')).demoProject);
+    await bootstrap.close();
+    const created=await write(owner,ownerCsrf,'/api/projects',{
+      name:'Recovery Preview Project',document:seed,
+    });
+    const id=created.id;
+    await write(owner,ownerCsrf,'/api/projects/'+id+'/access-rules',{
+      username:USERS.peer,action:'edit',allowed:true,
+    });
+    const a=await openCanvas(owner,id);
+    await a.getByLabel('新车站名称').fill('尚未发布的本地站');
+    let intercepted=false;
+    await a.route('**/api/projects/*/operations',async route=>{
+      if(intercepted) return route.continue();
+      intercepted=true;
+      const remoteCopy={...seed,name:'云端修改了项目名称'};
+      await write(peer,peerCsrf,'/api/projects/'+id,{
+        name:'远端保存',document:remoteCopy,expectedRevision:1,
+      },'PUT');
+      await route.continue();
+    });
+    await a.getByRole('button',{name:'新增独立车站',exact:true}).click();
+    const recovery=a.getByLabel('协同冲突处理');
+    await expect(recovery).toBeVisible({timeout:20000});
+    await expect(a.getByRole('alert')).toContainText('冲突');
+    await recovery.getByRole('button',{name:'刷新云端差异'}).click();
+    await expect(recovery.getByText(/云端相对基线：车站 0/)).toBeVisible();
+    await expect(recovery.getByText(/本地相对基线：车站 1/)).toBeVisible();
+    await a.getByRole('button',{name:'查看操作历史'}).click();
+    const history=a.getByLabel('协同操作历史');
+    await expect(history).toContainText(USERS.peer);
+    await expect(history).toContainText('完整工程保存');
+    const [download]=await Promise.all([
+      a.waitForEvent('download'),
+      recovery.getByRole('button',{name:'先导出本地 JSON 备份'}).click(),
+    ]);
+    const bytes=await readFile(await download.path(),'utf8');
+    const backup=JSON.parse(bytes);
+    expect(backup.stations.some(station=>station.name==='尚未发布的本地站')).toBe(true);
+    // No comparison or backup action is permitted to replace the unsaved canvas.
+    await expect(a.locator('svg').getByText('尚未发布的本地站').first()).toBeVisible();
+    const cloud=await owner.request.get(API+'/api/projects/'+id);
+    const current=await cloud.json();
+    expect(current.revision).toBe(2);
+    expect(current.document.stations.some(station=>station.name==='尚未发布的本地站')).toBe(false);
   } finally {
     await owner.close();
     await peer.close();

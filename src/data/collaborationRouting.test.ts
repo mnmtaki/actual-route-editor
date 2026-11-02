@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createEmptyProject } from './storage';
 import { serializeProject } from '../import-export/projectJson';
 import { connectExistingStation, insertStationIntoSegment } from './operations';
-import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit } from './collaborationRouting';
+import { deleteStationPreservingNetwork } from './stationDeletion';
+import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval } from './collaborationRouting';
 import type { ActualRouteProject } from './model';
 
 function makeProject(): ActualRouteProject {
@@ -86,6 +87,34 @@ describe('ordinary canvas collaboration routing', () => {
     });
     expect(detectCanvasSegmentSplit(serializeProject(phased),
       insertStationIntoSegment(phased, 'seg-ab', { x: 5, y: 0 }).project)).toBeNull();
+  });
+
+  it('routes ordinary middle-station deletion with matching canvas geometry', () => {
+    const project = makeProject();
+    const before = structuredClone(project);
+    before.lines[0].stationSequence.push('c');
+    before.stationLineRelations.push({ id:'rel-c',lineId:'line-1',stationId:'c' });
+    before.geometry.segments.push({
+      id:'seg-bc',lineId:'line-1',fromStationId:'b',toStationId:'c',
+      mode:'straight',structureType:'underground',waypoints:[],
+    });
+    const result = deleteStationPreservingNetwork(before, 'b');
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.reconnected).toBe(true);
+    const operation = detectCanvasMiddleStationRemoval(serializeProject(before),result.project);
+    expect(operation).toMatchObject({
+      lineId:'line-1',stationId:'b',beforeSegmentId:'seg-ab',
+      afterSegmentId:'seg-bc',canvasSemantics:true,
+    });
+    const mixed=structuredClone(result.project);
+    mixed.stations[0].name='Changed outside deletion';
+    expect(detectCanvasMiddleStationRemoval(serializeProject(before),mixed)).toBeNull();
+    const phased=structuredClone(before);
+    phased.openingPhases.push({id:'phase',lineId:'line-1',
+      openedAt:'2026-01-01',segmentIds:[],stationRelationIds:[]});
+    expect(detectCanvasMiddleStationRemoval(serializeProject(phased),
+      result.project)).toBeNull();
   });
 
   it('does not route phase-owned, branched or historical lines', () => {

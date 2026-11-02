@@ -900,6 +900,86 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void canvasContinuousStationDrawingIsAtomicAndIdempotent() throws Exception {
+        Session owner=account("canvasDraw");
+        String id=createProject(owner);
+        JsonNode seed=mapper.readTree("""
+            {"version":1,"name":"Continuous Drawing",
+             "stations":[],
+             "lines":[{"id":"line","name":"L","color":"#335577",
+                       "stationSequence":[],"lineOrder":0,
+                       "visible":true,"locked":false}],
+             "stationLineRelations":[],
+             "geometry":{"segments":[]},
+             "openingPhases":[{"id":"phase","lineId":"line","name":"一期",
+                               "openedAt":"2026-01-01",
+                               "segmentIds":[],"stationRelationIds":[]}],
+             "timeline":{"currentDate":"2026-01-01"}}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Continuous Drawing","document",seed,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        String endpoint="/api/projects/"+id+"/operations/line-append-new";
+        JsonNode firstStation=mapper.readTree("""
+            {"id":"station-a","name":"A","x":10,"y":20,
+             "labelOffsetX":14,"labelOffsetY":-14}
+            """);
+        JsonNode firstRelation=mapper.readTree("""
+            {"id":"rel-a","stationId":"station-a","lineId":"line",
+             "openedAt":"2026-01-01","closedAt":null}
+            """);
+        UUID firstOp=UUID.randomUUID();
+        String first=mapper.writeValueAsString(splitPayload(
+            "operationId",firstOp,"expectedRevision",2,
+            "lineId","line","station",firstStation,
+            "relation",firstRelation,"openingPhaseId","phase"));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(first),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.stations[0].id").value("station-a"))
+            .andExpect(jsonPath("$.document.lines[0].stationSequence[0]").value("station-a"))
+            .andExpect(jsonPath("$.document.openingPhases[0].stationRelationIds[0]").value("rel-a"));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(first),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+
+        JsonNode nextStation=mapper.readTree("""
+            {"id":"station-b","name":"B","x":90,"y":50,
+             "labelOffsetX":14,"labelOffsetY":-14}
+            """);
+        JsonNode nextRelation=mapper.readTree("""
+            {"id":"rel-b","stationId":"station-b","lineId":"line",
+             "openedAt":"2026-01-01","closedAt":null}
+            """);
+        JsonNode segment=mapper.readTree("""
+            {"id":"segment-ab","lineId":"line","fromStationId":"station-a",
+             "toStationId":"station-b","mode":"smooth",
+             "structureType":"underground","structureNodes":[],
+             "waypoints":[{"id":"point-ab","x":45,"y":25,"type":"smooth"}],
+             "openedAt":"2026-01-01","closedAt":null}
+            """);
+        String second=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",3,
+            "lineId","line","fromStationId","station-a",
+            "station",nextStation,"relation",nextRelation,
+            "segment",segment,"openingPhaseId","phase"));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(second),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4))
+            .andExpect(jsonPath("$.document.stations.length()").value(2))
+            .andExpect(jsonPath("$.document.geometry.segments.length()").value(1))
+            .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[0].id").value("point-ab"))
+            .andExpect(jsonPath("$.document.openingPhases[0].segmentIds[0]").value("segment-ab"));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(second),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4));
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4));
+    }
+
+    @Test
     void appendExistingStationUpdatesExactlyOneOpeningPhase() throws Exception {
         Session owner=account("phaseAppend");
         String id=createProject(owner);

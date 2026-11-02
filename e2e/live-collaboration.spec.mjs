@@ -355,3 +355,58 @@ test('two browser canvases converge after middle-station deletion and segment me
     await peer.close();
   }
 });
+
+test('actor-only station compensation converges in two browser canvases', async ({ browser }) => {
+  const owner=await browser.newContext();
+  const peer=await browser.newContext();
+  try {
+    const csrf=await registerAndLogin(owner,USERS.owner);
+    await registerAndLogin(peer,USERS.peer);
+    const bootstrap=await owner.newPage();
+    await bootstrap.goto(SITE);
+    const seed=await bootstrap.evaluate(async ()=>(await import('/src/data/demo.ts')).demoProject);
+    await bootstrap.close();
+    const created=await write(owner,csrf,'/api/projects',{
+      name:'Collaborative Compensation',document:seed,
+    });
+    const id=created.id;
+    await write(owner,csrf,'/api/projects/'+id+'/access-rules',{
+      username:USERS.peer,action:'edit',allowed:true,
+    });
+    const a=await openCanvas(owner,id);
+    const b=await openCanvas(peer,id);
+    const operationId=crypto.randomUUID();
+    await write(owner,csrf,'/api/projects/'+id+'/operations',{
+      operationId,expectedRevision:1,type:'station.rename',
+      station:{id:'s3',name:'协同改名站'},
+    });
+    for(const page of [a,b]) {
+      await expect(page.getByRole('region',{name:'协同工作区'})
+        .getByText(/本地基线 v2 · 远端 v2/)).toBeVisible({timeout:20000});
+      await expect(page.locator('svg').getByText('协同改名站').first()).toBeVisible();
+    }
+    const toolbar=a.getByRole('region',{name:'协同工作区'});
+    await toolbar.getByLabel('我的撤销重做操作').selectOption(operationId);
+    await toolbar.getByRole('button',{name:'撤销本人操作'}).click();
+    for(const page of [a,b]) {
+      await expect(page.getByRole('region',{name:'协同工作区'})
+        .getByText(/本地基线 v3 · 远端 v3/)).toBeVisible({timeout:20000});
+      await expect(page.locator('svg').getByText('青塔').first()).toBeVisible();
+      await expect(page.locator('svg').getByText('协同改名站')).toHaveCount(0);
+    }
+    await toolbar.getByLabel('我的撤销重做操作').selectOption(operationId);
+    await toolbar.getByRole('button',{name:'重做本人操作'}).click();
+    for(const page of [a,b]) {
+      await expect(page.getByRole('region',{name:'协同工作区'})
+        .getByText(/本地基线 v4 · 远端 v4/)).toBeVisible({timeout:20000});
+      await expect(page.locator('svg').getByText('协同改名站').first()).toBeVisible();
+    }
+    const final=await owner.request.get(API+'/api/projects/'+id);
+    const state=await final.json();
+    expect(state.revision).toBe(4);
+    expect(state.document.stations.find(station=>station.id==='s3').name).toBe('协同改名站');
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});

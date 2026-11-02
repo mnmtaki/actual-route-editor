@@ -1098,6 +1098,201 @@ public class ProjectController {
         return saved;
     }
 
+    /**
+     * Atomic ordinary-canvas station creation. A single operation appends the
+     * station, membership, optional interval (with its draft waypoints), and
+     * phase membership. Never infer a branch or implicitly reconnect topology.
+     */
+    public record LineNewStationOperation(
+        @NotNull UUID operationId, @NotNull Long expectedRevision,
+        @NotBlank String lineId, String fromStationId,
+        @NotNull JsonNode station, @NotNull JsonNode relation,
+        JsonNode segment, String openingPhaseId) {}
+
+    @PostMapping("/{id}/operations/line-append-new")
+    @Transactional
+    public ProjectView appendNewStation(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
+                                        @Valid @RequestBody LineNewStationOperation input) {
+        requireWritable(user,id);
+        if(input.expectedRevision()<1 || input.expectedRevision()==Long.MAX_VALUE
+            || !validId(input.lineId())
+            || (input.fromStationId()!=null && !validId(input.fromStationId()))
+            || (input.openingPhaseId()!=null && !validId(input.openingPhaseId()))
+            || !(input.station() instanceof ObjectNode station)
+            || !(input.relation() instanceof ObjectNode relation)
+            || !validId(station.path("id").asText()) || !validName(station.path("name"))
+            || !validCoord(station.path("x")) || !validCoord(station.path("y"))
+            || !validCoord(station.path("labelOffsetX"))
+            || !validCoord(station.path("labelOffsetY"))
+            || !(station.size()==6)
+            || !validId(relation.path("id").asText())
+            || !station.path("id").asText().equals(relation.path("stationId").asText())
+            || !input.lineId().equals(relation.path("lineId").asText())
+            || relation.size()>5
+            || (input.fromStationId()==null && input.segment()!=null)
+            || (input.fromStationId()!=null && !(input.segment() instanceof ObjectNode)))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效的新车站绘制操作");
+
+        ObjectNode payload=mapper.createObjectNode();
+        payload.put("lineId",input.lineId());
+        if(input.fromStationId()!=null)payload.put("fromStationId",input.fromStationId());
+        if(input.openingPhaseId()!=null)payload.put("openingPhaseId",input.openingPhaseId());
+        payload.set("station",station.deepCopy());
+        payload.set("relation",relation.deepCopy());
+        if(input.segment()!=null)payload.set("segment",input.segment().deepCopy());
+        String resource="line:"+input.lineId();
+        var locked=jdbc.query("""
+            SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
+            """,(rs,n)->new Object[]{rs.getLong("revision"),rs.getString("name"),
+                rs.getString("document")},id);
+        if(locked.isEmpty())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
+        var previous=jdbc.query("""
+            SELECT action,station_id,payload FROM cloud_project_operations
+            WHERE project_id=? AND operation_id=?
+            """,(rs,n)->new String[]{rs.getString("action"),rs.getString("station_id"),
+                rs.getString("payload")},id,input.operationId());
+        if(!previous.isEmpty()) {
+            String[] prior=previous.get(0);
+            try {
+                if(!"line.append-new".equals(prior[0]) || !resource.equals(prior[1])
+                    || !mapper.readTree(prior[2]).equals(payload))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"operationId 已用于不同操作");
+            } catch(com.fasterxml.jackson.core.JsonProcessingException e) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"操作记录损坏");
+            }
+            return get(user,id);
+        }
+        Object[] row=locked.get(0);
+        long revision=(Long)row[0];
+        if(revision!=input.expectedRevision())
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"线路拓扑版本冲突");
+        ObjectNode document;
+        try { document=(ObjectNode)mapper.readTree((String)row[2]); }
+        catch(Exception e) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"工程 JSON 损坏");
+        }
+        if(!(document.path("lines") instanceof ArrayNode lines)
+            || !(document.path("stations") instanceof ArrayNode stations)
+            || !(document.path("stationLineRelations") instanceof ArrayNode relations)
+            || !(document.path("geometry").path("segments") instanceof ArrayNode segments))
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"工程拓扑结构无效");
+        ObjectNode line=null;
+        for(JsonNode item:lines)
+            if(input.lineId().equals(item.path("id").asText()) && item instanceof ObjectNode)
+                line=(ObjectNode)item;
+        if(line==null || line.path("locked").asBoolean(false)
+            || line.path("isFake").asBoolean(false)
+            || !line.path("source").isMissingNode()
+            || line.path("operationHistory").isArray() && !line.path("operationHistory").isEmpty()
+            || !(line.path("stationSequence") instanceof ArrayNode sequence))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"线路不支持此类原子绘制");
+        if((input.fromStationId()==null) != sequence.isEmpty())
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"绘制起点与线路站序不一致");
+        if(input.fromStationId()!=null &&
+            !input.fromStationId().equals(sequence.get(sequence.size()-1).asText()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"绘制起点不是末端站");
+        if(segments.size()>100_000 || stations.size()>100_000)
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,"线路节点数量超过限制");
+
+        int lineSegmentCount=0;
+        for(JsonNode segment:segments)
+            if(input.lineId().equals(segment.path("lineId").asText()))lineSegmentCount++;
+        if(lineSegmentCount!=Math.max(0,sequence.size()-1))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"不支持分叉或不连续线路");
+        for(int i=0;i<sequence.size()-1;i++) {
+            String from=sequence.get(i).asText(), to=sequence.get(i+1).asText();
+            int matches=0;
+            for(JsonNode seg:segments)
+                if(input.lineId().equals(seg.path("lineId").asText())
+                    && from.equals(seg.path("fromStationId").asText())
+                    && to.equals(seg.path("toStationId").asText()))matches++;
+            if(matches!=1)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"线路拓扑不是唯一连续链");
+        }
+        for(JsonNode old:stations)
+            if(station.path("id").asText().equals(old.path("id").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"车站 ID 已存在");
+        for(JsonNode old:relations)
+            if(relation.path("id").asText().equals(old.path("id").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"关联 ID 已存在");
+
+        ObjectNode newSegment=null;
+        if(input.fromStationId()!=null) {
+            newSegment=(ObjectNode)input.segment();
+            if(!validId(newSegment.path("id").asText())
+                || !input.lineId().equals(newSegment.path("lineId").asText())
+                || !input.fromStationId().equals(newSegment.path("fromStationId").asText())
+                || !station.path("id").asText().equals(newSegment.path("toStationId").asText())
+                || !java.util.Set.of("straight","smooth").contains(newSegment.path("mode").asText())
+                || !"underground".equals(newSegment.path("structureType").asText())
+                || !(newSegment.path("waypoints") instanceof ArrayNode waypointNodes)
+                || waypointNodes.size()>500
+                || !newSegment.path("source").isMissingNode()
+                || newSegment.path("structureNodes").isArray() &&
+                    !newSegment.path("structureNodes").isEmpty()
+                || newSegment.has("operationHistory") || newSegment.has("lineHistory"))
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"新区间结构无效");
+            java.util.Set<String> waypointIds=new java.util.HashSet<>();
+            for(JsonNode waypoint:waypointNodes)
+                if(!validId(waypoint.path("id").asText())
+                    || !waypointIds.add(waypoint.path("id").asText())
+                    || !validCoord(waypoint.path("x")) || !validCoord(waypoint.path("y"))
+                    || !java.util.Set.of("smooth","corner").contains(waypoint.path("type").asText())
+                    || waypoint.size()!=4)
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"控制点数据无效");
+            for(JsonNode old:segments) {
+                if(newSegment.path("id").asText().equals(old.path("id").asText()))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"区间 ID 已存在");
+                for(JsonNode waypoint:old.path("waypoints"))
+                    if(waypointIds.contains(waypoint.path("id").asText()))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,"控制点 ID 已存在");
+            }
+        }
+        ObjectNode targetPhase=null;
+        for(JsonNode phase:document.path("openingPhases")) {
+            if(!input.lineId().equals(phase.path("lineId").asText()))continue;
+            if(input.openingPhaseId()==null
+                || !input.openingPhaseId().equals(phase.path("id").asText())
+                || targetPhase!=null || !(phase instanceof ObjectNode)
+                || !(phase.path("segmentIds") instanceof ArrayNode)
+                || !(phase.path("stationRelationIds") instanceof ArrayNode)
+                || !phase.path("openedAt").isTextual())
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"分期目标不唯一或缺失");
+            targetPhase=(ObjectNode)phase;
+        }
+        if(input.openingPhaseId()!=null && targetPhase==null)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"指定分期不存在");
+        JsonNode opened=targetPhase!=null?targetPhase.path("openedAt"):line.path("openedAt");
+        if(!opened.isTextual())opened=document.path("timeline").path("currentDate");
+        for(JsonNode item:java.util.List.of(relation)) {
+            if(!java.util.Objects.equals(item.path("openedAt").isTextual()?item.path("openedAt").asText():null,
+                opened.isTextual()?opened.asText():null))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"车站关联开通时间不一致");
+        }
+        if(newSegment!=null &&
+            !java.util.Objects.equals(newSegment.path("openedAt").isTextual()?
+                newSegment.path("openedAt").asText():null,opened.isTextual()?opened.asText():null))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"区间开通时间不一致");
+        stations.add(station.deepCopy());
+        relations.add(relation.deepCopy());
+        sequence.add(station.path("id").asText());
+        if(newSegment!=null)segments.add(newSegment.deepCopy());
+        if(targetPhase!=null) {
+            ((ArrayNode)targetPhase.path("stationRelationIds")).add(relation.path("id").asText());
+            if(newSegment!=null)
+                ((ArrayNode)targetPhase.path("segmentIds")).add(newSegment.path("id").asText());
+        }
+        ProjectView saved=saveRevision(user,id,revision,(String)row[1],json(document));
+        jdbc.update("""
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,actor_id,
+                action,station_id,payload)
+            VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
+            """,id,input.operationId(),saved.revision(),user,
+                "line.append-new",resource,payload.toString());
+        return saved;
+    }
+
     public record RemoveMiddleStationOperation(
         @NotNull UUID operationId, @NotNull Long expectedRevision,
         @NotBlank String lineId, @NotBlank String stationId,

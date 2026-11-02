@@ -1085,7 +1085,8 @@ public class ProjectController {
         @NotNull UUID operationId, @NotNull Long expectedRevision,
         @NotBlank String lineId, @NotBlank String stationId,
         @NotBlank String beforeSegmentId, @NotBlank String afterSegmentId,
-        @NotBlank String mergedSegmentId, @NotBlank String preservedWaypointId) {}
+        @NotBlank String mergedSegmentId, @NotBlank String preservedWaypointId,
+        Boolean canvasSemantics) {}
 
     /**
      * Bounded middle-station removal. Keeps cross-line transfer stations.
@@ -1111,6 +1112,7 @@ public class ProjectController {
         payload.put("afterSegmentId",input.afterSegmentId());
         payload.put("mergedSegmentId",input.mergedSegmentId());
         payload.put("preservedWaypointId",input.preservedWaypointId());
+        if(input.canvasSemantics()!=null)payload.put("canvasSemantics",input.canvasSemantics());
         String resource="line:"+input.lineId();
 
         var locked=jdbc.query("""
@@ -1305,15 +1307,31 @@ public class ProjectController {
         ObjectNode merged=before.deepCopy();
         merged.put("id",input.mergedSegmentId());
         merged.put("toStationId",to);
+        // Normal editor deletion always represents the resulting polyline as
+        // a smooth segment, with corner controls for formerly straight tracks.
+        // Legacy API calls retain their original behavior for compatibility.
+        boolean canvasSemantics=Boolean.TRUE.equals(input.canvasSemantics());
+        if(canvasSemantics)merged.put("mode","smooth");
         ArrayNode waypoints=mapper.createArrayNode();
-        for(JsonNode wp:before.path("waypoints"))waypoints.add(wp.deepCopy());
+        for(JsonNode wp:before.path("waypoints")) {
+            JsonNode copied=wp.deepCopy();
+            if(canvasSemantics && "straight".equals(before.path("mode").asText())
+               && copied instanceof ObjectNode object) object.put("type","corner");
+            waypoints.add(copied);
+        }
         ObjectNode formerStation=mapper.createObjectNode();
         formerStation.put("id",input.preservedWaypointId());
         formerStation.put("x",station.path("x").asDouble());
         formerStation.put("y",station.path("y").asDouble());
-        formerStation.put("type","corner");
+        formerStation.put("type",canvasSemantics && "smooth".equals(before.path("mode").asText())
+            ? "smooth" : "corner");
         waypoints.add(formerStation);
-        for(JsonNode wp:after.path("waypoints"))waypoints.add(wp.deepCopy());
+        for(JsonNode wp:after.path("waypoints")) {
+            JsonNode copied=wp.deepCopy();
+            if(canvasSemantics && "straight".equals(after.path("mode").asText())
+               && copied instanceof ObjectNode object) object.put("type","corner");
+            waypoints.add(copied);
+        }
         merged.set("waypoints",waypoints);
 
         // Remove high indices first to avoid positional shifts.

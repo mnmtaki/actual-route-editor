@@ -1128,7 +1128,8 @@ public class ProjectController {
             || !validId(relation.path("id").asText())
             || !station.path("id").asText().equals(relation.path("stationId").asText())
             || !input.lineId().equals(relation.path("lineId").asText())
-            || relation.size()>5
+            || !onlyFields(relation, java.util.Set.of(
+                "id","stationId","lineId","openedAt","closedAt"))
             || (input.fromStationId()==null && input.segment()!=null)
             || (input.fromStationId()!=null && !(input.segment() instanceof ObjectNode)))
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效的新车站绘制操作");
@@ -1183,6 +1184,7 @@ public class ProjectController {
                 line=(ObjectNode)item;
         if(line==null || line.path("locked").asBoolean(false)
             || line.path("isFake").asBoolean(false)
+            || line.path("parentLineId").isTextual()
             || !line.path("source").isMissingNode()
             || line.path("operationHistory").isArray() && !line.path("operationHistory").isEmpty()
             || !(line.path("stationSequence") instanceof ArrayNode sequence))
@@ -1220,7 +1222,10 @@ public class ProjectController {
         ObjectNode newSegment=null;
         if(input.fromStationId()!=null) {
             newSegment=(ObjectNode)input.segment();
-            if(!validId(newSegment.path("id").asText())
+            if(!onlyFields(newSegment,java.util.Set.of(
+                    "id","lineId","fromStationId","toStationId","mode",
+                    "structureType","structureNodes","waypoints","openedAt","closedAt"))
+                || !validId(newSegment.path("id").asText())
                 || !input.lineId().equals(newSegment.path("lineId").asText())
                 || !input.fromStationId().equals(newSegment.path("fromStationId").asText())
                 || !station.path("id").asText().equals(newSegment.path("toStationId").asText())
@@ -1564,6 +1569,13 @@ public class ProjectController {
             """,id,input.operationId(),saved.revision(),user,
                 "line.remove-middle-station",resource,payload.toString());
         return saved;
+    }
+
+    private boolean onlyFields(JsonNode node, java.util.Set<String> allowed) {
+        if(!node.isObject())return false;
+        var names=node.fieldNames();
+        while(names.hasNext())if(!allowed.contains(names.next()))return false;
+        return true;
     }
 
     private boolean validId(String id) {

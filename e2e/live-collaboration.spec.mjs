@@ -563,3 +563,80 @@ test('normal line drawing tool syncs first and next stations without collaborati
     await peer.close();
   }
 });
+
+test('two browser sessions converge after simultaneous independent line topology operations', async ({ browser }) => {
+  const owner = await browser.newContext();
+  const peer = await browser.newContext();
+  try {
+    const ownerCsrf = await registerAndLogin(owner, USERS.owner);
+    const peerCsrf = await registerAndLogin(peer, USERS.peer);
+    const bootstrap = await owner.newPage();
+    await bootstrap.goto(SITE);
+    const seed = await bootstrap.evaluate(async () => {
+      const { createEmptyProject } = await import('/src/data/storage.ts');
+      const project = createEmptyProject();
+      project.lines = [
+        { id: 'line-a', name: 'A', color: '#123456', lineOrder: 0, visible: true,
+          locked: false, stationSequence: ['a'] },
+        { id: 'line-b', name: 'B', color: '#654321', lineOrder: 1, visible: true,
+          locked: false, stationSequence: ['b'] },
+      ];
+      project.stations = [
+        { id: 'a', name: 'Origin A', x: 100, y: 100, labelOffsetX: 14, labelOffsetY: -14 },
+        { id: 'b', name: 'Origin B', x: 500, y: 400, labelOffsetX: 14, labelOffsetY: -14 },
+      ];
+      project.stationLineRelations = [
+        { id: 'ra', stationId: 'a', lineId: 'line-a' },
+        { id: 'rb', stationId: 'b', lineId: 'line-b' },
+      ];
+      return project;
+    });
+    await bootstrap.close();
+    const created = await write(owner, ownerCsrf, '/api/projects', {
+      name: 'Independent Topology', document: seed,
+    });
+    const id = created.id;
+    await write(owner, ownerCsrf, '/api/projects/' + id + '/access-rules', {
+      username: USERS.peer, action: 'edit', allowed: true,
+    });
+    const a = await openCanvas(owner, id);
+    const b = await openCanvas(peer, id);
+    const operation = (line, from, target, segment, relation) => ({
+      operationId: crypto.randomUUID(), expectedRevision: 1,
+      lineId: line, fromStationId: from,
+      station: { id: target, name: 'Added ' + target,
+        x: line === 'line-a' ? 240 : 650,
+        y: line === 'line-a' ? 120 : 440,
+        labelOffsetX: 14, labelOffsetY: -14 },
+      relation: { id: relation, stationId: target, lineId: line },
+      segment: { id: segment, lineId: line, fromStationId: from,
+        toStationId: target, mode: 'straight', structureType: 'underground',
+        structureNodes: [], waypoints: [] },
+    });
+    const endpoint = '/api/projects/' + id + '/operations/line-append-new';
+    const [first, second] = await Promise.all([
+      write(owner, ownerCsrf, endpoint,
+        operation('line-a', 'a', 'c', 'ac', 'rc')),
+      write(peer, peerCsrf, endpoint,
+        operation('line-b', 'b', 'd', 'bd', 'rd')),
+    ]);
+    expect(new Set([first.revision, second.revision])).toEqual(new Set([2, 3]));
+    const cloud = await (await owner.request.get(API + '/api/projects/' + id)).json();
+    expect(cloud.document.lines.find(line => line.id === 'line-a').stationSequence)
+      .toEqual(['a', 'c']);
+    expect(cloud.document.lines.find(line => line.id === 'line-b').stationSequence)
+      .toEqual(['b', 'd']);
+    for (const page of [a, b]) {
+      await expect(page.getByRole('region', { name: '协同工作区' })
+        .getByText(/本地基线 v3 · 远端 v3/))
+        .toBeVisible({ timeout: 20000 });
+      await expect(page.locator('[data-layer="segments"] path.segment-main'))
+        .toHaveCount(2, { timeout: 20000 });
+      await expect(page.locator('svg').getByText('Added c').first()).toBeVisible();
+      await expect(page.locator('svg').getByText('Added d').first()).toBeVisible();
+    }
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});

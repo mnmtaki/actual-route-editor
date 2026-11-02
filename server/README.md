@@ -293,3 +293,36 @@ test validates the segment split, persisted topology and both online
 canvases. Deletion, arbitrary insert geometry, cross-line transfers,
 operation-based undo and full branching topology collaboration remain
 outside this bounded endpoint.
+
+## Delete an interior line stop and merge adjacent segments (Flyway V13)
+
+`POST /api/projects/{id}/operations/remove-middle-station` is a strictly
+versioned, authenticated, idempotent **operation-level topology mutation**
+for unbranched native lines. The request includes `operationId`,
+`expectedRevision`, `lineId`, `stationId`, the two incident segment IDs,
+a fresh merged segment ID and a fresh waypoint ID.
+
+The server requires a unique interior station with exactly one membership
+for the affected line and exactly two adjacent directed segments. It rejects
+branches, malformed chains, incompatible segment mode/style/structure
+or opening dates, structural nodes, imported provenance, referencing
+operating history, and any stale revision. On success it replaces the
+two segments with one, preserving both waypoint lists in order and placing
+the removed station's coordinates between them as a corner waypoint.
+The affected line's station sequence and its station-line membership are
+updated atomically with the document, history snapshot and operation journal.
+WebSocket revision broadcast happens only after a successful commit.
+
+When a station is shared by another line, the global station object
+**remains** and only its membership in the affected line is removed.
+An orientation anchor that pointed to the removed line is cleared.
+When the station is unshared, has no referenced metadata and no historical
+dependencies, the station object is removed too. If the server cannot prove
+it is safe to delete the global station, it is kept as a standalone station
+rather than being dropped blindly.
+
+The UI exposes a line and middle-station selector and requires explicit
+confirmation. Deleting terminal stations, arbitrary segments, branching
+or historical topology, bulk deletion, and cross-user undo/redo remain
+out of scope. The implementation is intentionally narrower than the
+legacy local editor's general-purpose delete operation.

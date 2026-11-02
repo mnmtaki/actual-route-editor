@@ -147,7 +147,9 @@ export function detectCanvasSegmentSplit(baseJson: string, project: ActualRouteP
       !before.geometry.segments.filter(item=>item.id!==source.id).every(item=>
         after.geometry.segments.some(current=>equal(item,current)))) return null;
   return { segmentId:source.id, stationId:station.id, stationName:station.name,
-    x:station.x, y:station.y, relationId:relation.id,
+    x:station.x, y:station.y,
+    labelOffsetX:station.labelOffsetX, labelOffsetY:station.labelOffsetY,
+    relationId:relation.id,
     beforeSegmentId:first.id, afterSegmentId:second.id,
     splitWaypointIndex:first.waypoints.length };
 }

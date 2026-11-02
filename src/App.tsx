@@ -103,6 +103,7 @@ export default function App() {
   const [libraryReady, setLibraryReady] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [collab, setCollab] = useState<CollaborativeSession | null>(null);
+  const [lineDraftPending, setLineDraftPending] = useState(false);
   const [libraryItems, setLibraryItems] = useState<LocalProjectSummary[]>([]);
   const [libraryBusy, setLibraryBusy] = useState(false);
   const [libraryError, setLibraryError] = useState("");
@@ -1456,7 +1457,7 @@ export default function App() {
           onChange={(e) => importBg(e.currentTarget)}
         />
         {collab && <CollaborativePanel session={collab} project={history.project}
-          draftActive={Boolean(drawing || roadDraft || calibration || phasePreview)}
+          draftActive={Boolean(lineDraftPending || roadDraft || calibration || phasePreview)}
           onCreateStandaloneStation={(name) => {
             const stationId = uid("station");
             const x = view.x + view.width / 2;
@@ -1465,7 +1466,13 @@ export default function App() {
             setSelection({ type: "station", id: stationId });
           }}
           onUpdate={setCollab}
-          onLoad={(project, next) => { resetEditorForProject(project); setCollab(next); }}
+          onLoad={(project, next) => {
+            // Keep continuous line drawing active across collaboration reloads.
+            // The panel only calls this when no uncommitted draft is pending.
+            history.reset(project);
+            latestProject.current = project;
+            setCollab(next);
+          }}
           onExit={() => { setCollab(null); setNotice("已退出协同模式，当前本地工作副本保留"); }}
         />}
         <main className="workspace">
@@ -1533,6 +1540,7 @@ export default function App() {
               onDragCommit={history.commitFrom}
               onDraftHistoryChange={(canUndo, canRedo) => setDraftHistoryAvailability({ canUndo, canRedo })}
               onDraftEdit={history.discardRedo}
+              onLineDraftPendingChange={setLineDraftPending}
               onEditBlocked={setNotice}
               onFinishDrawing={finishDrawing}
               snapOptions={snapOptions}

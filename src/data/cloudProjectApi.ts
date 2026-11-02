@@ -57,6 +57,7 @@ export interface CloudMiddleStationRemoval {
   afterSegmentId: string;
   mergedSegmentId: string;
   preservedWaypointId: string;
+  canvasSemantics?: boolean;
 }
 export interface CloudOperationHistoryItem {
   operationId: string;

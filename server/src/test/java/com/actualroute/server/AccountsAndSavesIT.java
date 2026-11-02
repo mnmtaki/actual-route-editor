@@ -996,6 +996,49 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void canvasSegmentSplitPreservesStationLabelOffsets() throws Exception {
+        Session owner=account("splitLabel");
+        String id=createProject(owner);
+        JsonNode original=mapper.readTree("""
+            {"version":1,"name":"Label Test",
+             "stations":[{"id":"a","name":"A","x":0,"y":0},
+                         {"id":"b","name":"B","x":100,"y":0}],
+             "lines":[{"id":"l","name":"L","color":"#123456",
+                       "stationSequence":["a","b"],"lineOrder":0,
+                       "visible":true,"locked":false}],
+             "stationLineRelations":[{"id":"ra","stationId":"a","lineId":"l"},
+                                     {"id":"rb","stationId":"b","lineId":"l"}],
+             "geometry":{"segments":[{"id":"ab","lineId":"l",
+                                      "fromStationId":"a","toStationId":"b",
+                                      "mode":"straight","structureType":"underground",
+                                      "waypoints":[]}]},
+             "openingPhases":[]}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Label Test","document",original,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        UUID operation=UUID.randomUUID();
+        String body=mapper.writeValueAsString(splitPayload(
+            "operationId",operation,"expectedRevision",2,
+            "segmentId","ab","stationId","middle","stationName","Middle",
+            "x",50,"y",0,"labelOffsetX",17.5,"labelOffsetY",-9.25,
+            "beforeSegmentId","first","afterSegmentId","second",
+            "relationId","rm","splitWaypointIndex",0));
+        String endpoint="/api/projects/"+id+"/operations/segment-split";
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(body),owner))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.document.stations[2].labelOffsetX").value(17.5))
+            .andExpect(jsonPath("$.document.stations[2].labelOffsetY").value(-9.25))
+            .andExpect(jsonPath("$.revision").value(3));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(body),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+    }
+
+    @Test
     void segmentSplitCreatesStationAndTwoSegmentsWithoutLosingWaypoints() throws Exception {
         Session owner=account("splitOwner");
         Session peer=account("splitPeer");

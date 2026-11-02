@@ -56,6 +56,19 @@ export interface CloudMiddleStationRemoval {
   mergedSegmentId: string;
   preservedWaypointId: string;
 }
+export interface CloudUndoEntry {
+  operationId: string;
+  stationId: string;
+  action: 'station.rename' | 'station.move';
+  undone: boolean;
+  stateRevision: number;
+}
+export interface CloudCompensation {
+  operationId: string;
+  targetOperationId: string;
+  expectedRevision: number;
+  direction: 'undo' | 'redo';
+}
 export interface CloudProjectStatus { id: string; name: string; revision: number; visibility: CloudProjectSummary['visibility']; canEdit: boolean }
 export function cloudSocketUrl(id: string): string {
   return API_BASE.replace(/^http/i, 'ws') + '/ws/projects/' + encodeURIComponent(id);
@@ -184,6 +197,16 @@ export const cloudApi = {
   removeMiddleStation: async (id: string, operation: CloudMiddleStationRemoval) => {
     const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
       `/api/projects/${encodeURIComponent(id)}/operations/remove-middle-station`, {
+        method: 'POST', body: JSON.stringify(operation),
+      },
+    );
+    return { ...raw, document: parseProjectJson(JSON.stringify(raw.document)) } as CloudProject;
+  },
+  myUndo: (id: string) =>
+    api<CloudUndoEntry[]>(`/api/projects/${encodeURIComponent(id)}/operations/my-undo`),
+  compensate: async (id: string, operation: CloudCompensation) => {
+    const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
+      `/api/projects/${encodeURIComponent(id)}/operations/compensate`, {
         method: 'POST', body: JSON.stringify(operation),
       },
     );

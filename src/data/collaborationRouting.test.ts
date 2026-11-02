@@ -3,6 +3,7 @@ import { createEmptyProject } from './storage';
 import { serializeProject } from '../import-export/projectJson';
 import { connectExistingStation, insertStationIntoSegment } from './operations';
 import { deleteStationPreservingNetwork } from './stationDeletion';
+import { createOpeningPhase } from './openingPhases';
 import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval } from './collaborationRouting';
 import type { ActualRouteProject } from './model';
 
@@ -57,6 +58,26 @@ describe('ordinary canvas collaboration routing', () => {
     });
     expect(operation?.segmentId).toBeTruthy();
     expect(operation?.relationId).toBeTruthy();
+  });
+
+  it('routes a normal canvas append into its sole explicit opening phase', () => {
+    const base = makeProject();
+    const created = createOpeningPhase(base, {
+      lineId:'line-1', openedAt:'2026-04-01', name:'一期',
+    });
+    const after = connectExistingStation(created.project,'line-1','c','b',created.phaseId);
+    const routed = detectCanvasLineAppend(serializeProject(created.project),after);
+    expect(routed).toMatchObject({
+      lineId:'line-1',fromStationId:'b',toStationId:'c',
+      openingPhaseId:created.phaseId,
+    });
+    const ambiguous = structuredClone(created.project);
+    ambiguous.openingPhases.push({
+      id:'phase-two',lineId:'line-1',openedAt:'2026-05-01',
+      segmentIds:[],stationRelationIds:[],
+    });
+    expect(detectCanvasLineAppend(serializeProject(ambiguous),
+      connectExistingStation(ambiguous,'line-1','c','b',created.phaseId))).toBeNull();
   });
 
   it('rejects mixed changes and non-terminal connections', () => {

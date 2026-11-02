@@ -227,8 +227,8 @@ export default function App() {
   };
   const openCollaborativeProject = (id: string) => {
     void runLibraryAction(async () => {
-      // Each collaborator gets an isolated local working copy; a cloud update
-      // is published only by explicit action in the collaborative toolbar.
+      // Each collaborator gets an isolated local working copy. Ordinary canvas
+      // edits sync automatically via bounded operations or revision-checked CAS.
       const remote = await cloudApi.get(id);
       const local = await createLocalProject(remote.document);
       currentProjectId.current = local.id;
@@ -238,7 +238,7 @@ export default function App() {
       setCollab({ id, name: remote.name, revision: remote.revision,
         baseJson: serializeProject(remote.document) });
       setLibraryOpen(false);
-      setNotice("已进入协同编辑，修改仅在点击「发布当前画布」后共享");
+      setNotice("已进入协同编辑，普通绘制工具的修改会自动同步；冲突时保留本地副本");
     });
   };
   const openedShareLink = useRef(false);

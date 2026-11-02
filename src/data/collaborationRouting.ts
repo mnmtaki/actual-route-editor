@@ -14,10 +14,14 @@ export function canUseLiveLineAppend(
   openingPhaseId?: string,
 ): boolean {
   const line = project.lines.find(item => item.id === lineId);
-  if (!line || !fromId || openingPhaseId ||
+  if (!line || !fromId ||
       line.locked || line.isFake || line.source?.format === 'aarc' ||
-      (line.operationHistory?.length ?? 0) > 0 ||
-      project.openingPhases.some(phase => phase.lineId === lineId)) return false;
+      (line.operationHistory?.length ?? 0) > 0) return false;
+  const phases=project.openingPhases.filter(phase=>phase.lineId===lineId);
+  if ((phases.length===0 && openingPhaseId) ||
+      (phases.length!==0 && (phases.length!==1 || phases[0].id!==openingPhaseId ||
+        !Array.isArray(phases[0].segmentIds) ||
+        !Array.isArray(phases[0].stationRelationIds)))) return false;
   const sequence = line.stationSequence;
   if (sequence.length === 0 || sequence.at(-1) !== fromId ||
       sequence.includes(toId) || new Set(sequence).size !== sequence.length ||
@@ -47,8 +51,9 @@ export function detectCanvasLineAppend(baseJson: string, project: ActualRoutePro
   let before: ActualRouteProject;
   try { before = JSON.parse(baseJson) as ActualRouteProject; } catch { return null; }
   const after = JSON.parse(serializeProject(project)) as ActualRouteProject;
-  if (!equal({ ...before, lines: [], stationLineRelations: [], geometry: { ...before.geometry, segments: [] } },
-             { ...after, lines: [], stationLineRelations: [], geometry: { ...after.geometry, segments: [] } })) return null;
+  if (!equal({ ...before, lines: [], openingPhases: [], stationLineRelations: [], geometry: { ...before.geometry, segments: [] } },
+             { ...after, lines: [], openingPhases: [], stationLineRelations: [], geometry: { ...after.geometry, segments: [] } })) return null;
+  if (before.openingPhases.length !== after.openingPhases.length) return null;
   if (before.lines.length !== after.lines.length ||
       after.stationLineRelations.length !== before.stationLineRelations.length + 1 ||
       after.geometry.segments.length !== before.geometry.segments.length + 1) return null;
@@ -67,8 +72,25 @@ export function detectCanvasLineAppend(baseJson: string, project: ActualRoutePro
   const originalLine = before.lines.find(item => item.id === line.id);
   const fromStationId = originalLine?.stationSequence.at(-1);
   const toStationId = line.stationSequence.at(-1);
+  const changedPhases = after.openingPhases.filter((phase,i)=>
+    !equal(phase,before.openingPhases[i]));
+  const phase = changedPhases.length===1 ? changedPhases[0] : null;
+  if (changedPhases.length>1 ||
+      (phase && (
+        phase.lineId!==line.id ||
+        !before.openingPhases.some(item=>item.id===phase.id) ||
+        !equal({...phase,segmentIds:[],stationRelationIds:[]},
+          {...before.openingPhases.find(item=>item.id===phase.id)!,segmentIds:[],stationRelationIds:[]}) ||
+        !equal(phase.segmentIds,[
+          ...before.openingPhases.find(item=>item.id===phase.id)!.segmentIds,segment.id]) ||
+        !equal(phase.stationRelationIds,[
+          ...before.openingPhases.find(item=>item.id===phase.id)!.stationRelationIds,relation.id])
+      )) ||
+      (!phase && before.openingPhases.some(item=>item.lineId===line.id)) ||
+      !before.openingPhases.every((item,i)=>item.id===after.openingPhases[i].id &&
+        (item.id===phase?.id || equal(item,after.openingPhases[i])))) return null;
   if (!originalLine || !fromStationId || !toStationId ||
-      !canUseLiveLineAppend(before, line.id, fromStationId, toStationId) ||
+      !canUseLiveLineAppend(before, line.id, fromStationId, toStationId, phase?.id) ||
       !equal({ ...originalLine, stationSequence: [] }, { ...line, stationSequence: [] }) ||
       !equal(line.stationSequence, [...originalLine.stationSequence, toStationId]) ||
       relation.lineId !== line.id || relation.stationId !== toStationId ||
@@ -77,9 +99,12 @@ export function detectCanvasLineAppend(baseJson: string, project: ActualRoutePro
       segment.mode !== 'straight' || segment.structureType !== 'underground' ||
       (segment.structureNodes?.length ?? 0) !== 0 || segment.source ||
       segment.lineStyleId !== undefined || segment.operationHistory?.length ||
-      segment.lineHistory?.length || segment.cornerRadius !== undefined) return null;
+      segment.lineHistory?.length || segment.cornerRadius !== undefined ||
+      (phase && (relation.openedAt!==phase.openedAt ||
+        segment.openedAt!==phase.openedAt))) return null;
   return { lineId: line.id, fromStationId, toStationId,
-    segmentId: segment.id, relationId: relation.id };
+    segmentId: segment.id, relationId: relation.id,
+    ...(phase ? { openingPhaseId:phase.id } : {}) };
 }
 
 /**

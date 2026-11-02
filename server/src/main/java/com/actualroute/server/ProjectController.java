@@ -907,6 +907,248 @@ public class ProjectController {
         return saved;
     }
 
+    public record RemoveMiddleStationOperation(
+        @NotNull UUID operationId, @NotNull Long expectedRevision,
+        @NotBlank String lineId, @NotBlank String stationId,
+        @NotBlank String beforeSegmentId, @NotBlank String afterSegmentId,
+        @NotBlank String mergedSegmentId, @NotBlank String preservedWaypointId) {}
+
+    /**
+     * Bounded middle-station removal. Keeps cross-line transfer stations.
+     * Replaces two compatible segments by one, retaining their waypoints and
+     * the deleted stop's world position as a corner waypoint.
+     */
+    @PostMapping("/{id}/operations/remove-middle-station")
+    @Transactional
+    public ProjectView removeMiddleStation(@AuthenticationPrincipal UUID user, @PathVariable UUID id,
+                                            @Valid @RequestBody RemoveMiddleStationOperation input) {
+        requireWritable(user,id);
+        if(input.expectedRevision()<1 || input.expectedRevision()==Long.MAX_VALUE
+            || !validId(input.lineId()) || !validId(input.stationId())
+            || !validId(input.beforeSegmentId()) || !validId(input.afterSegmentId())
+            || !validId(input.mergedSegmentId()) || !validId(input.preservedWaypointId())
+            || input.beforeSegmentId().equals(input.afterSegmentId()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效的车站删除操作");
+
+        ObjectNode payload=mapper.createObjectNode();
+        payload.put("lineId",input.lineId());
+        payload.put("stationId",input.stationId());
+        payload.put("beforeSegmentId",input.beforeSegmentId());
+        payload.put("afterSegmentId",input.afterSegmentId());
+        payload.put("mergedSegmentId",input.mergedSegmentId());
+        payload.put("preservedWaypointId",input.preservedWaypointId());
+        String resource="line:"+input.lineId();
+
+        var locked=jdbc.query("""
+            SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
+            """,(rs,n)->new Object[]{rs.getLong("revision"),rs.getString("name"),rs.getString("document")},id);
+        if(locked.isEmpty())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
+        var prior=jdbc.query("""
+            SELECT action,station_id,payload FROM cloud_project_operations
+            WHERE project_id=? AND operation_id=?
+            """,(rs,n)->new String[]{rs.getString("action"),rs.getString("station_id"),
+                rs.getString("payload")},id,input.operationId());
+        if(!prior.isEmpty()) {
+            String[] priorRow=prior.get(0);
+            try {
+                if(!"line.remove-middle-station".equals(priorRow[0])
+                    || !resource.equals(priorRow[1])
+                    || !mapper.readTree(priorRow[2]).equals(payload))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"operationId 已用于其他操作");
+            } catch(com.fasterxml.jackson.core.JsonProcessingException e) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"操作日志损坏");
+            }
+            return get(user,id);
+        }
+        Object[] row=locked.get(0);
+        long revision=(Long)row[0];
+        if(revision!=input.expectedRevision())
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"拓扑版本已更新，请先同步");
+
+        ObjectNode document;
+        try {
+            document=(ObjectNode)mapper.readTree((String)row[2]);
+        } catch(Exception e) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"工程 JSON 无效");
+        }
+        if(!(document.path("stations") instanceof ArrayNode stations)
+            || !(document.path("lines") instanceof ArrayNode lines)
+            || !(document.path("stationLineRelations") instanceof ArrayNode relations)
+            || !(document.path("geometry").path("segments") instanceof ArrayNode segments))
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"拓扑数据不完整");
+
+        ObjectNode line=null,station=null;
+        int stationIndex=-1;
+        for(JsonNode item:lines)
+            if(input.lineId().equals(item.path("id").asText()))line=(ObjectNode)item;
+        for(int i=0;i<stations.size();i++)
+            if(input.stationId().equals(stations.get(i).path("id").asText())) {
+                stationIndex=i;station=(ObjectNode)stations.get(i);
+            }
+        if(line==null || station==null || line.path("locked").asBoolean(false)
+            || line.path("isFake").asBoolean(false)
+            || !line.path("source").isMissingNode()
+            || !station.path("source").isMissingNode()
+            || line.path("operationHistory").isArray() && !line.path("operationHistory").isEmpty())
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"不支持此线路或车站的快捷删除");
+
+        if(!(line.path("stationSequence") instanceof ArrayNode sequence) || sequence.size()<3)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"线路至少需要三个车站");
+        int position=-1;
+        for(int i=0;i<sequence.size();i++)
+            if(input.stationId().equals(sequence.get(i).asText())) {
+                if(position!=-1)
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"站序出现重复节点");
+                position=i;
+            }
+        if(position<=0 || position>=sequence.size()-1)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"只能删除线路中间站");
+        java.util.Set<String> unique=new java.util.HashSet<>();
+        for(JsonNode node:sequence)
+            if(!unique.add(node.asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"站序存在循环或重复");
+        String from=sequence.get(position-1).asText();
+        String to=sequence.get(position+1).asText();
+
+        ObjectNode before=null,after=null;
+        int beforeIndex=-1,afterIndex=-1, lineSegments=0;
+        for(int i=0;i<segments.size();i++) {
+            JsonNode seg=segments.get(i);
+            if(input.mergedSegmentId().equals(seg.path("id").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"合并区间 ID 已存在");
+            if(!input.lineId().equals(seg.path("lineId").asText()))continue;
+            lineSegments++;
+            if(input.beforeSegmentId().equals(seg.path("id").asText())) {
+                before=(ObjectNode)seg;beforeIndex=i;
+            }
+            if(input.afterSegmentId().equals(seg.path("id").asText())) {
+                after=(ObjectNode)seg;afterIndex=i;
+            }
+        }
+        if(before==null || after==null || lineSegments!=sequence.size()-1)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"区间拓扑不连续或存在分叉");
+        // Validate every edge rather than relying on a matching segment count.
+        for(int k=0;k<sequence.size()-1;k++) {
+            String a=sequence.get(k).asText(), c=sequence.get(k+1).asText();
+            int matches=0;
+            for(JsonNode seg:segments)
+                if(input.lineId().equals(seg.path("lineId").asText())
+                    && a.equals(seg.path("fromStationId").asText())
+                    && c.equals(seg.path("toStationId").asText()))matches++;
+            if(matches!=1)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"站序与区间连接不一致");
+        }
+        if(!from.equals(before.path("fromStationId").asText())
+            ||!input.stationId().equals(before.path("toStationId").asText())
+            ||!input.stationId().equals(after.path("fromStationId").asText())
+            ||!to.equals(after.path("toStationId").asText()))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"两段区间不构成连续链");
+        for(JsonNode seg:segments) {
+            if(!seg.path("waypoints").isArray())continue;
+            for(JsonNode waypoint:seg.path("waypoints"))
+                if(input.preservedWaypointId().equals(waypoint.path("id").asText()))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"控制点 ID 已存在");
+        }
+        for(JsonNode ref:document.path("openingPhases")) {
+            if(input.lineId().equals(ref.path("lineId").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"有分期记录，不允许快捷删除");
+            for(String name:java.util.List.of("segmentIds","stationRelationIds",
+                "overriddenSegmentIds","overriddenStationRelationIds")) {
+                for(JsonNode value:ref.path(name))
+                    if(input.beforeSegmentId().equals(value.asText())
+                        ||input.afterSegmentId().equals(value.asText()))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,"区间被分期引用");
+            }
+        }
+        for(JsonNode event:document.path("operationEvents")) {
+            if(input.lineId().equals(event.path("lineId").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"有运营历史，不允许快捷删除");
+            for(JsonNode val:event.path("segmentIds"))
+                if(input.beforeSegmentId().equals(val.asText())
+                    ||input.afterSegmentId().equals(val.asText()))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"运营历史引用了区间");
+        }
+        for(JsonNode seg:java.util.List.of(before,after)) {
+            if(!seg.path("source").isMissingNode()
+                ||seg.path("structureNodes").isArray() && !seg.path("structureNodes").isEmpty()
+                ||seg.path("operationHistory").isArray() && !seg.path("operationHistory").isEmpty()
+                ||seg.path("lineHistory").isArray() && !seg.path("lineHistory").isEmpty()
+                ||!seg.path("waypoints").isArray())
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"复杂结构或历史区间不可快捷合并");
+        }
+        for(String key:java.util.List.of("lineId","mode","cornerRadius","structureType",
+            "lineStyleId","openedAt","closedAt")) {
+            JsonNode left=before.get(key),right=after.get(key);
+            if(!java.util.Objects.equals(left,right))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"相邻区间样式或运营时间不同");
+        }
+        int relationIndex=-1,relationCount=0,remainingMemberships=0;
+        for(int i=0;i<relations.size();i++) {
+            JsonNode rel=relations.get(i);
+            if(!input.stationId().equals(rel.path("stationId").asText()))continue;
+            if(input.lineId().equals(rel.path("lineId").asText())) {
+                relationIndex=i;relationCount++;
+                if(rel.path("operationHistory").isArray() && !rel.path("operationHistory").isEmpty())
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"车站关联有历史状态");
+            } else remainingMemberships++;
+        }
+        if(relationCount!=1)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"车站成员关系不唯一");
+        // Never remove a shared transfer station or a referenced node globally.
+        boolean referenced=false;
+        for(JsonNode lineNode:lines) {
+            if(input.lineId().equals(lineNode.path("id").asText()))continue;
+            for(JsonNode stationId:lineNode.path("stationSequence"))
+                if(input.stationId().equals(stationId.asText()))referenced=true;
+        }
+        for(JsonNode seg:segments)
+            if(!input.beforeSegmentId().equals(seg.path("id").asText())
+                && !input.afterSegmentId().equals(seg.path("id").asText())
+                && (input.stationId().equals(seg.path("fromStationId").asText())
+                    ||input.stationId().equals(seg.path("toStationId").asText())))referenced=true;
+        // Other features can reference station IDs in arbitrary metadata.
+        // Keep the shared station object; never delete globally unless only
+        // this line owns it and no complex metadata can reference it.
+        boolean safelyRemoveStation=remainingMemberships==0 && !referenced
+            && document.path("openingPhases").isEmpty()
+            && document.path("operationEvents").isEmpty()
+            && document.path("aarc").isMissingNode()
+            && station.path("compoundGroupId").isMissingNode()
+            && station.path("orientationAnchorLineId").isMissingNode();
+
+        ObjectNode merged=before.deepCopy();
+        merged.put("id",input.mergedSegmentId());
+        merged.put("toStationId",to);
+        ArrayNode waypoints=mapper.createArrayNode();
+        for(JsonNode wp:before.path("waypoints"))waypoints.add(wp.deepCopy());
+        ObjectNode formerStation=mapper.createObjectNode();
+        formerStation.put("id",input.preservedWaypointId());
+        formerStation.put("x",station.path("x").asDouble());
+        formerStation.put("y",station.path("y").asDouble());
+        formerStation.put("type","corner");
+        waypoints.add(formerStation);
+        for(JsonNode wp:after.path("waypoints"))waypoints.add(wp.deepCopy());
+        merged.set("waypoints",waypoints);
+
+        // Remove high indices first to avoid positional shifts.
+        segments.remove(Math.max(beforeIndex,afterIndex));
+        segments.remove(Math.min(beforeIndex,afterIndex));
+        segments.insert(Math.min(beforeIndex,afterIndex),merged);
+        sequence.remove(position);
+        relations.remove(relationIndex);
+        if(safelyRemoveStation)stations.remove(stationIndex);
+
+        ProjectView saved=saveRevision(user,id,revision,(String)row[1],json(document));
+        jdbc.update("""
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,actor_id,
+                action,station_id,payload)
+            VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
+            """,id,input.operationId(),saved.revision(),user,
+                "line.remove-middle-station",resource,payload.toString());
+        return saved;
+    }
+
     private boolean validId(String id) {
         return id!=null && !id.isBlank() && id.length()<=120;
     }

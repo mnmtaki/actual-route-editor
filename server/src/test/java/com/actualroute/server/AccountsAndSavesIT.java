@@ -1196,6 +1196,131 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void collaborativeUndoRedoAffectsOnlyOwnStationAndRetainsOtherEditorsWork() throws Exception {
+        Session owner=account("undoOwner");
+        Session peer=account("undoPeer");
+        String id=createProject(owner);
+        String operations="/api/projects/"+id+"/operations";
+        String compensation=operations+"/compensate";
+        UUID peerId=auth.resolve(peer.sessionCookie().getValue());
+        String peerName=jdbc.queryForObject("SELECT username FROM app_users WHERE id=?",
+            String.class,peerId);
+        mvc.perform(authorized(post("/api/projects/"+id+"/access-rules")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",peerName,"action","edit","allowed",true))),owner))
+            .andExpect(status().isOk());
+        for(int i=0;i<2;i++) {
+            mvc.perform(authorized(post(operations).contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(Map.of(
+                    "operationId",UUID.randomUUID(),"expectedRevision",1+i,
+                    "type","station.create","station",Map.of(
+                        "id",i==0?"a":"b","name",i==0?"A":"B",
+                        "x",i==0?100:300,"y",200)))),owner))
+                .andExpect(status().isOk());
+        }
+        UUID moveId=UUID.randomUUID();
+        mvc.perform(authorized(post(operations).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",moveId,"expectedRevision",3,"type","station.move",
+                "station",Map.of("id","a","x",150,"y",250)))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4));
+        // Another editor changes another station. Compensation is allowed.
+        mvc.perform(authorized(post(operations).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",4,"type","station.move",
+                "station",Map.of("id","b","x",350,"y",240)))),peer))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(5));
+        UUID undoId=UUID.randomUUID();
+        String undo=mapper.writeValueAsString(Map.of(
+            "operationId",undoId,"targetOperationId",moveId,
+            "expectedRevision",5,"direction","undo"));
+        mvc.perform(authorized(post(compensation).contentType(MediaType.APPLICATION_JSON)
+            .content(undo),peer)).andExpect(status().isNotFound());
+        mvc.perform(authorized(post(compensation).contentType(MediaType.APPLICATION_JSON)
+            .content(undo),owner)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(6))
+            .andExpect(jsonPath("$.document.stations[0].x").value(100))
+            .andExpect(jsonPath("$.document.stations[1].x").value(350));
+        // Exact retry does not generate a second inverse.
+        mvc.perform(authorized(post(compensation).contentType(MediaType.APPLICATION_JSON)
+            .content(undo),owner)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(6));
+        UUID redoId=UUID.randomUUID();
+        mvc.perform(authorized(post(compensation).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",redoId,"targetOperationId",moveId,
+                "expectedRevision",6,"direction","redo"))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(7))
+            .andExpect(jsonPath("$.document.stations[0].x").value(150))
+            .andExpect(jsonPath("$.document.stations[1].x").value(350));
+        mvc.perform(authorized(get(operations+"/my-undo"),owner))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$[0].operationId").value(moveId.toString()))
+            .andExpect(jsonPath("$[0].undone").value(false));
+        assertEquals(1,jdbc.queryForObject("""
+            SELECT count(*) FROM cloud_station_undo_entries
+            WHERE project_id=? AND operation_id=?
+            """,Integer.class,UUID.fromString(id),moveId));
+    }
+
+    @Test
+    void collaborativeUndoRejectsSameStationOrUnjournaledFullSave() throws Exception {
+        Session owner=account("undoConflict");
+        Session peer=account("undoCollide");
+        String id=createProject(owner);
+        UUID peerId=auth.resolve(peer.sessionCookie().getValue());
+        String peerName=jdbc.queryForObject("SELECT username FROM app_users WHERE id=?",
+            String.class,peerId);
+        mvc.perform(authorized(post("/api/projects/"+id+"/access-rules")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",peerName,"action","edit","allowed",true))),owner))
+            .andExpect(status().isOk());
+        String path="/api/projects/"+id+"/operations";
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",1,
+                "type","station.create",
+                "station",Map.of("id","a","name","Original","x",100,"y",200)))),owner))
+            .andExpect(status().isOk());
+        UUID originalId=UUID.randomUUID();
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",originalId,"expectedRevision",2,
+                "type","station.rename",
+                "station",Map.of("id","a","name","New Name")))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",3,
+                "type","station.rename",
+                "station",Map.of("id","a","name","Peer Name")))),peer))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4));
+        mvc.perform(authorized(post(path+"/compensate").contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"targetOperationId",originalId,
+                "expectedRevision",4,"direction","undo"))),owner))
+            .andExpect(status().isConflict());
+        var current=mapper.readTree(mvc.perform(get("/api/projects/"+id)
+            .cookie(owner.cookies())).andReturn().getResponse().getContentAsString());
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","City","document",current.path("document"),
+                "expectedRevision",4))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(5));
+        mvc.perform(authorized(post(path+"/compensate").contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"targetOperationId",originalId,
+                "expectedRevision",5,"direction","undo"))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(5))
+            .andExpect(jsonPath("$.document.stations[0].name").value("Peer Name"));
+    }
+
+    @Test
     void rateLimitBlocksRepeatedFailedLogins() throws Exception {
         String user = "wrong" + UUID.randomUUID().toString().replace("-", "").substring(0, 15);
         String ip = "198.51.100.77";

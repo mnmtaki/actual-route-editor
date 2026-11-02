@@ -1045,6 +1045,157 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void removeMiddleStationMergesCompatibleSegmentsPreservesGeometryAndRejectsStale() throws Exception {
+        Session owner=account("removeOwner");
+        Session peer=account("removePeer");
+        String id=createProject(owner);
+        UUID peerId=auth.resolve(peer.sessionCookie().getValue());
+        String username=jdbc.queryForObject("SELECT username FROM app_users WHERE id=?",
+            String.class,peerId);
+        mvc.perform(authorized(post("/api/projects/"+id+"/access-rules")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",username,"action","edit","allowed",true))),owner))
+            .andExpect(status().isOk());
+
+        JsonNode original=mapper.readTree("""
+            {"version":1,"name":"Removal Network",
+             "stations":[
+               {"id":"a","name":"A","x":100,"y":200,"labelOffsetX":0,"labelOffsetY":0},
+               {"id":"b","name":"B","x":300,"y":220,"labelOffsetX":0,"labelOffsetY":0},
+               {"id":"c","name":"C","x":500,"y":240,"labelOffsetX":0,"labelOffsetY":0}
+             ],
+             "lines":[{"id":"line-a","name":"Line A","color":"#335577",
+               "stationSequence":["a","b","c"],"lineOrder":0,
+               "openedAt":"2020-01-01","visible":true,"locked":false}],
+             "stationLineRelations":[
+               {"id":"ra","lineId":"line-a","stationId":"a","openedAt":"2020-01-01"},
+               {"id":"rb","lineId":"line-a","stationId":"b","openedAt":"2020-01-01"},
+               {"id":"rc","lineId":"line-a","stationId":"c","openedAt":"2020-01-01"}],
+             "geometry":{"segments":[
+               {"id":"s-ab","lineId":"line-a","fromStationId":"a","toStationId":"b",
+                "mode":"smooth","structureType":"elevated","structureNodes":[],
+                "lineStyleId":"style-one",
+                "waypoints":[{"id":"w1","x":180,"y":260,"type":"smooth"}],
+                "openedAt":"2020-01-01"},
+               {"id":"s-bc","lineId":"line-a","fromStationId":"b","toStationId":"c",
+                "mode":"smooth","structureType":"elevated","structureNodes":[],
+                "lineStyleId":"style-one",
+                "waypoints":[{"id":"w2","x":420,"y":275,"type":"corner"}],
+                "openedAt":"2020-01-01"}]},
+             "openingPhases":[],"operationEvents":[],"timeline":{"currentDate":"2025-01-01"}}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Removal Network","document",original,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        String path="/api/projects/"+id+"/operations/remove-middle-station";
+        UUID op=UUID.randomUUID();
+        String body=mapper.writeValueAsString(Map.of(
+            "operationId",op,"expectedRevision",2,
+            "lineId","line-a","stationId","b",
+            "beforeSegmentId","s-ab","afterSegmentId","s-bc",
+            "mergedSegmentId","s-ac","preservedWaypointId","w-b"));
+        mvc.perform(post(path).contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isUnauthorized());
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(body),peer))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.lines[0].stationSequence.length()").value(2))
+            .andExpect(jsonPath("$.document.geometry.segments.length()").value(1))
+            .andExpect(jsonPath("$.document.geometry.segments[0].id").value("s-ac"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].fromStationId").value("a"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].toStationId").value("c"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[0].id").value("w1"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[1].id").value("w-b"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[1].x").value(300))
+            .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[1].type").value("corner"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[2].id").value("w2"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].structureType").value("elevated"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].lineStyleId").value("style-one"))
+            .andExpect(jsonPath("$.document.stations.length()").value(2))
+            .andExpect(jsonPath("$.document.stationLineRelations.length()").value(2));
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(body),peer))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",op,"expectedRevision",2,"lineId","line-a","stationId","b",
+                "beforeSegmentId","s-ab","afterSegmentId","s-bc",
+                "mergedSegmentId","other","preservedWaypointId","w-b"))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "lineId","line-a","stationId","b",
+                "beforeSegmentId","s-ab","afterSegmentId","s-bc",
+                "mergedSegmentId","another","preservedWaypointId","w-c"))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        assertEquals(1,jdbc.queryForObject("""
+            SELECT count(*) FROM cloud_project_operations
+             WHERE project_id=? AND action='line.remove-middle-station'
+            """,Integer.class,UUID.fromString(id)));
+    }
+
+    @Test
+    void removeSharedMiddleStationKeepsGlobalStationForOtherLine() throws Exception {
+        Session owner=account("transferOwner");
+        String id=createProject(owner);
+        JsonNode original=mapper.readTree("""
+            {"version":1,"name":"Transfer Network",
+             "stations":[
+               {"id":"a","name":"A","x":100,"y":200,"labelOffsetX":0,"labelOffsetY":0},
+               {"id":"b","name":"B","x":300,"y":200,"labelOffsetX":0,"labelOffsetY":0,
+                "orientationAnchorLineId":"l1"},
+               {"id":"c","name":"C","x":500,"y":200,"labelOffsetX":0,"labelOffsetY":0},
+               {"id":"d","name":"D","x":300,"y":500,"labelOffsetX":0,"labelOffsetY":0}
+             ],
+             "lines":[
+               {"id":"l1","name":"L1","color":"#335577",
+                "stationSequence":["a","b","c"],"lineOrder":0,
+                "openedAt":"2020-01-01","visible":true,"locked":false},
+               {"id":"l2","name":"L2","color":"#226688",
+                "stationSequence":["b","d"],"lineOrder":1,
+                "openedAt":"2020-01-01","visible":true,"locked":false}],
+             "stationLineRelations":[
+               {"id":"r1a","lineId":"l1","stationId":"a","openedAt":"2020-01-01"},
+               {"id":"r1b","lineId":"l1","stationId":"b","openedAt":"2020-01-01"},
+               {"id":"r1c","lineId":"l1","stationId":"c","openedAt":"2020-01-01"},
+               {"id":"r2b","lineId":"l2","stationId":"b","openedAt":"2020-01-01"},
+               {"id":"r2d","lineId":"l2","stationId":"d","openedAt":"2020-01-01"}],
+             "geometry":{"segments":[
+               {"id":"s1","lineId":"l1","fromStationId":"a","toStationId":"b",
+                "mode":"straight","structureType":"underground","waypoints":[]},
+               {"id":"s2","lineId":"l1","fromStationId":"b","toStationId":"c",
+                "mode":"straight","structureType":"underground","waypoints":[]},
+               {"id":"s3","lineId":"l2","fromStationId":"b","toStationId":"d",
+                "mode":"straight","structureType":"underground","waypoints":[]}]},
+             "openingPhases":[],"operationEvents":[],"timeline":{"currentDate":"2025-01-01"}}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Transfer Network","document",original,"expectedRevision",1))),owner))
+            .andExpect(status().isOk());
+        String path="/api/projects/"+id+"/operations/remove-middle-station";
+        mvc.perform(authorized(post(path).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "lineId","l1","stationId","b",
+                "beforeSegmentId","s1","afterSegmentId","s2",
+                "mergedSegmentId","s4","preservedWaypointId","wp-b"))),owner))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.document.stations.length()").value(4))
+            .andExpect(jsonPath("$.document.stationLineRelations.length()").value(4))
+            .andExpect(jsonPath("$.document.lines[0].stationSequence.length()").value(2))
+            .andExpect(jsonPath("$.document.lines[1].stationSequence[0]").value("b"))
+            .andExpect(jsonPath("$.document.stations[1].orientationAnchorLineId").doesNotExist())
+            .andExpect(jsonPath("$.document.geometry.segments.length()").value(2))
+            .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[0].id").value("wp-b"));
+    }
+
+    @Test
     void rateLimitBlocksRepeatedFailedLogins() throws Exception {
         String user = "wrong" + UUID.randomUUID().toString().replace("-", "").substring(0, 15);
         String ip = "198.51.100.77";

@@ -1,6 +1,6 @@
 import type { ActualRouteProject } from './model';
 import { serializeProject } from '../import-export/projectJson';
-import type { CloudLineAppend, CloudSegmentSplit } from './cloudProjectApi';
+import type { CloudLineAppend, CloudSegmentSplit, CloudMiddleStationRemoval } from './cloudProjectApi';
 
 /**
  * The backend's line-append endpoint intentionally supports only an existing,
@@ -152,4 +152,89 @@ export function detectCanvasSegmentSplit(baseJson: string, project: ActualRouteP
     relationId:relation.id,
     beforeSegmentId:first.id, afterSegmentId:second.id,
     splitWaypointIndex:first.waypoints.length };
+}
+
+/**
+ * Route an ordinary delete-key operation to the bounded Java removal endpoint.
+ * Only a single native non-transfer middle station in an exact, phase-free,
+ * forward-oriented chain is eligible. The output must match the editor's own
+ * safe "merge tracks" semantics without deleting unrelated objects.
+ */
+export function detectCanvasMiddleStationRemoval(baseJson: string, project: ActualRouteProject):
+  Omit<CloudMiddleStationRemoval, 'operationId' | 'expectedRevision'> | null {
+  let before: ActualRouteProject;
+  try { before = JSON.parse(baseJson) as ActualRouteProject; } catch { return null; }
+  const after=JSON.parse(serializeProject(project)) as ActualRouteProject;
+  if (!equal({ ...before, stations: [], lines: [], stationLineRelations: [],
+      geometry: { ...before.geometry, segments: [] } },
+    { ...after, stations: [], lines: [], stationLineRelations: [],
+      geometry: { ...after.geometry, segments: [] } })) return null;
+  if (before.stations.length!==after.stations.length+1 ||
+      before.stationLineRelations.length!==after.stationLineRelations.length+1 ||
+      before.lines.length!==after.lines.length ||
+      before.geometry.segments.length!==after.geometry.segments.length+1 ||
+      before.openingPhases.length || (before.operationEvents?.length??0) ||
+      before.aarc) return null;
+
+  const removedStations=before.stations.filter(station=>!after.stations.some(x=>x.id===station.id));
+  const removedRelations=before.stationLineRelations.filter(rel=>!after.stationLineRelations.some(x=>x.id===rel.id));
+  const removedSegments=before.geometry.segments.filter(seg=>!after.geometry.segments.some(x=>x.id===seg.id));
+  const addedSegments=after.geometry.segments.filter(seg=>!before.geometry.segments.some(x=>x.id===seg.id));
+  if (removedStations.length!==1 || removedRelations.length!==1 ||
+      removedSegments.length!==2 || addedSegments.length!==1 ||
+      !before.stations.filter(x=>x.id!==removedStations[0].id).every(x=>after.stations.some(y=>equal(x,y))) ||
+      !before.stationLineRelations.filter(x=>x.id!==removedRelations[0].id).every(x=>after.stationLineRelations.some(y=>equal(x,y))) ||
+      !before.geometry.segments.filter(x=>!removedSegments.some(r=>r.id===x.id))
+        .every(x=>after.geometry.segments.some(y=>equal(x,y)))) return null;
+  const station=removedStations[0], rel=removedRelations[0], merged=addedSegments[0];
+  if (station.source || station.compoundGroupId || station.orientationAnchorLineId ||
+      rel.stationId!==station.id || rel.operationHistory?.length ||
+      before.stationLineRelations.filter(r=>r.stationId===station.id).length!==1 ||
+      before.geometry.segments.filter(seg=>seg.fromStationId===station.id || seg.toStationId===station.id).length!==2 ||
+      merged.mode!=='smooth' || merged.structureNodes?.length || merged.source ||
+      merged.operationHistory?.length || merged.lineHistory?.length) return null;
+  const line=before.lines.find(item=>item.id===rel.lineId);
+  const nextLine=after.lines.find(item=>item.id===rel.lineId);
+  if(!line || !nextLine || line.locked || line.isFake || line.source ||
+      line.operationHistory?.length || line.stationSequence.length<3 ||
+      before.lines.filter(x=>x.id!==line.id).some(x=>!equal(x,after.lines.find(y=>y.id===x.id))) ||
+      !equal({...line,stationSequence:[]},{...nextLine,stationSequence:[]}) ||
+      new Set(line.stationSequence).size!==line.stationSequence.length ||
+      before.geometry.segments.filter(seg=>seg.lineId===line.id).length!==line.stationSequence.length-1) return null;
+  const index=line.stationSequence.indexOf(station.id);
+  if(index<=0 || index>=line.stationSequence.length-1 ||
+      !equal(nextLine.stationSequence,line.stationSequence.filter(id=>id!==station.id)) ||
+      !line.stationSequence.slice(1).every((id,i)=>before.geometry.segments.filter(seg=>
+        seg.lineId===line.id && seg.fromStationId===line.stationSequence[i] &&
+        seg.toStationId===id).length===1)) return null;
+  const from=line.stationSequence[index-1], to=line.stationSequence[index+1];
+  const first=removedSegments.find(seg=>seg.lineId===line.id &&
+    seg.fromStationId===from && seg.toStationId===station.id);
+  const second=removedSegments.find(seg=>seg.lineId===line.id &&
+    seg.fromStationId===station.id && seg.toStationId===to);
+  if(!first || !second || merged.lineId!==line.id ||
+      merged.fromStationId!==from || merged.toStationId!==to ||
+      first.source || second.source ||
+      first.structureNodes?.length || second.structureNodes?.length ||
+      first.lineHistory?.length || second.lineHistory?.length ||
+      first.operationHistory?.length || second.operationHistory?.length ||
+      !['straight','smooth'].includes(first.mode) ||
+      first.mode!==second.mode || first.structureType!==second.structureType ||
+      first.lineStyleId!==second.lineStyleId || first.cornerRadius!==second.cornerRadius ||
+      first.openedAt!==second.openedAt || first.closedAt!==second.closedAt ||
+      merged.structureType!==first.structureType || merged.lineStyleId!==first.lineStyleId ||
+      merged.cornerRadius!==first.cornerRadius || merged.openedAt!==first.openedAt ||
+      merged.closedAt!==first.closedAt ||
+      merged.waypoints.length!==first.waypoints.length+second.waypoints.length+1 ||
+      !equal(merged.waypoints.slice(0,first.waypoints.length),
+        first.waypoints.map(w=>first.mode==='straight'?{...w,type:'corner'}:w)) ||
+      !equal(merged.waypoints.slice(first.waypoints.length+1),
+        second.waypoints.map(w=>second.mode==='straight'?{...w,type:'corner'}:w))) return null;
+  const center=merged.waypoints[first.waypoints.length];
+  if(center.x!==station.x || center.y!==station.y ||
+      center.type!==(first.mode==='straight'?'corner':'smooth')) return null;
+  return { lineId:line.id, stationId:station.id,
+    beforeSegmentId:first.id, afterSegmentId:second.id,
+    mergedSegmentId:merged.id, preservedWaypointId:center.id,
+    canvasSemantics:true };
 }

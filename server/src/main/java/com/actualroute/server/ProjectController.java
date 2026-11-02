@@ -486,7 +486,9 @@ public class ProjectController {
         Long overlaps=jdbc.queryForObject("""
             SELECT count(*) FROM cloud_project_operations
             WHERE project_id=? AND revision>? AND revision<=?
-                AND station_id=?
+              AND (station_id=? OR action NOT IN
+                    ('station.create','station.rename','station.move',
+                     'station.undo','station.redo'))
             """,Long.class,id,previousRevision,revision,(String)record[0]);
         // Every intermediate revision must be explicitly recorded, and none
         // may touch this station. Full-document PUT / restore lack such logs.

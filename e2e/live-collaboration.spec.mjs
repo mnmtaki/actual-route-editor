@@ -489,3 +489,77 @@ test('collaboration history and conflict recovery preserve the local canvas and 
     await peer.close();
   }
 });
+
+test('normal line drawing tool syncs first and next stations without collaboration buttons', async ({ browser }) => {
+  const owner = await browser.newContext();
+  const peer = await browser.newContext();
+  try {
+    const csrf = await registerAndLogin(owner, USERS.owner);
+    await registerAndLogin(peer, USERS.peer);
+    const bootstrap = await owner.newPage();
+    await bootstrap.goto(SITE);
+    const empty = await bootstrap.evaluate(async () =>
+      (await import('/src/data/storage.ts')).createEmptyProject());
+    await bootstrap.close();
+    const created = await write(owner, csrf, '/api/projects', {
+      name: 'Ordinary Canvas Drawing', document: empty,
+    });
+    const id = created.id;
+    await write(owner, csrf, '/api/projects/' + id + '/access-rules', {
+      username: USERS.peer, action: 'edit', allowed: true,
+    });
+    const a = await openCanvas(owner, id);
+    const b = await openCanvas(peer, id);
+
+    // Use the SAME controls as the single-user drawing workflow.
+    await a.getByRole('button', { name: '＋ 新建线路' }).click();
+    await a.locator('.line-dialog').getByRole('button', { name: '开始绘制' }).click();
+    const drawing = a.locator('#network-canvas');
+    await expect(drawing).toHaveClass(/is-drawing/);
+
+    // The newly created line and opening phase must be saved even though
+    // drawing mode is still active.
+    await expect.poll(async () => {
+      const res = await owner.request.get(API + '/api/projects/' + id);
+      const data = await res.json();
+      return { lines: data.document.lines.length, phases: data.document.openingPhases.length };
+    }, { timeout: 20000 }).toEqual({ lines: 1, phases: 1 });
+
+    await drawing.click({ position: { x: 390, y: 310 } });
+    await expect.poll(async () => {
+      const res = await owner.request.get(API + '/api/projects/' + id);
+      const data = await res.json();
+      return { stations: data.document.stations.length, relations: data.document.stationLineRelations.length };
+    }, { timeout: 20000 }).toEqual({ stations: 1, relations: 1 });
+
+    // Cloud acknowledgement must not close the normal line drawing tool.
+    await expect(drawing).toHaveClass(/is-drawing/);
+    await drawing.click({ position: { x: 700, y: 490 } });
+    await a.getByRole('button', { name: '完成绘制' }).click();
+    await expect.poll(async () => {
+      const res = await owner.request.get(API + '/api/projects/' + id);
+      const data = await res.json();
+      return {
+        stations: data.document.stations.length,
+        segments: data.document.geometry.segments.length,
+        phaseSegments: data.document.openingPhases[0]?.segmentIds.length,
+      };
+    }, { timeout: 20000 }).toEqual({
+      stations: 2, segments: 1, phaseSegments: 1,
+    });
+
+    await expect.poll(async () => {
+      const res = await peer.request.get(API + '/api/projects/' + id);
+      const data = await res.json();
+      return data.document.lines[0]?.stationSequence.length;
+    }, { timeout: 20000 }).toBe(2);
+    await expect(b.getByRole('region', { name: '协同工作区' })
+      .getByText(/本地基线 v4 · 远端 v4/))
+      .toBeVisible({ timeout: 20000 });
+    await expect(b.locator('[data-layer="segments"] path.segment-main'))
+      .toHaveCount(1, { timeout: 20000 });
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});

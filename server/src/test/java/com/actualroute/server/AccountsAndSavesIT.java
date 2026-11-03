@@ -1627,6 +1627,59 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void crossLineExistingStationAppendConflictsWithSharedEndpoint() throws Exception {
+        Session owner=account("crossTransfer");
+        String id=createProject(owner);
+        JsonNode doc=mapper.readTree("""
+            {"version":1,"name":"Transfer",
+             "stations":[{"id":"a","name":"A","x":0,"y":0},
+                         {"id":"b","name":"B","x":200,"y":0}],
+             "lines":[
+               {"id":"l1","name":"L1","color":"#112233","lineOrder":0,
+                "stationSequence":["a"],"visible":true,"locked":false},
+               {"id":"l2","name":"L2","color":"#445566","lineOrder":1,
+                "stationSequence":["b"],"visible":true,"locked":false}],
+             "stationLineRelations":[
+               {"id":"ra","stationId":"a","lineId":"l1"},
+               {"id":"rb","stationId":"b","lineId":"l2"}],
+             "geometry":{"segments":[]},"openingPhases":[]}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Transfer","document",doc,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        mvc.perform(authorized(post("/api/projects/"+id+"/operations/line-append")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "lineId","l2","fromStationId","b","toStationId","a",
+                "segmentId","ba","relationId","r2a"))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        String conflicting=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","l1","fromStationId","a",
+            "station",mapper.readTree("""
+                {"id":"c","name":"C","x":100,"y":0,
+                 "labelOffsetX":0,"labelOffsetY":0}
+                """),
+            "relation",mapper.readTree("""
+                {"id":"rc","stationId":"c","lineId":"l1"}
+                """),
+            "segment",mapper.readTree("""
+                {"id":"ac","lineId":"l1","fromStationId":"a",
+                 "toStationId":"c","mode":"straight",
+                 "structureType":"underground","waypoints":[]}
+                """)));
+        mvc.perform(authorized(post("/api/projects/"+id+"/operations/line-append-new")
+            .contentType(MediaType.APPLICATION_JSON).content(conflicting),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.stationLineRelations.length()").value(3));
+    }
+
+    @Test
     void independentSplitAndNewStationRebaseAcrossLinesButRejectSameLine() throws Exception {
         Session owner=account("crossTopology");
         String id=createProject(owner);

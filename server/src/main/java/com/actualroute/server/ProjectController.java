@@ -1076,6 +1076,66 @@ public class ProjectController {
     }
 
     /**
+     * All-or-nothing fallback for cross-line / global compound editor actions.
+     * This is NOT automatic merging: it requires an exact current revision.
+     * Unlike the legacy full PUT, a stable operationId makes lost ACKs safe
+     * to replay without duplicating the revision.
+     */
+    public record AtomicProjectOperation(
+        @NotNull UUID operationId,@NotNull Long expectedRevision,
+        @NotBlank @Size(max=200) String name,@NotNull JsonNode document) {}
+
+    @PostMapping("/{id}/operations/project-atomic")
+    @Transactional
+    public ProjectView applyProjectAtomic(@AuthenticationPrincipal UUID user,
+                                          @PathVariable UUID id,
+                                          @Valid @RequestBody AtomicProjectOperation input) {
+        requireWritable(user,id);
+        if(input.expectedRevision()<1 || input.expectedRevision()==Long.MAX_VALUE)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效的事务版本");
+        String document=json(input.document());
+        ObjectNode payload=mapper.createObjectNode();
+        payload.put("name",input.name());
+        payload.put("documentHash",digestCompound(document));
+        var rows=jdbc.query("""
+            SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
+            """,(rs,n)->new Object[]{rs.getLong("revision"),rs.getString("name"),
+                rs.getString("document")},id);
+        if(rows.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
+        var previous=jdbc.query("""
+            SELECT action,payload FROM cloud_project_operations
+            WHERE project_id=? AND operation_id=?
+            """,(rs,n)->new String[]{rs.getString("action"),rs.getString("payload")},
+            id,input.operationId());
+        if(!previous.isEmpty()) {
+            String[] stored=previous.get(0);
+            try {
+                if(!"project.atomic".equals(stored[0]) ||
+                   !mapper.readTree(stored[1]).equals(payload))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "事务 ID 已被用于不同的工程操作");
+            } catch(com.fasterxml.jackson.core.JsonProcessingException error) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "原子操作日志损坏");
+            }
+            return get(user,id);
+        }
+        Object[] row=rows.get(0);
+        long revision=(Long)row[0];
+        if(revision!=input.expectedRevision())
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "复合工程操作发生并发冲突，拒绝整图覆盖");
+        ProjectView saved=saveRevision(user,id,revision,input.name(),document);
+        jdbc.update("""
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,
+                actor_id,action,station_id,payload)
+            VALUES(?,?,?,?,?,'project',CAST(? AS jsonb))
+            """,id,input.operationId(),saved.revision(),user,
+                "project.atomic",payload.toString());
+        return saved;
+    }
+
+    /**
      * Compound topology fallback for an ordinary canvas mutation scoped to
      * one native line. Both snapshots must match an existing immutable
      * baseline revision. The server patches only that line's owned resources

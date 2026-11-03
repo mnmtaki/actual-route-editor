@@ -1093,11 +1093,14 @@ public class ProjectController {
                 "visible","locked","parentLineId"))
             || !onlyFields(phase,java.util.Set.of("id","lineId","name","openedAt",
                 "segmentIds","stationRelationIds","overriddenSegmentIds",
-                "overriddenStationRelationIds","showOverviewAfter"))
+                "overriddenStationRelationIds","showOverviewAfter","revealStartStationId"))
             || !validId(line.path("id").asText())
             || !validId(phase.path("id").asText())
             || !line.path("id").asText().equals(phase.path("lineId").asText())
-            || !validName(line.path("name"))
+            || (!validName(line.path("name")) &&
+                !(line.path("parentLineId").isTextual() &&
+                  line.path("name").isTextual() &&
+                  line.path("name").asText().isEmpty()))
             || !line.path("color").asText("").matches("#[0-9a-fA-F]{6}")
             || !(line.path("stationSequence") instanceof ArrayNode sequence)
             || sequence.size()>(input.seedRelation()==null?0:1)
@@ -1122,6 +1125,8 @@ public class ProjectController {
                 line.path("openedAt").asText())
             || !(phase.path("segmentIds") instanceof ArrayNode)
             || !phase.path("segmentIds").isEmpty()
+            || (input.seedRelation()==null && phase.has("revealStartStationId"))
+            || (input.seedRelation()!=null && !line.has("parentLineId"))
             || !(phase.path("stationRelationIds") instanceof ArrayNode)
             || (input.seedRelation()==null && !phase.path("stationRelationIds").isEmpty())
             || !(phase.path("overriddenSegmentIds") instanceof ArrayNode)

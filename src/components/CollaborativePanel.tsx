@@ -248,6 +248,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     const { operation } = pending;
     const resend = () => {
       switch (operation.kind) {
+        case 'project-atomic': return cloudApi.applyProjectAtomic(session.id, operation.payload);
         case 'compound': return cloudApi.applyLineCompound(session.id, operation.payload);
         case 'loop-close': return cloudApi.closeLoop(session.id, operation.payload);
         case 'new-line': return cloudApi.createLine(session.id, operation.payload);
@@ -423,6 +424,13 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     const waypointCandidate = candidate ? null : detectWaypointMove(session.baseJson, project);
     if (!candidate && !waypointCandidate) return;
     const snapshot = serializeProject(project);
+    // A scoped mutation uses the fine-grained transaction above. Arbitrary
+    // compound edits use a strict-revision, idempotent all-or-nothing write.
+    // Large maps keep the existing CAS fallback to avoid browser storage
+    // quota failures while persisting the pending operation.
+    const projectAtomic = !newLine && !loopClosure && !newLineStation &&
+      !lineAppend && !segmentSplit && !middleRemoval && !compound &&
+      snapshot.length <= 360_000;
     const attemptKey = session.id + ':' + session.revision + ':' + snapshot;
     if (lastAutoAttempt.current === attemptKey) return;
     const timer = window.setTimeout(() => {
@@ -524,10 +532,15 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       lastAutoAttempt.current = attemptKey;
       working.current = true;
       setBusy(true);
-      setLiveStatus(compound ? '正在同步复合拓扑事务…' : newLine ? '正在同步新建线路…' : loopClosure ? '正在同步环线闭合…' : newLineStation ? '正在同步绘制的新车站…' : lineAppend ? '正在同步线路接站…' : segmentSplit ? '正在同步区间插站…' : middleRemoval ? '正在同步删除中间站…' : '正在同步画布修改…');
+      setLiveStatus(projectAtomic ? '正在同步跨线路原子事务…' : compound ? '正在同步复合拓扑事务…' : newLine ? '正在同步新建线路…' : loopClosure ? '正在同步环线闭合…' : newLineStation ? '正在同步绘制的新车站…' : lineAppend ? '正在同步线路接站…' : segmentSplit ? '正在同步区间插站…' : middleRemoval ? '正在同步删除中间站…' : '正在同步画布修改…');
       setError('');
       const operationId = crypto.randomUUID();
-      const topologyOperation: PendingTopologyOperation | null = compound
+      const topologyOperation: PendingTopologyOperation | null = projectAtomic
+        ? { kind: 'project-atomic', payload: { operationId,
+            expectedRevision: session.revision,
+            name: project.projectName || project.name,
+            document: JSON.parse(snapshot) as ActualRouteProject } }
+        : compound
         ? { kind: 'compound', payload: { ...compound, operationId, expectedRevision: session.revision } }
         : loopClosure
         ? { kind: 'loop-close', payload: { ...loopClosure, operationId, expectedRevision: session.revision } }
@@ -554,6 +567,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       const sendTopology = () => {
         if (!topologyOperation) throw new Error('没有待提交拓扑操作');
         switch (topologyOperation.kind) {
+          case 'project-atomic': return cloudApi.applyProjectAtomic(session.id, topologyOperation.payload);
           case 'compound': return cloudApi.applyLineCompound(session.id, topologyOperation.payload);
           case 'loop-close': return cloudApi.closeLoop(session.id, topologyOperation.payload);
           case 'new-line': return cloudApi.createLine(session.id, topologyOperation.payload);
@@ -612,7 +626,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
           onLoadRef.current(saved.document, next);
           setRecoveryOpen(false);
           setError('');
-          setLiveStatus((compound ? '复合拓扑事务' : newLine ? '新建线路' : loopClosure ? '环线闭合' : newLineStation ? '连续绘制新站' : lineAppend ? '线路接站' : segmentSplit ? '区间插站' : '删除中间站') + '已按操作级协议同步至 v' + saved.revision);
+          setLiveStatus((projectAtomic ? '跨线路原子事务' : compound ? '复合拓扑事务' : newLine ? '新建线路' : loopClosure ? '环线闭合' : newLineStation ? '连续绘制新站' : lineAppend ? '线路接站' : segmentSplit ? '区间插站' : '删除中间站') + '已按操作级协议同步至 v' + saved.revision);
           return;
         }
         const next = { id: session.id, name: saved.name,

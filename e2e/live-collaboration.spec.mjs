@@ -642,3 +642,52 @@ test('two browser sessions converge after simultaneous independent line topology
     await peer.close();
   }
 });
+
+test('two editors create independent native lines concurrently through regular toolbar', async ({ browser }) => {
+  const owner=await browser.newContext();
+  const peer=await browser.newContext();
+  try {
+    const ownerCsrf=await registerAndLogin(owner,USERS.owner);
+    await registerAndLogin(peer,USERS.peer);
+    const bootstrap=await owner.newPage();
+    await bootstrap.goto(SITE);
+    const empty=await bootstrap.evaluate(async ()=>
+      (await import('/src/data/storage.ts')).createEmptyProject());
+    await bootstrap.close();
+    const created=await write(owner,ownerCsrf,'/api/projects',{
+      name:'Two Concurrent Native Lines',document:empty,
+    });
+    const id=created.id;
+    await write(owner,ownerCsrf,'/api/projects/'+id+'/access-rules',{
+      username:USERS.peer,action:'edit',allowed:true,
+    });
+    const a=await openCanvas(owner,id);
+    const b=await openCanvas(peer,id);
+    await Promise.all([
+      a.getByRole('button',{name:'＋ 新建线路'}).click(),
+      b.getByRole('button',{name:'＋ 新建线路'}).click(),
+    ]);
+    await a.locator('.line-dialog input').first().fill('Owner Line');
+    await b.locator('.line-dialog input').first().fill('Peer Line');
+    await Promise.all([
+      a.locator('.line-dialog').getByRole('button',{name:'开始绘制'}).click(),
+      b.locator('.line-dialog').getByRole('button',{name:'开始绘制'}).click(),
+    ]);
+    await expect.poll(async ()=>{
+      const result=await (await owner.request.get(API+'/api/projects/'+id)).json();
+      return {revision:result.revision,
+        names:result.document.lines.map(line=>line.name).sort(),
+        phases:result.document.openingPhases.length};
+    },{timeout:30000}).toEqual({
+      revision:3,names:['Owner Line','Peer Line'],phases:2,
+    });
+    for(const page of [a,b]) {
+      await expect(page.getByRole('region',{name:'协同工作区'})
+        .getByText(/本地基线 v3 · 远端 v3/))
+        .toBeVisible({timeout:20000});
+    }
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});

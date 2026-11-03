@@ -862,22 +862,28 @@ class AccountsAndSavesIT {
                 "waypointId","w1","x",5,"y",6))),guest))
             .andExpect(status().isConflict());
 
-        // A station operation must never rebase through an intervening waypoint edit.
+        // An independent station creation can rebase across waypoint edits.
         mvc.perform(authorized(post("/api/projects/"+id+"/operations")
             .contentType(MediaType.APPLICATION_JSON)
             .content(mapper.writeValueAsString(Map.of(
                 "operationId",UUID.randomUUID(),"expectedRevision",2,
                 "type","station.create",
                 "station",Map.of("id","independent","name","Station","x",1,"y",2)))),owner))
-            .andExpect(status().isConflict());
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(5));
+        // Conversely, a different waypoint can rebase through a station edit.
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "operationId",UUID.randomUUID(),"expectedRevision",4,
+                "segmentId","s1","waypointId","w1","x",112,"y",223))),guest))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(6));
 
         JsonNode latest=mapper.readTree(mvc.perform(get("/api/projects/" + id)
             .cookie(owner.cookies())).andReturn().getResponse().getContentAsString());
         mvc.perform(authorized(put("/api/projects/"+id)
             .contentType(MediaType.APPLICATION_JSON)
             .content(mapper.writeValueAsString(Map.of(
-                "name","City","document",latest.get("document"),"expectedRevision",4))),owner))
-            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(5));
+                "name","City","document",latest.get("document"),"expectedRevision",6))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(7));
         mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
             .content(mapper.writeValueAsString(Map.of(
                 "operationId",UUID.randomUUID(),"expectedRevision",4,"segmentId","s2",
@@ -885,18 +891,18 @@ class AccountsAndSavesIT {
             .andExpect(status().isConflict());
         mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
             .content(mapper.writeValueAsString(Map.of(
-                "operationId",UUID.randomUUID(),"expectedRevision",5,"segmentId","s2",
+                "operationId",UUID.randomUUID(),"expectedRevision",7,"segmentId","s2",
                 "waypointId","missing","x",7,"y",8))),guest))
             .andExpect(status().isConflict());
         mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
             .content(mapper.writeValueAsString(Map.of(
-                "operationId",UUID.randomUUID(),"expectedRevision",5,"segmentId","s2",
+                "operationId",UUID.randomUUID(),"expectedRevision",7,"segmentId","s2",
                 "waypointId","w2","x",1.0e30,"y",8))),guest))
             .andExpect(status().isBadRequest());
         Integer rows=jdbc.queryForObject(
             "SELECT count(*) FROM cloud_project_operations WHERE project_id=? AND action='segment.waypoint.move'",
             Integer.class,UUID.fromString(id));
-        assertEquals(2,rows);
+        assertEquals(3,rows);
     }
 
     @Test

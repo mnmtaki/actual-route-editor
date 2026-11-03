@@ -929,6 +929,44 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void permissionRevocationRejectsStaleCollaboratorWriteWithoutAdvancingRevision() throws Exception {
+        Session owner=account("revocationOwner");
+        Session editor=account("revocationEditor");
+        String id=createProject(owner);
+        UUID editorId=auth.resolve(editor.sessionCookie().getValue());
+        String username=jdbc.queryForObject(
+            "SELECT username FROM app_users WHERE id=?",String.class,editorId);
+        String rule="/api/projects/"+id+"/access-rules";
+        mvc.perform(authorized(post(rule).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",username,"action","edit","allowed",true))),owner))
+            .andExpect(status().isOk());
+        mvc.perform(authorized(post("/api/projects/"+id+"/operations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",1,
+                "type","station.create",
+                "station",Map.of("id","before-revoke","name","Before","x",1,"y",1)))),editor))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        mvc.perform(authorized(post(rule).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",username,"action","edit","allowed",false))),owner))
+            .andExpect(status().isOk());
+        mvc.perform(authorized(post("/api/projects/"+id+"/operations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "type","station.create",
+                "station",Map.of("id","after-revoke","name","After","x",2,"y",2)))),editor))
+            .andExpect(status().isNotFound());
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(2))
+            .andExpect(jsonPath("$.document.stations.length()").value(1))
+            .andExpect(jsonPath("$.document.stations[0].id").value("before-revoke"));
+    }
+
+    @Test
     void endpointAndWaypointConflictsButDisjointStationCanRebase() throws Exception {
         Session owner=account("geometryConflict");
         String id=createProject(owner);

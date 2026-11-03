@@ -57,6 +57,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   const working = useRef(false);
   const fetching = useRef(false);
   const lastAutoAttempt = useRef('');
+  const receiveRevisionRef = useRef<((revision: number) => Promise<void>) | null>(null);
   draftInProgress.current = draftActive;
   latest.current = project;
   activeSession.current = session;
@@ -133,6 +134,8 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
           window.setTimeout(() => { if (alive) void receiveRevision(pendingRevision); }, 0);
       }
     }
+
+    receiveRevisionRef.current = receiveRevision;
 
     async function checkRemote() {
       try {
@@ -211,8 +214,20 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
       if (pingTimer !== undefined) window.clearInterval(pingTimer);
       socket?.close();
+      receiveRevisionRef.current = null;
     };
   }, [session.id]);
+
+  // A websocket notification can arrive while the local write holds the
+  // single-flight guard. Catch up immediately when that write finishes,
+  // without waiting for the 30-second missed-event fallback.
+  useEffect(() => {
+    if (busy || working.current || fetching.current || permissionLost ||
+        draftActive || dirty || pendingTopologyRead(session.id) ||
+        remoteRevision <= session.revision) return;
+    void receiveRevisionRef.current?.(remoteRevision);
+  }, [busy, remoteRevision, session.revision, session.id,
+      permissionLost, draftActive, dirty]);
 
   // An uncertain committed operation survives a tab refresh. Re-use its
   // persisted operationId, never invent a fresh id or replay a compound PUT.

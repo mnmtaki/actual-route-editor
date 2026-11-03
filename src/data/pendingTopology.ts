@@ -10,6 +10,7 @@ export interface PendingTopologyWrite {
   projectId: string;
   snapshot: string;
   operation: PendingTopologyOperation;
+  confirmed?: boolean;
 }
 
 const PREFIX = 'ara:pending-topology:v1:';
@@ -38,7 +39,9 @@ export function pendingTopologyRead(projectId: string, store: Pick<Storage, 'get
 export function pendingTopologySave(value: PendingTopologyWrite,
   store: Pick<Storage, 'getItem' | 'setItem'> = localStorage): boolean {
   try {
+    const rawPending = store.getItem(key(value.projectId));
     const current = pendingTopologyRead(value.projectId, store);
+    if (rawPending && !current) return false; // Corrupt journal: fail closed.
     if (current && current.operation.payload.operationId !== value.operation.payload.operationId)
       return false;
     const raw = JSON.stringify(value);
@@ -54,4 +57,13 @@ export function pendingTopologyClear(projectId: string, operationId: string,
     if (pendingTopologyRead(projectId, store)?.operation.payload.operationId === operationId)
       store.removeItem(key(projectId));
   } catch { /* Best effort; stale IDs remain safe to replay. */ }
+}
+
+/** Mark a committed request without discarding its local recovery snapshot. */
+export function pendingTopologyConfirm(projectId: string, operationId: string,
+  store: Pick<Storage, 'getItem' | 'setItem'> = localStorage): void {
+  const existing = pendingTopologyRead(projectId, store);
+  if (existing?.operation.payload.operationId === operationId) {
+    pendingTopologySave({ ...existing, confirmed: true }, store);
+  }
 }

@@ -1075,6 +1075,150 @@ public class ProjectController {
         return saved;
     }
 
+    /** Closing a native loop adds one interval, never a duplicate station. */
+    public record LoopClosureOperation(
+        @NotNull UUID operationId,@NotNull Long expectedRevision,
+        @NotBlank String lineId,@NotBlank String segmentId,
+        String openingPhaseId) {}
+
+    @PostMapping("/{id}/operations/loop-close")
+    @Transactional
+    public ProjectView closeLoop(@AuthenticationPrincipal UUID user,@PathVariable UUID id,
+                                  @Valid @RequestBody LoopClosureOperation input) {
+        requireWritable(user,id);
+        if(input.expectedRevision()<1 || input.expectedRevision()==Long.MAX_VALUE ||
+           !validId(input.lineId()) || !validId(input.segmentId()) ||
+           (input.openingPhaseId()!=null && !validId(input.openingPhaseId())))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效的环线闭合请求");
+        ObjectNode payload=mapper.createObjectNode();
+        payload.put("lineId",input.lineId());
+        payload.put("segmentId",input.segmentId());
+        if(input.openingPhaseId()!=null)payload.put("openingPhaseId",input.openingPhaseId());
+        String resource="line:"+input.lineId();
+        var rows=jdbc.query("""
+            SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
+            """,(rs,n)->new Object[]{rs.getLong("revision"),rs.getString("name"),
+                rs.getString("document")},id);
+        if(rows.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
+        var prior=jdbc.query("""
+            SELECT action,station_id,payload FROM cloud_project_operations
+            WHERE project_id=? AND operation_id=?
+            """,(rs,n)->new String[]{rs.getString("action"),rs.getString("station_id"),
+                rs.getString("payload")},id,input.operationId());
+        if(!prior.isEmpty()) {
+            String[] logged=prior.get(0);
+            try {
+                if(!"line.loop-close".equals(logged[0]) ||
+                    !resource.equals(logged[1]) ||
+                    !mapper.readTree(logged[2]).equals(payload))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "operationId 已用于不同闭合操作");
+            } catch(com.fasterxml.jackson.core.JsonProcessingException error) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"操作日志损坏");
+            }
+            return get(user,id);
+        }
+        Object[] row=rows.get(0);
+        long revision=(Long)row[0];
+        requireDisjointLineHistory(id,input.expectedRevision(),revision,input.lineId());
+        ObjectNode document;
+        try { document=(ObjectNode)mapper.readTree((String)row[2]); }
+        catch(Exception e) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"工程 JSON 损坏");
+        }
+        if(!(document.path("lines") instanceof ArrayNode lines) ||
+           !(document.path("geometry").path("segments") instanceof ArrayNode segments) ||
+           !(document.path("stationLineRelations") instanceof ArrayNode relations))
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"拓扑数据不完整");
+        ObjectNode line=null;
+        for(JsonNode candidate:lines)
+            if(input.lineId().equals(candidate.path("id").asText()) &&
+               candidate instanceof ObjectNode)
+                line=(ObjectNode)candidate;
+        if(line==null || line.path("locked").asBoolean(false) ||
+           line.path("isFake").asBoolean(false) ||
+           line.has("source") || line.path("operationHistory").size()>0 ||
+           !(line.path("stationSequence") instanceof ArrayNode sequence) ||
+           sequence.size()<3)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "当前线路不支持原子环线闭合");
+        String first=sequence.get(0).asText();
+        String last=sequence.get(sequence.size()-1).asText();
+        if(first.equals(last))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"环线站序不应重复首站");
+        java.util.Set<String> unique=new java.util.HashSet<>();
+        for(JsonNode station:sequence)
+            if(!unique.add(station.asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"环线站序重复");
+        int count=0;
+        for(JsonNode segment:segments) {
+            if(input.segmentId().equals(segment.path("id").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"闭合区间 ID 已存在");
+            if(!input.lineId().equals(segment.path("lineId").asText()))continue;
+            count++;
+            boolean expected=false;
+            for(int i=0;i<sequence.size()-1;i++)
+                if(sequence.get(i).asText().equals(segment.path("fromStationId").asText()) &&
+                   sequence.get(i+1).asText().equals(segment.path("toStationId").asText()))
+                    expected=true;
+            if(!expected)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "线路已有分叉或环线区间");
+        }
+        if(count!=sequence.size()-1)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"不完整的环线链");
+        for(JsonNode stationId:java.util.List.of(first,last)) {
+            boolean member=false;
+            for(JsonNode relation:relations)
+                if(input.lineId().equals(relation.path("lineId").asText()) &&
+                   stationId.asText().equals(relation.path("stationId").asText()))
+                    member=true;
+            if(!member)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "环线端点缺少线路关联");
+        }
+        ObjectNode phase=null;
+        for(JsonNode item:document.path("openingPhases")) {
+            if(!input.lineId().equals(item.path("lineId").asText()))continue;
+            if(input.openingPhaseId()==null ||
+               !input.openingPhaseId().equals(item.path("id").asText()) ||
+               phase!=null || !(item instanceof ObjectNode))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "环线分期不唯一");
+            phase=(ObjectNode)item;
+        }
+        if(input.openingPhaseId()!=null && phase==null)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"闭合分期不存在");
+        JsonNode opened=phase!=null?phase.path("openedAt"):line.path("openedAt");
+        if(!opened.isTextual())opened=document.path("timeline").path("currentDate");
+        ObjectNode segment=mapper.createObjectNode();
+        segment.put("id",input.segmentId());
+        segment.put("lineId",input.lineId());
+        segment.put("fromStationId",last);
+        segment.put("toStationId",first);
+        segment.put("mode","straight");
+        segment.put("structureType","underground");
+        segment.set("structureNodes",mapper.createArrayNode());
+        segment.set("waypoints",mapper.createArrayNode());
+        if(opened.isTextual())segment.put("openedAt",opened.asText());
+        else segment.putNull("openedAt");
+        segment.putNull("closedAt");
+        segments.add(segment);
+        if(phase!=null) {
+            if(!(phase.path("segmentIds") instanceof ArrayNode ids))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"分期区间关联无效");
+            ids.add(input.segmentId());
+        }
+        ProjectView saved=saveRevision(user,id,revision,(String)row[1],json(document));
+        jdbc.update("""
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,
+                actor_id,action,station_id,payload)
+            VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
+            """,id,input.operationId(),saved.revision(),user,
+                "line.loop-close",resource,payload.toString());
+        return saved;
+    }
+
     /** Concurrent creation of independent empty native lines and first phases. */
     public record LineCreateOperation(
         @NotNull UUID operationId, @NotNull Long expectedRevision,
@@ -1928,7 +2072,7 @@ public class ProjectController {
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "并发操作版本不连续，拒绝自动重基");
             switch(action) {
-                case "line.create","line.append-new","line.append-existing","segment.split-station" -> {
+                case "line.create","line.loop-close","line.append-new","line.append-existing","segment.split-station" -> {
                     if(!resource.startsWith("line:") ||
                         resource.equals("line:"+lineId))
                         throw new ResponseStatusException(HttpStatus.CONFLICT,

@@ -545,7 +545,10 @@ export function detectCanvasLineCompound(baseJson: string, project: ActualRouteP
   let before: ActualRouteProject;
   try { before=JSON.parse(baseJson) as ActualRouteProject; } catch { return null; }
   const serialized=serializeProject(project);
-  if(baseJson.length+serialized.length>750_000) return null;
+  // The per-tab recovery journal stores both full snapshots PLUS the local
+  // drawing snapshot. Keep compound payloads small enough to persist before
+  // sending; larger projects use the strict full-document CAS fallback.
+  if(baseJson.length+2*serialized.length>700_000) return null;
   const after=JSON.parse(serialized) as ActualRouteProject;
   if(!equal({...before,lines:[],stations:[],stationLineRelations:[],
       openingPhases:[],geometry:{...before.geometry,segments:[]}},

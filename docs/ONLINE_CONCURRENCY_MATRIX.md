@@ -55,7 +55,14 @@ All test results must be recorded from a real execution before release.
 | Permissions revoked while editing | Reject further writes; preserve local document | Auth/permission Java IT; browser race pending |
 | Phase-owned terminal append, single unambiguous phase | Atomically update line, segment, relation and phase | `appendExistingStationUpdatesExactlyOneOpeningPhase` |
 | Concurrent edits to same phase | 409 | Line-scoped conflict; explicit pair test pending |
-| Branched line / loop / compound style and historical edits | No inferred automatic merge; strict whole-document CAS | Routing safety tests; browser pair tests pending |
+| New native child branch (empty or seeded from existing parent station) | Atomic line + initial phase + optional membership; conflicting parent edits rejected | `seededBranchCreationAndContinuationAreAtomicAndIdempotent`, `collaborationRouting.test.ts` |
+| Continuing native child branch with new stations | Atomic station + segment + phase membership | Same Java IT; client routing tests |
+| Simple native loop closure (last station to first) | Atomic closing interval, no duplicate station; same-line concurrent closure rejected | `nativeLoopClosureAddsOneSegmentAndRejectsConcurrentDuplicate`, `collaborationRouting.test.ts` |
+| Loop closure on line A + seeded child branch on independent parent B | Merge after line/parent dependency proof | `loop closure and independently seeded branch creation converge across browsers` (added, not executed) |
+| Multi-object edit confined to one native line | Verified historical baseline, scoped three-way merge; no global overwrite | `LineCompoundMergeTest`, `lineCompoundMergesDisjointRemoteStationEditAndRejectsSameLineOverlap` |
+| Compound edit touching multiple lines or global fields | Strict document CAS / 409; no automatic inferred merge | `collaborationRouting.test.ts`, `LineCompoundMergeTest` |
+| Compound transaction with deleted or shared station | Reject unless independently covered by dedicated safe operation | `LineCompoundMergeTest`; extended scope pending |
+| Arbitrary phase-history / AARC / imported geometry edits | Strict document CAS; never automatically replay unknown metadata | Routing exclusions; dedicated E2E pending |
 | Multi-server WebSocket deployments | Database writes remain serialized; realtime delivery needs shared pubsub | **Not implemented**, 30s polling fallback only |
 | Collaborative undo/redo vs other-editor changes | Compensating operations, no global rewind; only covered station actions | `collaborativeUndoRedoAffectsOnlyOwnStationAndRetainsOtherEditorsWork` |
 
@@ -74,8 +81,21 @@ All test results must be recorded from a real execution before release.
 
 ## Operational limits
 
-This is a bounded operation journal protocol, **not CRDT/OT**. It does not
-promise to automatically merge arbitrary cross-line branches, loop edits,
-style changes, phase history, or free-form whole-project mutations. Those
-concurrent edits are supported by explicit conflict detection and local
-recovery, not simultaneous automatic merging.
+This is a bounded operation journal protocol, **not CRDT/OT**. Native
+single-line branch creation, seeded branches, loop closure, and bounded
+single-line compound topology updates have explicit transaction paths.
+For a compound operation the Java endpoint compares the supplied baseline
+against a stored immutable revision, checks the *entire target line and its
+station/segment/phase dependency closure*, and patches the latest document
+without overwriting unrelated lines. The compound endpoint has an 800 KB
+two-snapshot request limit and requires the historical baseline to remain
+available (up to the retained snapshot window).
+
+Automatic merging is **not** promised for arbitrary cross-line compound edits,
+unbounded sequences, global settings, imported AARC metadata, historical phase
+operations, or deletions of globally shared stations. These must use strict
+whole-document CAS with local recovery or a dedicated operation-level handler.
+
+All newly added branch/loop/compound tests are **committed but unexecuted** in
+this environment. Do not mark this release complete until the release gate
+above passes.

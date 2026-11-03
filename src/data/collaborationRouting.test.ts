@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyProject } from './storage';
 import { serializeProject } from '../import-export/projectJson';
-import { connectExistingStation, insertStationIntoSegment, appendStationToLineWithWaypoints, createLine } from './operations';
+import { connectExistingStation, insertStationIntoSegment, appendStationToLineWithWaypoints, createLine, createBranchLine } from './operations';
 import { deleteStationPreservingNetwork } from './stationDeletion';
 import { createOpeningPhase } from './openingPhases';
-import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation, mergeOnePendingCanvasStation, detectCanvasNewLine } from './collaborationRouting';
+import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation, mergeOnePendingCanvasStation, detectCanvasNewLine, detectCanvasLoopClosure } from './collaborationRouting';
 import type { ActualRouteProject } from './model';
 
 function makeProject(): ActualRouteProject {
@@ -58,6 +58,44 @@ describe('ordinary canvas collaboration routing', () => {
     const seeded=structuredClone(phased.project);
     seeded.lines.at(-1)!.stationSequence.push('already-on-canvas');
     expect(detectCanvasNewLine(serializeProject(before),seeded)).toBeNull();
+  });
+
+  it('routes native child-branch creation including the seeded parent station', () => {
+    const before=makeProject();
+    const child=createBranchLine(before,'line-1',{openedAt:'2026-04-01'});
+    expect(child.lineId).toBeTruthy();
+    const phased=createOpeningPhase(child.project,{
+      lineId:child.lineId!,name:'一期',openedAt:'2026-04-01',
+      revealStartStationId:'b',
+    });
+    const withSeed=connectExistingStation(phased.project,child.lineId!,'b',null,phased.phaseId);
+    const routed=detectCanvasNewLine(serializeProject(before),withSeed);
+    expect(routed).toMatchObject({
+      line:{id:child.lineId,parentLineId:'line-1',stationSequence:['b']},
+      phase:{lineId:child.lineId,stationRelationIds:[expect.any(String)]},
+      seedRelation:{lineId:child.lineId,stationId:'b'},
+    });
+    expect(withSeed.stations.length).toBe(before.stations.length);
+    expect(withSeed.geometry.segments.length).toBe(before.geometry.segments.length);
+    const changed=structuredClone(withSeed);
+    changed.lines[0].locked=true;
+    expect(detectCanvasNewLine(serializeProject(before),changed)).toBeNull();
+  });
+
+  it('routes native loop closure without duplicating the first station or its relation', () => {
+    const before=appended(makeProject());
+    const after=connectExistingStation(before,'line-1','a','c');
+    expect(after.lines[0].stationSequence).toEqual(before.lines[0].stationSequence);
+    expect(after.stationLineRelations).toEqual(before.stationLineRelations);
+    const routed=detectCanvasLoopClosure(serializeProject(before),after);
+    expect(routed).toMatchObject({
+      lineId:'line-1',segmentId:after.geometry.segments.at(-1)?.id,
+    });
+    const concurrent=structuredClone(after);
+    concurrent.stations[0].x+=5;
+    expect(detectCanvasLoopClosure(serializeProject(before),concurrent)).toBeNull();
+    const alreadyClosed=connectExistingStation(after,'line-1','a','c');
+    expect(detectCanvasLoopClosure(serializeProject(after),alreadyClosed)).toBeNull();
   });
 
   it('recognizes an isolated terminal connection to an existing station', () => {

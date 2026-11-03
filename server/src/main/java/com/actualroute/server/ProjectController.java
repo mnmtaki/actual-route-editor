@@ -1191,7 +1191,10 @@ public class ProjectController {
             if(phase.path("id").asText().equals(oldPhase.path("id").asText()))
                 throw new ResponseStatusException(HttpStatus.CONFLICT,"分期 ID 已存在");
         ObjectNode addedLine=line.deepCopy();
-        addedLine.put("lineOrder",lines.size()); // Resolve concurrent ordering collision.
+        int nextLineOrder=0;
+        for(JsonNode existing:lines)
+            nextLineOrder=Math.max(nextLineOrder,existing.path("lineOrder").asInt(0)+1);
+        addedLine.put("lineOrder",nextLineOrder); // Also handles existing ordering gaps.
         lines.add(addedLine);
         phases.add(phase.deepCopy());
         ProjectView result=saveRevision(user,id,revision,(String)row[1],json(document));

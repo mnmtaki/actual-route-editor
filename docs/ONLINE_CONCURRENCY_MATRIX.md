@@ -29,6 +29,7 @@ All test results must be recorded from a real execution before release.
 | New main line + new main line | Merge; server assigns unique line order | `independentLineCreationRebasesAndResolvesConcurrentOrdering` |
 | Two regular new-line toolbar actions in different browser accounts | Merge, both rendered | `two editors create independent native lines concurrently through regular toolbar` |
 | Two regular new-line toolbar actions in same-account tabs | Merge, per-tab outboxes | `same-account tabs keep independent pending operations during concurrent line creation` |
+| Fast new-line creation + immediate first station on both clients | Must retain both lines/stations; test is expected to expose any compound-edit gap | `rapid native line creation then first station survives a concurrent peer line creation` (not executed) |
 | New station / terminal append on independent lines | Merge | `differentLinesRebaseTopologyWhileSameLineAndFullSaveConflict` |
 | Split a segment on line A + append new station on line B | Merge | `independentSplitAndNewStationRebaseAcrossLinesButRejectSameLine` |
 | Same-line topology writes | 409 unless explicitly ordered by a fresh revision | Same tests |
@@ -48,7 +49,7 @@ All test results must be recorded from a real execution before release.
 | Same `operationId`, identical payload | Idempotent, no extra revision | Multiple Java IT cases |
 | Same `operationId`, different payload | 409 | Multiple Java IT cases |
 | Network response lost after server commit | Replay same operation ID | `pendingTopology.test.ts` + server idempotency; browser fault injection pending |
-| New local drawing while prior request is in flight | Preserve local canvas; auto-continue only with safe proven merge | `collaborationRouting.test.ts`; rapid-click E2E pending |
+| New local drawing while prior request is in flight | Preserve local canvas; auto-continue only with safe proven merge | `collaborationRouting.test.ts`; `rapid native line creation then first station survives a concurrent peer line creation` (added, not executed) |
 | New remote revision while local canvas is clean | Update canvas promptly | WebSocket + poll catch-up; E2E tests, missed-event test pending |
 | New remote revision while local canvas is dirty | Do not replace locally; show recovery | `collaboration history and conflict recovery preserve the local canvas and export backup` |
 | Permissions revoked while editing | Reject further writes; preserve local document | Auth/permission Java IT; browser race pending |

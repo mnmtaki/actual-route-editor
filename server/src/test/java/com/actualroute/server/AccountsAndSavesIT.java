@@ -664,6 +664,47 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void projectAtomicCompoundIsIdempotentAndRejectsConcurrentWholeMapEdits() throws Exception {
+        Session owner=account("atomicCompound");
+        String id=createProject(owner);
+        ObjectNode first=(ObjectNode)document();
+        ((com.fasterxml.jackson.databind.node.ArrayNode)first.path("stations"))
+            .add(mapper.readTree("""
+                {"id":"a","name":"A","x":1,"y":2}
+                """));
+        ObjectNode second=(ObjectNode)document();
+        ((com.fasterxml.jackson.databind.node.ArrayNode)second.path("stations"))
+            .add(mapper.readTree("""
+                {"id":"b","name":"B","x":3,"y":4}
+                """));
+        UUID operationId=UUID.randomUUID();
+        String endpoint="/api/projects/"+id+"/operations/project-atomic";
+        String body=mapper.writeValueAsString(splitPayload(
+            "operationId",operationId,"expectedRevision",1,
+            "name","Atomic","document",first));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(body),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2))
+            .andExpect(jsonPath("$.document.stations[0].id").value("a"));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(body),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",1,
+                "name","Competing","document",second))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",operationId,"expectedRevision",1,
+                "name","Different","document",second))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2))
+            .andExpect(jsonPath("$.document.stations.length()").value(1));
+    }
+
+    @Test
     void lineCompoundMergesDisjointRemoteStationEditAndRejectsSameLineOverlap() throws Exception {
         Session owner=account("compoundMerge");
         String id=createProject(owner);

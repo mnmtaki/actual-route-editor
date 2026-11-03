@@ -7,7 +7,7 @@ import type { CloudUndoEntry, CloudOperationHistoryItem } from '../data/cloudPro
 import { detectStationOperation } from '../data/stationLiveOperations';
 import { detectWaypointMove } from '../data/waypointLiveOperations';
 import { detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation } from '../data/collaborationRouting';
-import { pendingTopologyRead, pendingTopologySave, pendingTopologyClear } from '../data/pendingTopology';
+import { pendingTopologyRead, pendingTopologySave, pendingTopologyClear, pendingTopologyConfirm } from '../data/pendingTopology';
 import type { PendingTopologyOperation } from '../data/pendingTopology';
 
 export interface CollaborativeSession {
@@ -63,6 +63,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   onLoadRef.current = onLoad;
 
   const dirty = serializeProject(project) !== session.baseJson;
+  const pendingWrite = pendingTopologyRead(session.id);
 
   useEffect(() => {
     let alive = true;
@@ -219,6 +220,11 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   useEffect(() => {
     const pending = pendingTopologyRead(session.id);
     if (!pending) return;
+    if (pending.confirmed) {
+      setRecoveryOpen(true);
+      setError('断线操作已确认提交，但保留了未合并的本地绘制备份，请导出备份后处理。');
+      return;
+    }
     if (!connected || permissionLost || working.current || fetching.current) return;
     let cancelled = false;
     working.current = true;
@@ -235,13 +241,14 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     };
     void resend().then(saved => {
       if (cancelled) return;
-      pendingTopologyClear(session.id, operation.payload.operationId);
       setRemoteRevision(previous => Math.max(previous, saved.revision));
       if (serializeProject(latest.current) !== pending.snapshot || draftInProgress.current) {
+        pendingTopologyConfirm(session.id, operation.payload.operationId);
         setRecoveryOpen(true);
         setError('操作已确认提交，但当前画布与原始待提交快照不同；已保留本地修改，请先备份并比较差异。');
         return;
       }
+      pendingTopologyClear(session.id, operation.payload.operationId);
       const next = { id: session.id, name: saved.name, revision: saved.revision,
         baseJson: serializeProject(saved.document) };
       activeSession.current = next;
@@ -522,14 +529,15 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       void submitted.then(saved => {
         setRemoteRevision(previous => Math.max(previous, saved.revision));
         if (topologyOperation) {
-          pendingTopologyClear(session.id, operationId);
           if (serializeProject(latest.current) !== snapshot || draftInProgress.current) {
+            pendingTopologyConfirm(session.id, operationId);
             // Remote topology succeeded; never reset a newer local drawing.
             // Keep the original baseline, forcing explicit conflict recovery.
             setError('拓扑修改已保存，但提交期间还有本地修改。为防止丢失画布内容，请对比并同步云端版本。');
             setRecoveryOpen(true);
             return;
           }
+          pendingTopologyClear(session.id, operationId);
           const next = { id: session.id, name: saved.name,
             revision: saved.revision, baseJson: serializeProject(saved.document) };
           activeSession.current = next;
@@ -772,7 +780,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   }
 
   async function publish() {
-    if (busy || permissionLost || remoteRevision > session.revision || !dirty) return;
+    if (busy || permissionLost || pendingTopologyRead(session.id) || remoteRevision > session.revision || !dirty) return;
     working.current = true;
     setBusy(true); setError(''); setMessage('');
     try {
@@ -801,7 +809,11 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   }
 
   async function pull() {
-    if (busy) return;
+    if (busy || pendingTopologyRead(session.id)) {
+      setRecoveryOpen(true);
+      setError('请先导出并处理断线待确认操作的本地备份，再加载云端版本。');
+      return;
+    }
     if (dirty && !window.confirm('加载云端最新版会替换当前协同工作副本。请先导出未发布修改的 JSON 备份，确定继续吗？')) return;
     working.current = true;
     setBusy(true); setError(''); setMessage('');
@@ -829,6 +841,18 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     <span>本地基线 v{session.revision} · 远端 v{remoteRevision}</span>
     <span>{dirty ? '● 未发布修改' : draftActive ? '绘制操作进行中' : '✓ 与已加载版本一致'}</span>
     <span>{permissionLost ? '协作权限已失效' : connected ? 'WebSocket 已连接' : '实时连接中断 · 30 秒兜底检查'}</span>
+    {pendingWrite && <>
+      <span role="status">断线操作{pendingWrite.confirmed ? '已确认，等待备份处理' : '待确认'}</span>
+      <button type="button" onClick={() => downloadText(
+        pendingWrite.snapshot, 'actual-route-pending-' + session.id + '.json'
+      )}>导出断线前画布备份</button>
+      {pendingWrite.confirmed && <button type="button" onClick={() => {
+        if (!window.confirm('确认已导出备份？这会清除待恢复记录，但不会删除云端操作。')) return;
+        pendingTopologyClear(session.id, pendingWrite.operation.payload.operationId);
+        setRecoveryOpen(false);
+        setMessage('断线记录已清除；请比较本地与云端版本');
+      }}>备份后清除已确认记录</button>}
+    </>}
     <label>新增独立车站 <input aria-label="新车站名称" value={newStationName} maxLength={100}
       onChange={event => setNewStationName(event.target.value)} /></label>
     <button type="button" disabled={busy || permissionLost || dirty || draftActive || remoteRevision > session.revision || !newStationName.trim()}

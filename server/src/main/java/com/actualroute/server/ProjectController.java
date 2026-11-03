@@ -1100,6 +1100,110 @@ public class ProjectController {
         return saved;
     }
 
+    /** Concurrent creation of independent empty native lines and first phases. */
+    public record LineCreateOperation(
+        @NotNull UUID operationId, @NotNull Long expectedRevision,
+        @NotNull JsonNode line, @NotNull JsonNode phase) {}
+
+    @PostMapping("/{id}/operations/line-create")
+    @Transactional
+    public ProjectView createLineOperation(@AuthenticationPrincipal UUID user,@PathVariable UUID id,
+                                           @Valid @RequestBody LineCreateOperation input) {
+        requireWritable(user,id);
+        if(input.expectedRevision()<1 || input.expectedRevision()==Long.MAX_VALUE
+            || !(input.line() instanceof ObjectNode line)
+            || !(input.phase() instanceof ObjectNode phase)
+            || !onlyFields(line,java.util.Set.of("id","name","color",
+                "stationSequence","lineBadges","lineOrder","openedAt","closedAt",
+                "visible","locked"))
+            || !onlyFields(phase,java.util.Set.of("id","lineId","name","openedAt",
+                "segmentIds","stationRelationIds","overriddenSegmentIds",
+                "overriddenStationRelationIds","showOverviewAfter"))
+            || !validId(line.path("id").asText())
+            || !validId(phase.path("id").asText())
+            || !line.path("id").asText().equals(phase.path("lineId").asText())
+            || !validName(line.path("name"))
+            || !line.path("color").asText("").matches("#[0-9a-fA-F]{6}")
+            || !(line.path("stationSequence") instanceof ArrayNode)
+            || !line.path("stationSequence").isEmpty()
+            || !line.path("lineBadges").isArray() || !line.path("lineBadges").isEmpty()
+            || !line.path("lineOrder").canConvertToInt()
+            || !line.path("visible").asBoolean(false) || line.path("locked").asBoolean(true)
+            || !phase.path("openedAt").isTextual()
+            || !java.util.Objects.equals(phase.path("openedAt").asText(),
+                line.path("openedAt").asText())
+            || !(phase.path("segmentIds") instanceof ArrayNode)
+            || !phase.path("segmentIds").isEmpty()
+            || !(phase.path("stationRelationIds") instanceof ArrayNode)
+            || !phase.path("stationRelationIds").isEmpty()
+            || !(phase.path("overriddenSegmentIds") instanceof ArrayNode)
+            || !phase.path("overriddenSegmentIds").isEmpty()
+            || !(phase.path("overriddenStationRelationIds") instanceof ArrayNode)
+            || !phase.path("overriddenStationRelationIds").isEmpty())
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "仅支持简单空白主线及初始分期的并发创建");
+        ObjectNode payload=mapper.createObjectNode();
+        payload.set("line",line.deepCopy());
+        payload.set("phase",phase.deepCopy());
+        String resource="line:"+line.path("id").asText();
+        var rows=jdbc.query("""
+            SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
+            """,(rs,n)->new Object[]{rs.getLong("revision"),rs.getString("name"),
+                rs.getString("document")},id);
+        if(rows.isEmpty())
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
+        var prior=jdbc.query("""
+            SELECT action,station_id,payload FROM cloud_project_operations
+            WHERE project_id=? AND operation_id=?
+            """,(rs,n)->new String[]{rs.getString("action"),rs.getString("station_id"),
+                rs.getString("payload")},id,input.operationId());
+        if(!prior.isEmpty()) {
+            String[] previous=prior.get(0);
+            try {
+                if(!"line.create".equals(previous[0]) ||
+                    !resource.equals(previous[1]) ||
+                    !mapper.readTree(previous[2]).equals(payload))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "operationId 已用于不同操作");
+            } catch(com.fasterxml.jackson.core.JsonProcessingException error) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "操作日志损坏");
+            }
+            return get(user,id);
+        }
+        Object[] row=rows.get(0);
+        long revision=(Long)row[0];
+        requireDisjointLineHistory(id,input.expectedRevision(),revision,line.path("id").asText());
+        ObjectNode document;
+        try { document=(ObjectNode)mapper.readTree((String)row[2]); }
+        catch(Exception e) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                "工程 JSON 无效");
+        }
+        if(!(document.path("lines") instanceof ArrayNode lines)
+            || !(document.path("openingPhases") instanceof ArrayNode phases))
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                "工程线路数据不完整");
+        for(JsonNode oldLine:lines)
+            if(line.path("id").asText().equals(oldLine.path("id").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"线路 ID 已存在");
+        for(JsonNode oldPhase:phases)
+            if(phase.path("id").asText().equals(oldPhase.path("id").asText()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"分期 ID 已存在");
+        ObjectNode addedLine=line.deepCopy();
+        addedLine.put("lineOrder",lines.size()); // Resolve concurrent ordering collision.
+        lines.add(addedLine);
+        phases.add(phase.deepCopy());
+        ProjectView result=saveRevision(user,id,revision,(String)row[1],json(document));
+        jdbc.update("""
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,
+                actor_id,action,station_id,payload)
+            VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
+            """,id,input.operationId(),result.revision(),user,
+                "line.create",resource,payload.toString());
+        return result;
+    }
+
     /**
      * Atomic ordinary-canvas station creation. A single operation appends the
      * station, membership, optional interval (with its draft waypoints), and
@@ -1639,7 +1743,7 @@ public class ProjectController {
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "并发操作版本不连续，拒绝自动重基");
             switch(action) {
-                case "line.append-new","line.append-existing","segment.split-station" -> {
+                case "line.create","line.append-new","line.append-existing","segment.split-station" -> {
                     if(!resource.startsWith("line:") ||
                         resource.equals("line:"+lineId))
                         throw new ResponseStatusException(HttpStatus.CONFLICT,

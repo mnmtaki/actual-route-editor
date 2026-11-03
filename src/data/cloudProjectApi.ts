@@ -24,6 +24,13 @@ export interface CloudWaypointMove {
   x: number;
   y: number;
 }
+export interface CloudLineCompound {
+  operationId: string;
+  expectedRevision: number;
+  lineId: string;
+  beforeDocument: ActualRouteProject;
+  afterDocument: ActualRouteProject;
+}
 export interface CloudLoopClose {
   operationId: string;
   expectedRevision: number;
@@ -209,6 +216,14 @@ export const cloudApi = {
   moveWaypoint: async (id: string, operation: CloudWaypointMove) => {
     const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
       `/api/projects/${encodeURIComponent(id)}/operations/waypoint`, {
+        method: 'POST', body: JSON.stringify(operation),
+      },
+    );
+    return { ...raw, document: parseProjectJson(JSON.stringify(raw.document)) } as CloudProject;
+  },
+  applyLineCompound: async (id: string, operation: CloudLineCompound) => {
+    const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
+      `/api/projects/${encodeURIComponent(id)}/operations/line-compound`, {
         method: 'POST', body: JSON.stringify(operation),
       },
     );

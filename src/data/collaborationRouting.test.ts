@@ -144,6 +144,17 @@ describe('ordinary canvas collaboration routing', () => {
     const collision = structuredClone(base);
     collision.stations.push(structuredClone(local.project.stations.at(-1)!));
     expect(mergeOnePendingCanvasStation(serializeProject(base),local.project,collision)).toBeNull();
+    const movedEndpoint = structuredClone(base);
+    movedEndpoint.stations[1].x += 5;
+    expect(mergeOnePendingCanvasStation(serializeProject(base),local.project,movedEndpoint)).toBeNull();
+    const changedSegment = structuredClone(base);
+    changedSegment.geometry.segments[0].mode = 'smooth';
+    expect(mergeOnePendingCanvasStation(serializeProject(base),local.project,changedSegment)).toBeNull();
+    const newTransfer = structuredClone(base);
+    newTransfer.lines.push({ id:'another', name:'Another', color:'#aabbcc',
+      stationSequence:['b'], lineOrder:1, visible:true, locked:false });
+    newTransfer.stationLineRelations.push({ id:'transfer', lineId:'another', stationId:'b' });
+    expect(mergeOnePendingCanvasStation(serializeProject(base),local.project,newTransfer)).toBeNull();
   });
 
   it('rejects mixed changes and non-terminal connections', () => {

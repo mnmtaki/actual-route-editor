@@ -663,6 +663,72 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void independentLineCreationRebasesAndResolvesConcurrentOrdering() throws Exception {
+        Session owner=account("twoNewLines");
+        String id=createProject(owner);
+        JsonNode seed=mapper.readTree("""
+            {"version":1,"name":"New Lines","stations":[],"lines":[],
+             "stationLineRelations":[],"geometry":{"segments":[]},
+             "openingPhases":[]}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","New Lines","document",seed,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        String endpoint="/api/projects/"+id+"/operations/line-create";
+        JsonNode phaseA=mapper.readTree("""
+            {"id":"phase-a","lineId":"line-a","name":"一期",
+             "openedAt":"2026-05-01","showOverviewAfter":false,
+             "segmentIds":[],"stationRelationIds":[],
+             "overriddenSegmentIds":[],"overriddenStationRelationIds":[]}
+            """);
+        JsonNode lineA=mapper.readTree("""
+            {"id":"line-a","name":"A","color":"#112233",
+             "stationSequence":[],"lineBadges":[],"lineOrder":0,
+             "openedAt":"2026-05-01","closedAt":null,
+             "visible":true,"locked":false}
+            """);
+        JsonNode phaseB=mapper.readTree("""
+            {"id":"phase-b","lineId":"line-b","name":"一期",
+             "openedAt":"2026-05-01","showOverviewAfter":false,
+             "segmentIds":[],"stationRelationIds":[],
+             "overriddenSegmentIds":[],"overriddenStationRelationIds":[]}
+            """);
+        JsonNode lineB=mapper.readTree("""
+            {"id":"line-b","name":"B","color":"#445566",
+             "stationSequence":[],"lineBadges":[],"lineOrder":0,
+             "openedAt":"2026-05-01","closedAt":null,
+             "visible":true,"locked":false}
+            """);
+        String first=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "line",lineA,"phase",phaseA));
+        String second=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "line",lineB,"phase",phaseB));
+        mvc.perform(authorized(post(endpoint)
+            .contentType(MediaType.APPLICATION_JSON).content(first),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        mvc.perform(authorized(post(endpoint)
+            .contentType(MediaType.APPLICATION_JSON).content(second),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4))
+            .andExpect(jsonPath("$.document.lines.length()").value(2))
+            .andExpect(jsonPath("$.document.openingPhases.length()").value(2))
+            .andExpect(jsonPath("$.document.lines[0].lineOrder").value(0))
+            .andExpect(jsonPath("$.document.lines[1].lineOrder").value(1));
+        mvc.perform(authorized(post(endpoint)
+            .contentType(MediaType.APPLICATION_JSON).content(second),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4));
+        // Reusing the same new line ID with a different operation must conflict.
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",4,
+                "line",lineB,"phase",phaseB))),owner))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
     void concurrentIndependentStationRequestsSerializeWithoutLostUpdates() throws Exception {
         Session owner=account("parallelWrite");
         Session peer=account("parallelPeer");

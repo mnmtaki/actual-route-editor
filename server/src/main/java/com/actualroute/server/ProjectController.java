@@ -1090,7 +1090,7 @@ public class ProjectController {
             || !(input.phase() instanceof ObjectNode phase)
             || !onlyFields(line,java.util.Set.of("id","name","color",
                 "stationSequence","lineBadges","lineOrder","openedAt","closedAt",
-                "visible","locked"))
+                "visible","locked","parentLineId"))
             || !onlyFields(phase,java.util.Set.of("id","lineId","name","openedAt",
                 "segmentIds","stationRelationIds","overriddenSegmentIds",
                 "overriddenStationRelationIds","showOverviewAfter"))
@@ -1159,6 +1159,24 @@ public class ProjectController {
             || !(document.path("openingPhases") instanceof ArrayNode phases))
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                 "工程线路数据不完整");
+        // A native branch is an independent line with a live, editable
+        // parent reference. A stale branch creation must not silently attach
+        // to a parent whose topology changed after the user's baseline.
+        if(line.has("parentLineId")) {
+            String parentId=line.path("parentLineId").asText("");
+            if(!validId(parentId) || parentId.equals(line.path("id").asText()))
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"支线主线 ID 无效");
+            ObjectNode parent=null;
+            for(JsonNode oldLine:lines)
+                if(parentId.equals(oldLine.path("id").asText()) &&
+                   oldLine instanceof ObjectNode)
+                    parent=(ObjectNode)oldLine;
+            if(parent==null || parent.path("locked").asBoolean(false) ||
+                parent.path("isFake").asBoolean(false))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "支线主线不存在或已锁定");
+            requireDisjointLineHistory(id,input.expectedRevision(),revision,parentId);
+        }
         for(JsonNode oldLine:lines)
             if(line.path("id").asText().equals(oldLine.path("id").asText()))
                 throw new ResponseStatusException(HttpStatus.CONFLICT,"线路 ID 已存在");

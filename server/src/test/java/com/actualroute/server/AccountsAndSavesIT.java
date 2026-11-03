@@ -663,6 +663,73 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void lineCompoundMergesDisjointRemoteStationEditAndRejectsSameLineOverlap() throws Exception {
+        Session owner=account("compoundMerge");
+        String id=createProject(owner);
+        ObjectNode seed=(ObjectNode)mapper.readTree("""
+            {"version":1,"name":"Compound",
+             "stations":[
+               {"id":"a","name":"A","x":0,"y":0},
+               {"id":"b","name":"B","x":100,"y":0},
+               {"id":"c","name":"C","x":250,"y":0}],
+             "lines":[
+               {"id":"l1","name":"First","color":"#123456",
+                "stationSequence":["a","b"],"lineOrder":0,
+                "visible":true,"locked":false},
+               {"id":"l2","name":"Second","color":"#654321",
+                "stationSequence":["c"],"lineOrder":1,
+                "visible":true,"locked":false}],
+             "stationLineRelations":[
+               {"id":"ra","lineId":"l1","stationId":"a"},
+               {"id":"rb","lineId":"l1","stationId":"b"},
+               {"id":"rc","lineId":"l2","stationId":"c"}],
+             "geometry":{"segments":[{"id":"ab","lineId":"l1",
+                "fromStationId":"a","toStationId":"b",
+                "mode":"straight","structureType":"underground",
+                "waypoints":[]}]},
+             "openingPhases":[]}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Compound","document",seed,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        ObjectNode after=seed.deepCopy();
+        ObjectNode first=(ObjectNode)after.path("geometry").path("segments").get(0);
+        first.put("mode","smooth");
+        first.set("waypoints",mapper.readTree("""
+            [{"id":"w","x":50,"y":20,"type":"smooth"}]
+            """));
+        mvc.perform(authorized(post("/api/projects/"+id+"/operations")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "type","station.rename","station",
+                Map.of("id","c","name","Changed Remotely")))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        String endpoint="/api/projects/"+id+"/operations/line-compound";
+        String body=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","l1","beforeDocument",seed,"afterDocument",after));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(body),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4))
+            .andExpect(jsonPath("$.document.stations[2].name").value("Changed Remotely"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].mode").value("smooth"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[0].id").value("w"));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(body),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4));
+        ObjectNode concurrent=seed.deepCopy();
+        ((ObjectNode)concurrent.path("lines").get(0)).put("name","Conflicting title");
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "lineId","l1","beforeDocument",seed,
+                "afterDocument",concurrent))),owner))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
     void seededBranchCreationAndContinuationAreAtomicAndIdempotent() throws Exception {
         Session owner=account("branchAtomic");
         String id=createProject(owner);

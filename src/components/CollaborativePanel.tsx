@@ -400,7 +400,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   // to a single station. Complex topology and compound edits keep manual CAS.
   useEffect(() => {
     if (busy || working.current || fetching.current || permissionLost
-        || draftActive) return;
+        || draftActive || pendingTopologyRead(session.id)) return;
     const candidate = detectStationOperation(session.baseJson, project);
     const waypointCandidate = candidate ? null : detectWaypointMove(session.baseJson, project);
     if (!candidate && !waypointCandidate) return;

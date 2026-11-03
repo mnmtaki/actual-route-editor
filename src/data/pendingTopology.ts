@@ -1,6 +1,7 @@
-import type { CloudLoopClose, CloudNewLine, CloudNewLineStation, CloudLineAppend, CloudSegmentSplit, CloudMiddleStationRemoval } from './cloudProjectApi';
+import type { CloudLineCompound, CloudLoopClose, CloudNewLine, CloudNewLineStation, CloudLineAppend, CloudSegmentSplit, CloudMiddleStationRemoval } from './cloudProjectApi';
 
 export type PendingTopologyOperation =
+  | { kind: 'compound'; payload: CloudLineCompound }
   | { kind: 'loop-close'; payload: CloudLoopClose }
   | { kind: 'new-line'; payload: CloudNewLine }
   | { kind: 'new-station'; payload: CloudNewLineStation }
@@ -51,7 +52,7 @@ export function pendingTopologyRead(projectId: string, store: Pick<Storage, 'get
     if (!raw || raw.length > MAX_BYTES) return null;
     const value = JSON.parse(raw) as PendingTopologyWrite;
     if (value.projectId !== projectId || typeof value.snapshot !== 'string' ||
-        !value.operation || !['loop-close', 'new-line', 'new-station', 'append', 'split', 'remove'].includes(value.operation.kind) ||
+        !value.operation || !['compound', 'loop-close', 'new-line', 'new-station', 'append', 'split', 'remove'].includes(value.operation.kind) ||
         typeof value.operation.payload?.operationId !== 'string' ||
         typeof value.operation.payload.expectedRevision !== 'number') return null;
     return value;

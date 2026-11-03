@@ -979,6 +979,39 @@ class AccountsAndSavesIT {
             .andExpect(jsonPath("$.document.stations[0].x").value(10))
             .andExpect(jsonPath("$.document.stations[2].x").value(510))
             .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[0].x").value(55));
+
+        // Renaming an endpoint is independent of the geometric waypoint move.
+        mvc.perform(authorized(post(stationApi).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",5,
+                "type","station.rename","station",
+                Map.of("id","a","name","Renamed A")))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(6));
+        mvc.perform(authorized(post(waypointApi).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",5,
+                "segmentId","ab","waypointId","w","x",60,"y",8))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(7));
+
+        // The reverse direction also merges: a rename rebases over a waypoint.
+        mvc.perform(authorized(post(stationApi).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",6,
+                "type","station.rename","station",
+                Map.of("id","b","name","Renamed B")))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(8));
+        // Moving the endpoint, however, may not rebase over that same waypoint.
+        mvc.perform(authorized(post(stationApi).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",6,
+                "type","station.move","station",
+                Map.of("id","a","x",12,"y",2)))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.document.stations[0].name").value("Renamed A"))
+            .andExpect(jsonPath("$.document.stations[1].name").value("Renamed B"))
+            .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[0].x").value(60));
     }
 
     @Test

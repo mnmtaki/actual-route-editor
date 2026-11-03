@@ -664,6 +664,69 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void independentCompoundTransactionsMergeAcrossLinesButNotWithinSameLine() throws Exception {
+        Session owner=account("twoCompound");
+        String id=createProject(owner);
+        ObjectNode base=(ObjectNode)mapper.readTree("""
+            {"version":1,"name":"Compound Parallel",
+             "stations":[{"id":"a","name":"A","x":0,"y":0},
+                         {"id":"b","name":"B","x":100,"y":0},
+                         {"id":"c","name":"C","x":200,"y":0},
+                         {"id":"d","name":"D","x":300,"y":0}],
+             "lines":[
+               {"id":"l1","name":"L1","color":"#112233",
+                "stationSequence":["a","b"],"lineOrder":0,
+                "visible":true,"locked":false},
+               {"id":"l2","name":"L2","color":"#445566",
+                "stationSequence":["c","d"],"lineOrder":1,
+                "visible":true,"locked":false}],
+             "stationLineRelations":[
+               {"id":"ra","lineId":"l1","stationId":"a"},
+               {"id":"rb","lineId":"l1","stationId":"b"},
+               {"id":"rc","lineId":"l2","stationId":"c"},
+               {"id":"rd","lineId":"l2","stationId":"d"}],
+             "geometry":{"segments":[
+               {"id":"ab","lineId":"l1","fromStationId":"a",
+                "toStationId":"b","mode":"straight",
+                "structureType":"underground","waypoints":[]},
+               {"id":"cd","lineId":"l2","fromStationId":"c",
+                "toStationId":"d","mode":"straight",
+                "structureType":"underground","waypoints":[]}]},
+             "openingPhases":[]}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Compound Parallel","document",base,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        ObjectNode afterOne=base.deepCopy();
+        ((ObjectNode)afterOne.path("geometry").path("segments").get(0))
+            .put("mode","smooth");
+        ObjectNode afterTwo=base.deepCopy();
+        ((ObjectNode)afterTwo.path("geometry").path("segments").get(1))
+            .put("mode","smooth");
+        String endpoint="/api/projects/"+id+"/operations/line-compound";
+        String first=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","l1","beforeDocument",base,"afterDocument",afterOne));
+        String second=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","l2","beforeDocument",base,"afterDocument",afterTwo));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(first),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(second),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4))
+            .andExpect(jsonPath("$.document.geometry.segments[0].mode").value("smooth"))
+            .andExpect(jsonPath("$.document.geometry.segments[1].mode").value("smooth"));
+        String overlap=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","l1","beforeDocument",base,"afterDocument",afterOne));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(overlap),owner)).andExpect(status().isConflict());
+    }
+
+    @Test
     void projectAtomicCompoundIsIdempotentAndRejectsConcurrentWholeMapEdits() throws Exception {
         Session owner=account("atomicCompound");
         String id=createProject(owner);

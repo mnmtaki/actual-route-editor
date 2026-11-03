@@ -663,6 +663,69 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void concurrentIndependentStationRequestsSerializeWithoutLostUpdates() throws Exception {
+        Session owner=account("parallelWrite");
+        Session peer=account("parallelPeer");
+        String id=createProject(owner);
+        UUID peerId=auth.resolve(peer.sessionCookie().getValue());
+        String username=jdbc.queryForObject("SELECT username FROM app_users WHERE id=?",
+            String.class,peerId);
+        mvc.perform(authorized(post("/api/projects/"+id+"/access-rules")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "username",username,"action","edit","allowed",true))),owner))
+            .andExpect(status().isOk());
+
+        String endpoint="/api/projects/"+id+"/operations";
+        String first=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",1,
+            "type","station.create",
+            "station",Map.of("id","station-owner","name","Owner","x",10,"y",20)));
+        String second=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",1,
+            "type","station.create",
+            "station",Map.of("id","station-peer","name","Peer","x",30,"y",40)));
+        var ready=new java.util.concurrent.CountDownLatch(2);
+        var start=new java.util.concurrent.CountDownLatch(1);
+        var pool=java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            java.util.concurrent.Callable<Integer> actionA=()->{
+                ready.countDown();
+                if(!start.await(10,java.util.concurrent.TimeUnit.SECONDS))
+                    throw new IllegalStateException("start latch expired");
+                return mvc.perform(authorized(post(endpoint)
+                    .contentType(MediaType.APPLICATION_JSON).content(first),owner))
+                    .andReturn().getResponse().getStatus();
+            };
+            java.util.concurrent.Callable<Integer> actionB=()->{
+                ready.countDown();
+                if(!start.await(10,java.util.concurrent.TimeUnit.SECONDS))
+                    throw new IllegalStateException("start latch expired");
+                return mvc.perform(authorized(post(endpoint)
+                    .contentType(MediaType.APPLICATION_JSON).content(second),peer))
+                    .andReturn().getResponse().getStatus();
+            };
+            var futureA=pool.submit(actionA);
+            var futureB=pool.submit(actionB);
+            assertTrue(ready.await(10,java.util.concurrent.TimeUnit.SECONDS));
+            start.countDown();
+            assertEquals(200,futureA.get(20,java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(200,futureB.get(20,java.util.concurrent.TimeUnit.SECONDS));
+        } finally {
+            start.countDown();
+            pool.shutdownNow();
+        }
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.stations.length()").value(2));
+        assertEquals(2,jdbc.queryForObject("""
+            SELECT count(*) FROM cloud_project_operations
+            WHERE project_id=? AND action='station.create'
+            """,Integer.class,UUID.fromString(id)));
+    }
+
+    @Test
     void twoEditorsMergeDisjointStationEditsButRejectOverlappingOrFullSaves() throws Exception {
         Session owner=account("mergeOwner");
         Session peer=account("mergePeer");

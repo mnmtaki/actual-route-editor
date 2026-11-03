@@ -430,33 +430,49 @@ export function detectCanvasNewLine(baseJson: string, project: ActualRouteProjec
   let before: ActualRouteProject;
   try { before=JSON.parse(baseJson) as ActualRouteProject; } catch { return null; }
   const after=JSON.parse(serializeProject(project)) as ActualRouteProject;
-  if (!equal({...before,lines:[],openingPhases:[]},
-             {...after,lines:[],openingPhases:[]}) ||
+  const oldRelations=before.stationLineRelations;
+  const newRelations=after.stationLineRelations;
+  if (!equal({...before,lines:[],openingPhases:[],stationLineRelations:[]},
+             {...after,lines:[],openingPhases:[],stationLineRelations:[]}) ||
       after.lines.length!==before.lines.length+1 ||
       after.openingPhases.length!==before.openingPhases.length+1 ||
       !before.lines.every((line,i)=>equal(line,after.lines[i])) ||
-      !before.openingPhases.every((phase,i)=>equal(phase,after.openingPhases[i])))
+      !before.openingPhases.every((phase,i)=>equal(phase,after.openingPhases[i])) ||
+      !oldRelations.every((relation,i)=>equal(relation,newRelations[i])))
     return null;
   const line=after.lines.at(-1), phase=after.openingPhases.at(-1);
   if(!line || !phase || line.isFake || line.source ||
-      line.operationHistory?.length || line.stationSequence.length ||
-      line.lineBadges?.length || !line.visible || line.locked ||
-      !line.name.trim() || !/^#[0-9a-fA-F]{6}$/.test(line.color) ||
+      line.operationHistory?.length || line.lineBadges?.length ||
+      !line.visible || line.locked ||
+      (!line.parentLineId && !line.name.trim()) ||
+      !/^#[0-9a-fA-F]{6}$/.test(line.color) ||
       line.openedAt!==phase.openedAt || phase.lineId!==line.id ||
       !phase.openedAt || phase.segmentIds.length ||
-      phase.stationRelationIds.length ||
       phase.overriddenSegmentIds?.length ||
       phase.overriddenStationRelationIds?.length ||
-      phase.revealStartStationId || phase.revealEndStationId ||
+      phase.revealEndStationId ||
       before.lines.some(item=>item.id===line.id) ||
       before.openingPhases.some(item=>item.id===phase.id) ||
       (line.parentLineId && (
         !before.lines.some(parent=>parent.id===line.parentLineId &&
-          !parent.locked && !parent.isFake) ||
-        // Child color must match the actual parent service family.
-        // A complex color-inheritance history is not suitable for this path.
-        before.lines.find(parent=>parent.id===line.parentLineId)?.source
-      )))
-    return null;
-  return { line, phase };
+          !parent.locked && !parent.isFake && !parent.source)
+      ))) return null;
+  const seedRelation=newRelations.length===oldRelations.length+1
+    ? newRelations.at(-1) : undefined;
+  if(newRelations.length!==oldRelations.length+(seedRelation?1:0)) return null;
+  if(seedRelation) {
+    if(!line.parentLineId || line.stationSequence.length!==1 ||
+       line.stationSequence[0]!==seedRelation.stationId ||
+       seedRelation.lineId!==line.id ||
+       !before.stations.some(station=>station.id===seedRelation.stationId) ||
+       phase.revealStartStationId!==seedRelation.stationId ||
+       !equal(phase.stationRelationIds,[seedRelation.id]) ||
+       seedRelation.openedAt!==phase.openedAt ||
+       seedRelation.closedAt!==null ||
+       seedRelation.operationHistory?.length ||
+       seedRelation.anchor || seedRelation.stationCode)
+      return null;
+  } else if(line.stationSequence.length || phase.stationRelationIds.length ||
+            phase.revealStartStationId) return null;
+  return { line, phase, ...(seedRelation?{seedRelation}:{}) };
 }

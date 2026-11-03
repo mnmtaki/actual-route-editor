@@ -1777,6 +1777,18 @@ public class ProjectController {
                         resource.equals("line:"+lineId))
                         throw new ResponseStatusException(HttpStatus.CONFLICT,
                             "存在同线或无法识别的拓扑操作");
+                    if("line.append-existing".equals(action)) {
+                        try {
+                            JsonNode payload=mapper.readTree((String)item[3]);
+                            if(stationsOnLine.contains(payload.path("toStationId").asText()) ||
+                               stationsOnLine.contains(payload.path("fromStationId").asText()))
+                                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                                    "跨线接站触及共享站点，拒绝自动合并");
+                        } catch(com.fasterxml.jackson.core.JsonProcessingException e) {
+                            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                                "无法核实跨线接站依赖");
+                        }
+                    }
                 }
                 case "line.remove-middle-station" -> {
                     if(!resource.startsWith("line:") ||

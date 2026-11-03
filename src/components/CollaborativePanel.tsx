@@ -6,7 +6,7 @@ import { cloudApi, cloudSocketUrl, CloudApiError } from '../data/cloudProjectApi
 import type { CloudUndoEntry, CloudOperationHistoryItem } from '../data/cloudProjectApi';
 import { detectStationOperation } from '../data/stationLiveOperations';
 import { detectWaypointMove } from '../data/waypointLiveOperations';
-import { detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation, mergeOnePendingCanvasStation } from '../data/collaborationRouting';
+import { detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation, mergeOnePendingCanvasStation, detectCanvasNewLine } from '../data/collaborationRouting';
 import { pendingTopologyRead, pendingTopologySave, pendingTopologyClear, pendingTopologyConfirm } from '../data/pendingTopology';
 import type { PendingTopologyOperation } from '../data/pendingTopology';
 
@@ -233,6 +233,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     const { operation } = pending;
     const resend = () => {
       switch (operation.kind) {
+        case 'new-line': return cloudApi.createLine(session.id, operation.payload);
         case 'new-station': return cloudApi.appendNewStation(session.id, operation.payload);
         case 'append': return cloudApi.appendExistingStation(session.id, operation.payload);
         case 'split': return cloudApi.splitSegment(session.id, operation.payload);
@@ -481,16 +482,17 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
         draftActive || !dirty || pendingTopologyRead(session.id)) return;
     if (detectStationOperation(session.baseJson, project) ||
         detectWaypointMove(session.baseJson, project)) return;
-    const newLineStation = detectCanvasNewLineStation(session.baseJson, project);
-    const lineAppend = newLineStation ? null : detectCanvasLineAppend(session.baseJson, project);
-    const segmentSplit = newLineStation || lineAppend ? null : detectCanvasSegmentSplit(session.baseJson, project);
-    const middleRemoval = newLineStation || lineAppend || segmentSplit ? null : detectCanvasMiddleStationRemoval(session.baseJson, project);
+    const newLine = detectCanvasNewLine(session.baseJson, project);
+    const newLineStation = newLine ? null : detectCanvasNewLineStation(session.baseJson, project);
+    const lineAppend = newLine || newLineStation ? null : detectCanvasLineAppend(session.baseJson, project);
+    const segmentSplit = newLine || newLineStation || lineAppend ? null : detectCanvasSegmentSplit(session.baseJson, project);
+    const middleRemoval = newLine || newLineStation || lineAppend || segmentSplit ? null : detectCanvasMiddleStationRemoval(session.baseJson, project);
     // A later WebSocket revision may come from a DIFFERENT line. The Java
     // journal validates that disjointness, so do not suppress a safe operation
     // solely because the advertised global revision advanced. Full-document
     // fallback remains strictly version-checked and must stop.
     if (remoteRevision > session.revision &&
-        !newLineStation && !lineAppend && !segmentSplit && !middleRemoval) return;
+        !newLine && !newLineStation && !lineAppend && !segmentSplit && !middleRemoval) return;
     const snapshot = serializeProject(project);
     const attemptKey = session.id + ':' + session.revision + ':' + snapshot;
     if (lastAutoAttempt.current === attemptKey) return;
@@ -502,10 +504,12 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       lastAutoAttempt.current = attemptKey;
       working.current = true;
       setBusy(true);
-      setLiveStatus(newLineStation ? '正在同步绘制的新车站…' : lineAppend ? '正在同步线路接站…' : segmentSplit ? '正在同步区间插站…' : middleRemoval ? '正在同步删除中间站…' : '正在同步画布修改…');
+      setLiveStatus(newLine ? '正在同步新建线路…' : newLineStation ? '正在同步绘制的新车站…' : lineAppend ? '正在同步线路接站…' : segmentSplit ? '正在同步区间插站…' : middleRemoval ? '正在同步删除中间站…' : '正在同步画布修改…');
       setError('');
       const operationId = crypto.randomUUID();
-      const topologyOperation: PendingTopologyOperation | null = newLineStation
+      const topologyOperation: PendingTopologyOperation | null = newLine
+        ? { kind: 'new-line', payload: { ...newLine, operationId, expectedRevision: session.revision } }
+        : newLineStation
         ? { kind: 'new-station', payload: { ...newLineStation, operationId, expectedRevision: session.revision } }
         : lineAppend
           ? { kind: 'append', payload: { ...lineAppend, operationId, expectedRevision: session.revision } }
@@ -526,6 +530,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       const sendTopology = () => {
         if (!topologyOperation) throw new Error('没有待提交拓扑操作');
         switch (topologyOperation.kind) {
+          case 'new-line': return cloudApi.createLine(session.id, topologyOperation.payload);
           case 'new-station': return cloudApi.appendNewStation(session.id, topologyOperation.payload);
           case 'append': return cloudApi.appendExistingStation(session.id, topologyOperation.payload);
           case 'split': return cloudApi.splitSegment(session.id, topologyOperation.payload);
@@ -581,7 +586,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
           onLoadRef.current(saved.document, next);
           setRecoveryOpen(false);
           setError('');
-          setLiveStatus((newLineStation ? '连续绘制新站' : lineAppend ? '线路接站' : segmentSplit ? '区间插站' : '删除中间站') + '已按操作级协议同步至 v' + saved.revision);
+          setLiveStatus((newLine ? '新建线路' : newLineStation ? '连续绘制新站' : lineAppend ? '线路接站' : segmentSplit ? '区间插站' : '删除中间站') + '已按操作级协议同步至 v' + saved.revision);
           return;
         }
         const next = { id: session.id, name: saved.name,

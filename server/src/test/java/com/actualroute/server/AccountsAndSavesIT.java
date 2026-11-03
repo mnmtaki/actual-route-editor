@@ -929,6 +929,59 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void endpointAndWaypointConflictsButDisjointStationCanRebase() throws Exception {
+        Session owner=account("geometryConflict");
+        String id=createProject(owner);
+        JsonNode doc=mapper.readTree("""
+            {"version":1,"name":"Geometry","stations":[
+              {"id":"a","name":"A","x":0,"y":0},
+              {"id":"b","name":"B","x":100,"y":0},
+              {"id":"c","name":"C","x":500,"y":500}],
+             "lines":[{"id":"l","name":"L","color":"#112233",
+               "stationSequence":["a","b"],"visible":true,"locked":false}],
+             "stationLineRelations":[
+               {"id":"ra","lineId":"l","stationId":"a"},
+               {"id":"rb","lineId":"l","stationId":"b"}],
+             "geometry":{"segments":[
+               {"id":"ab","lineId":"l","fromStationId":"a","toStationId":"b",
+                "mode":"smooth","structureType":"underground",
+                "waypoints":[{"id":"w","x":50,"y":5,"type":"smooth"}]}]},
+             "openingPhases":[]}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Geometry","document",doc,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        String stationApi="/api/projects/"+id+"/operations";
+        String waypointApi="/api/projects/"+id+"/operations/waypoint";
+        mvc.perform(authorized(post(stationApi).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "type","station.move","station",Map.of("id","a","x",10,"y",0)))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        String moveWaypoint=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "segmentId","ab","waypointId","w","x",51,"y",6));
+        mvc.perform(authorized(post(waypointApi).contentType(MediaType.APPLICATION_JSON)
+            .content(moveWaypoint),owner)).andExpect(status().isConflict());
+        mvc.perform(authorized(post(stationApi).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "type","station.move","station",Map.of("id","c","x",510,"y",510)))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4));
+        mvc.perform(authorized(post(waypointApi).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",3,
+                "segmentId","ab","waypointId","w","x",55,"y",7))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(5));
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.document.stations[0].x").value(10))
+            .andExpect(jsonPath("$.document.stations[2].x").value(510))
+            .andExpect(jsonPath("$.document.geometry.segments[0].waypoints[0].x").value(55));
+    }
+
+    @Test
     void waypointOperationsMergeSeparateSegmentsButRejectOverlapAndFullSave() throws Exception {
         Session owner=account("wayOwner");
         Session guest=account("wayGuest");

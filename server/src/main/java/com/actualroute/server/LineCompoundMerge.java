@@ -46,6 +46,7 @@ final class LineCompoundMerge {
         require(!oldLine.path("locked").asBoolean(false) &&
                 !oldLine.path("isFake").asBoolean(false) &&
                 !oldLine.has("source") &&
+                !newLine.has("source") &&
                 oldLine.path("operationHistory").size()==0,
                 "来源线路或锁定线路禁止复合合并");
         require(otherLinesEqual(before.path("lines"),after.path("lines"),lineId),
@@ -250,15 +251,40 @@ final class LineCompoundMerge {
         var segments=index(doc.path("geometry").path("segments"));
         var relations=index(doc.path("stationLineRelations"));
         JsonNode line=find(doc.path("lines"),lineId);
+        require(line.path("stationSequence").isArray(),"线路站序格式无效");
+        var membershipIds=new HashSet<String>();
+        for(JsonNode rel:scoped(doc.path("stationLineRelations"),lineId))
+            membershipIds.add(rel.path("stationId").asText());
         for(JsonNode id:line.path("stationSequence"))
-            require(stations.containsKey(id.asText()),"线路站序引用了不存在的车站");
+            require(stations.containsKey(id.asText()) &&
+                    membershipIds.contains(id.asText()),
+                    "线路站序引用了无成员关系的车站");
+        for(JsonNode station:doc.path("stations")) {
+            String id=station.path("id").asText("");
+            require(!id.isEmpty() && id.length()<=128,
+                "车站 ID 无效");
+            if(!Double.isFinite(station.path("x").asDouble(Double.NaN)) ||
+               !Double.isFinite(station.path("y").asDouble(Double.NaN)))
+                throw new IllegalArgumentException("车站坐标无效");
+        }
         for(JsonNode rel:scoped(doc.path("stationLineRelations"),lineId))
             require(stations.containsKey(rel.path("stationId").asText()),
                 "线路关联引用了不存在的车站");
-        for(JsonNode seg:scoped(doc.path("geometry").path("segments"),lineId))
-            require(stations.containsKey(seg.path("fromStationId").asText()) &&
-                    stations.containsKey(seg.path("toStationId").asText()),
-                "区间引用了不存在的端点");
+        for(JsonNode seg:scoped(doc.path("geometry").path("segments"),lineId)) {
+            String from=seg.path("fromStationId").asText();
+            String to=seg.path("toStationId").asText();
+            require(stations.containsKey(from) && stations.containsKey(to) &&
+                    membershipIds.contains(from) && membershipIds.contains(to) &&
+                    !from.equals(to),"区间引用了不属于本线的端点");
+            require(seg.path("waypoints").isArray() &&
+                    java.util.Set.of("straight","smooth").contains(
+                        seg.path("mode").asText("")),"区间几何格式无效");
+            for(JsonNode waypoint:seg.path("waypoints"))
+                require(waypoint.path("id").isTextual() &&
+                        Double.isFinite(waypoint.path("x").asDouble(Double.NaN)) &&
+                        Double.isFinite(waypoint.path("y").asDouble(Double.NaN)),
+                        "区间控制点格式无效");
+        }
         for(JsonNode phase:scoped(doc.path("openingPhases"),lineId)) {
             for(JsonNode id:phase.path("segmentIds"))
                 require(segments.containsKey(id.asText()) &&

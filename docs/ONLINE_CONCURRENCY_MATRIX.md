@@ -1,0 +1,74 @@
+# Actual Route Editor — Online Concurrency Contract
+
+Branch: `feat/java-accounts-cloud-saves-20261101`
+
+## Core contract
+
+The ordinary editor toolbar is the write entry point. Operation-level changes
+are serialized by a PostgreSQL project-row lock and logged with a stable
+`operationId`; a stale operation may rebase only across a complete, provably
+disjoint revision journal. Otherwise the server returns 409 and the client
+retains its working copy. Whole-project PUT/restore is an explicit conflict
+boundary, not an automatic three-way merge.
+
+**Important: code and test cases committed ≠ CI or browser acceptance passed.**
+All test results must be recorded from a real execution before release.
+
+## Operation-pair matrix
+
+| Concurrent operations | Desired policy | Implementation / test coverage |
+|---|---|---|
+| Two independent station creations | Merge; reject duplicate station ID | `concurrentIndependentStationRequestsSerializeWithoutLostUpdates` |
+| Distinct station moves/renames | Merge | `twoEditorsMergeDisjointStationEditsButRejectOverlappingOrFullSaves` |
+| Same-station edits | 409, never last-write-wins | Same test |
+| Two distinct segment waypoint moves | Merge | `waypointOperationsMergeSeparateSegmentsButRejectOverlapAndFullSave` |
+| Two changes to same segment's waypoints | 409 | Same test |
+| Station rename + waypoint edit | Merge (non-geometric) | `endpointAndWaypointConflictsButDisjointStationCanRebase` |
+| Segment endpoint station move + waypoint edit | 409 (geometry dependency) | Same test |
+| Other station move + waypoint edit | Merge | Same test |
+| New main line + new main line | Merge; server assigns unique line order | `independentLineCreationRebasesAndResolvesConcurrentOrdering` |
+| Two regular new-line toolbar actions in different browser accounts | Merge, both rendered | `two editors create independent native lines concurrently through regular toolbar` |
+| Two regular new-line toolbar actions in same-account tabs | Merge, per-tab outboxes | `same-account tabs keep independent pending operations during concurrent line creation` |
+| New station / terminal append on independent lines | Merge | `differentLinesRebaseTopologyWhileSameLineAndFullSaveConflict` |
+| Split a segment on line A + append new station on line B | Merge | `independentSplitAndNewStationRebaseAcrossLinesButRejectSameLine` |
+| Same-line topology writes | 409 unless explicitly ordered by a fresh revision | Same tests |
+| Cross-line append involving shared station | 409 | `crossLineExistingStationAppendConflictsWithSharedEndpoint` |
+| Station move on line A + independent topology on line B (both orders) | Merge only if no shared endpoint/line membership | `unrelatedStationEditDoesNotBlockOtherLineTopologyButSameLineDoes`, `independentStationCanRebaseAfterTopologyButSharedEndpointCannot` |
+| Delete middle station + other-line topology | Merge only if no shared station; otherwise 409 | `removeSharedMiddleStationKeepsGlobalStationForOtherLine` and line-journal dependency guard; pair E2E pending |
+| Segment split + other-line waypoint | Merge only when line ownership is provable | Java dependency guard; pair E2E pending |
+| Existing-station terminal append + unrelated station change | Merge only with proof of no shared endpoint | Java dependency guard; pair E2E pending |
+| Full document save/restore vs any stale operation | 409 (conflict boundary) | `differentLinesRebaseTopologyWhileSameLineAndFullSaveConflict`, waypoint/station tests |
+| Unknown/legacy action or missing operation journal revision | 409 | Guarded by complete contiguous journal; fault-injection test pending |
+| Same `operationId`, identical payload | Idempotent, no extra revision | Multiple Java IT cases |
+| Same `operationId`, different payload | 409 | Multiple Java IT cases |
+| Network response lost after server commit | Replay same operation ID | `pendingTopology.test.ts` + server idempotency; browser fault injection pending |
+| New local drawing while prior request is in flight | Preserve local canvas; auto-continue only with safe proven merge | `collaborationRouting.test.ts`; rapid-click E2E pending |
+| New remote revision while local canvas is clean | Update canvas promptly | WebSocket + poll catch-up; E2E tests, missed-event test pending |
+| New remote revision while local canvas is dirty | Do not replace locally; show recovery | `collaboration history and conflict recovery preserve the local canvas and export backup` |
+| Permissions revoked while editing | Reject further writes; preserve local document | Auth/permission Java IT; browser race pending |
+| Phase-owned terminal append, single unambiguous phase | Atomically update line, segment, relation and phase | `appendExistingStationUpdatesExactlyOneOpeningPhase` |
+| Concurrent edits to same phase | 409 | Line-scoped conflict; explicit pair test pending |
+| Branched line / loop / compound style and historical edits | No inferred automatic merge; strict whole-document CAS | Routing safety tests; browser pair tests pending |
+| Multi-server WebSocket deployments | Database writes remain serialized; realtime delivery needs shared pubsub | **Not implemented**, 30s polling fallback only |
+| Collaborative undo/redo vs other-editor changes | Compensating operations, no global rewind; only covered station actions | `collaborativeUndoRedoAffectsOnlyOwnStationAndRetainsOtherEditorsWork` |
+
+## Release gate
+
+1. Java 21/Maven test and PostgreSQL integration suite green.
+2. TypeScript type-check and complete Vitest suite green.
+3. Playwright E2E passing in two independent browser contexts and two
+   same-account tabs.
+4. Fault-injection cases: slow request, lost ACK, delayed WebSocket event,
+   permission revocation, and two concurrent writes on shared station.
+5. Confirm invariant: no accepted operation is silently lost, no rejected
+   mutation overwrites local work, no duplicate idempotent operation revision.
+6. Verify the branch head's CI run (older green runs do not certify this branch
+   revision). Keep the branch unmerged until these conditions are met.
+
+## Operational limits
+
+This is a bounded operation journal protocol, **not CRDT/OT**. It does not
+promise to automatically merge arbitrary cross-line branches, loop edits,
+style changes, phase history, or free-form whole-project mutations. Those
+concurrent edits are supported by explicit conflict detection and local
+recovery, not simultaneous automatic merging.

@@ -1,6 +1,6 @@
 import type { ActualRouteProject } from './model';
 import { serializeProject } from '../import-export/projectJson';
-import type { CloudLineAppend, CloudSegmentSplit, CloudMiddleStationRemoval, CloudNewLineStation, CloudNewLine, CloudLoopClose } from './cloudProjectApi';
+import type { CloudLineAppend, CloudSegmentSplit, CloudMiddleStationRemoval, CloudNewLineStation, CloudNewLine, CloudLoopClose, CloudLineCompound } from './cloudProjectApi';
 
 /**
  * The backend's line-append endpoint intentionally supports only an existing,
@@ -530,4 +530,78 @@ export function detectCanvasLoopClosure(baseJson: string, project: ActualRoutePr
      (segment.closedAt??null)!==null) return null;
   return {lineId:line.id,segmentId:segment.id,
     ...(phase?{openingPhaseId:phase.id}:{})};
+}
+
+/**
+ * Fallback for a complex mutation affecting ONE native line, including
+ * branch/loop reconfiguration and compound segment edits. The server checks
+ * a trusted immutable baseline and validates all dependencies before merging.
+ *
+ * Do not route cross-line or global changes, or changes that only rename/move
+ * one station (they have a smaller existing operation protocol).
+ */
+export function detectCanvasLineCompound(baseJson: string, project: ActualRouteProject):
+  Omit<CloudLineCompound, 'operationId' | 'expectedRevision'> | null {
+  let before: ActualRouteProject;
+  try { before=JSON.parse(baseJson) as ActualRouteProject; } catch { return null; }
+  const serialized=serializeProject(project);
+  if(baseJson.length+serialized.length>750_000) return null;
+  const after=JSON.parse(serialized) as ActualRouteProject;
+  if(!equal({...before,lines:[],stations:[],stationLineRelations:[],
+      openingPhases:[],geometry:{...before.geometry,segments:[]}},
+    {...after,lines:[],stations:[],stationLineRelations:[],
+      openingPhases:[],geometry:{...after.geometry,segments:[]}})) return null;
+  if(before.lines.length!==after.lines.length) return null;
+  const changed=new Set<string>();
+  const diffOwned=(key:'stationLineRelations'|'openingPhases')=>{
+    const original=new Map(before[key].map(item=>[item.id,item]));
+    const updated=new Map(after[key].map(item=>[item.id,item]));
+    for(const [id,item] of original)
+      if(!equal(item,updated.get(id))) changed.add(item.lineId);
+    for(const [id,item] of updated)
+      if(!equal(item,original.get(id))) changed.add(item.lineId);
+  };
+  const oldLines=new Map(before.lines.map(line=>[line.id,line]));
+  const newLines=new Map(after.lines.map(line=>[line.id,line]));
+  if(oldLines.size!==before.lines.length || newLines.size!==after.lines.length) return null;
+  for(const [id,line] of oldLines) {
+    if(!newLines.has(id))return null;
+    if(!equal(line,newLines.get(id)))changed.add(id);
+  }
+  diffOwned('stationLineRelations');
+  diffOwned('openingPhases');
+  const oldSegments=new Map(before.geometry.segments.map(item=>[item.id,item]));
+  const newSegments=new Map(after.geometry.segments.map(item=>[item.id,item]));
+  for(const [id,item] of oldSegments)
+    if(!equal(item,newSegments.get(id))) changed.add(item.lineId);
+  for(const [id,item] of newSegments)
+    if(!equal(item,oldSegments.get(id))) changed.add(item.lineId);
+  if(changed.size!==1) return null;
+  const [lineId]=[...changed];
+  const line=oldLines.get(lineId);
+  const next=newLines.get(lineId);
+  if(!line || !next || line.locked || line.isFake || line.source ||
+      line.operationHistory?.length) return null;
+  const stationIds=new Set([
+    ...line.stationSequence,...next.stationSequence,
+    ...before.stationLineRelations.filter(r=>r.lineId===lineId).map(r=>r.stationId),
+    ...after.stationLineRelations.filter(r=>r.lineId===lineId).map(r=>r.stationId),
+  ]);
+  const oldStations=new Map(before.stations.map(station=>[station.id,station]));
+  const newStations=new Map(after.stations.map(station=>[station.id,station]));
+  if(newStations.size<oldStations.size) return null;
+  for(const [id,item] of oldStations)
+    if(!newStations.has(id) || (!equal(item,newStations.get(id)) && !stationIds.has(id)))
+      return null;
+  for(const [id] of newStations)
+    if(!oldStations.has(id) && !stationIds.has(id)) return null;
+  for(const key of ['stationLineRelations','openingPhases'] as const) {
+    const original=before[key].filter(item=>item.lineId!==lineId);
+    const updated=after[key].filter(item=>item.lineId!==lineId);
+    if(!equal(original,updated)) return null;
+  }
+  if(!equal(
+    before.geometry.segments.filter(item=>item.lineId!==lineId),
+    after.geometry.segments.filter(item=>item.lineId!==lineId))) return null;
+  return {lineId,beforeDocument:before,afterDocument:after};
 }

@@ -1723,6 +1723,71 @@ public class ProjectController {
                    !"station.rename".equals(action) &&
                    endpoints.get(segmentId).contains(resource))
                     throw new ResponseStatusException(HttpStatus.CONFLICT,"车站几何依赖冲突");
+            } else if(java.util.Set.of("line.create","line.append-new",
+                    "line.append-existing","segment.split-station",
+                    "line.remove-middle-station").contains(action)) {
+                if(!resource.startsWith("line:"))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "旧版或未知的线路日志不能安全重基");
+                String changedLine=resource.substring("line:".length());
+                if("line.create".equals(action)) continue;
+                // For a waypoint, topology edits to its owning line must be
+                // rejected. An independent line can only commute if it does
+                // not attach to one of this segment's shared endpoints.
+                if(segmentId!=null) {
+                    String ownerLine=null;
+                    for(JsonNode segment:document.path("geometry").path("segments"))
+                        if(segmentId.equals(segment.path("id").asText()))
+                            ownerLine=segment.path("lineId").asText();
+                    if(ownerLine==null || ownerLine.equals(changedLine))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "控制点所属线路拓扑已改变");
+                }
+                if("segment.split-station".equals(action)) {
+                    boolean belongs=false;
+                    for(JsonNode relation:document.path("stationLineRelations"))
+                        if(changedLine.equals(relation.path("lineId").asText()) &&
+                           stationId!=null && stationId.equals(relation.path("stationId").asText()))
+                            belongs=true;
+                    if(belongs)
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "插站涉及当前车站所在的线路");
+                    continue;
+                }
+                JsonNode changedPayload;
+                try {
+                    String raw=jdbc.queryForObject("""
+                        SELECT payload::text FROM cloud_project_operations
+                        WHERE project_id=? AND revision=?
+                        """,String.class,projectId,revision);
+                    changedPayload=mapper.readTree(raw);
+                } catch(Exception error) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "无法核实拓扑日志参数");
+                }
+                java.util.Set<String> attached=new java.util.HashSet<>();
+                if("line.append-new".equals(action)) {
+                    attached.add(changedPayload.path("fromStationId").asText());
+                    attached.add(changedPayload.path("station").path("id").asText());
+                } else if("line.append-existing".equals(action)) {
+                    attached.add(changedPayload.path("fromStationId").asText());
+                    attached.add(changedPayload.path("toStationId").asText());
+                } else {
+                    attached.add(changedPayload.path("stationId").asText());
+                    // Deletion can also alter the surviving line's endpoints.
+                    for(JsonNode relation:document.path("stationLineRelations"))
+                        if(changedLine.equals(relation.path("lineId").asText()))
+                            attached.add(relation.path("stationId").asText());
+                }
+                if(stationId!=null && attached.contains(stationId))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "线路操作与当前车站存在依赖");
+                if(segmentId!=null) {
+                    for(String endpoint:endpoints.get(segmentId))
+                        if(attached.contains(endpoint))
+                            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                                "跨线操作涉及当前区间的共享端点");
+                }
             } else throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "拓扑或整图变更需要重新同步");
         }

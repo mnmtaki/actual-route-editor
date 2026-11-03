@@ -1167,6 +1167,18 @@ public class ProjectController {
         }
         if(count!=sequence.size()-1)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"不完整的环线链");
+        for(int i=0;i<sequence.size()-1;i++) {
+            String left=sequence.get(i).asText(),right=sequence.get(i+1).asText();
+            int matches=0;
+            for(JsonNode segment:segments)
+                if(input.lineId().equals(segment.path("lineId").asText()) &&
+                   left.equals(segment.path("fromStationId").asText()) &&
+                   right.equals(segment.path("toStationId").asText()))
+                    matches++;
+            if(matches!=1)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "环线中存在重复或缺失区间");
+        }
         for(String stationId:java.util.List.of(first,last)) {
             boolean member=false;
             for(JsonNode relation:relations)

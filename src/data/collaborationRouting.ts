@@ -344,3 +344,55 @@ export function detectCanvasNewLineStation(baseJson: string, project: ActualRout
   return {lineId:line.id,fromStationId:fromStationId??null,station,relation,
     ...(segment?{segment}:{}),...(phase?{openingPhaseId:phase.id}:{})};
 }
+
+/**
+ * Three-way merge of exactly one subsequent ordinary canvas station append.
+ * The server has already committed an earlier operation and may have merged
+ * changes to other lines in that response. Preserve those remote changes and
+ * the next local station only when the target line + its phase are identical
+ * to the acknowledged local snapshot. Unknown local edits never merge.
+ */
+export function mergeOnePendingCanvasStation(
+  acknowledgedSnapshot: string,
+  newestLocal: ActualRouteProject,
+  committedRemote: ActualRouteProject,
+): ActualRouteProject | null {
+  const next = detectCanvasNewLineStation(acknowledgedSnapshot, newestLocal);
+  if (!next) return null;
+  let baseline: ActualRouteProject;
+  try { baseline = JSON.parse(acknowledgedSnapshot) as ActualRouteProject; }
+  catch { return null; }
+  const local = JSON.parse(serializeProject(newestLocal)) as ActualRouteProject;
+  const remote = JSON.parse(serializeProject(committedRemote)) as ActualRouteProject;
+  const oldLine = baseline.lines.find(line => line.id === next.lineId);
+  const remoteLine = remote.lines.find(line => line.id === next.lineId);
+  if (!oldLine || !remoteLine || !equal(oldLine, remoteLine)) return null;
+  const oldPhases = baseline.openingPhases.filter(phase => phase.lineId === next.lineId);
+  const newPhases = remote.openingPhases.filter(phase => phase.lineId === next.lineId);
+  if (!equal(oldPhases,newPhases)) return null;
+  if (remote.stations.some(station => station.id === next.station.id) ||
+      remote.stationLineRelations.some(relation => relation.id === next.relation.id) ||
+      (next.segment && remote.geometry.segments.some(segment => segment.id === next.segment!.id))) return null;
+  if (next.fromStationId &&
+      (!remote.stations.some(station => station.id === next.fromStationId) ||
+       remoteLine.stationSequence.at(-1) !== next.fromStationId)) return null;
+  if (!next.fromStationId && remoteLine.stationSequence.length) return null;
+
+  const merged = structuredClone(remote);
+  const line = merged.lines.find(item => item.id === next.lineId)!;
+  line.stationSequence.push(next.station.id);
+  merged.stations.push(structuredClone(next.station));
+  merged.stationLineRelations.push(structuredClone(next.relation));
+  if (next.segment) merged.geometry.segments.push(structuredClone(next.segment));
+  if (next.openingPhaseId) {
+    const phase = merged.openingPhases.find(item => item.id === next.openingPhaseId);
+    if (!phase) return null;
+    phase.stationRelationIds.push(next.relation.id);
+    if (next.segment) phase.segmentIds.push(next.segment.id);
+  }
+  // Guard against fields in the local delta that the operation detector may
+  // not have represented. For a document without remote edits, the result
+  // must be bitwise equal to the ordinary editor's intended serialized map.
+  if (equal(remote,baseline) && !equal(merged,local)) return null;
+  return merged;
+}

@@ -1368,6 +1368,83 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void unrelatedStationEditDoesNotBlockOtherLineTopologyButSameLineDoes() throws Exception {
+        Session owner=account("mixedRebase");
+        String id=createProject(owner);
+        JsonNode seed=mapper.readTree("""
+            {"version":1,"name":"Two Lines",
+             "stations":[
+                {"id":"a","name":"A","x":0,"y":0},
+                {"id":"b","name":"B","x":100,"y":0}],
+             "lines":[
+                {"id":"l1","name":"L1","color":"#112233",
+                 "stationSequence":["a"],"lineOrder":0,"locked":false},
+                {"id":"l2","name":"L2","color":"#334455",
+                 "stationSequence":["b"],"lineOrder":1,"locked":false}],
+             "stationLineRelations":[
+                {"id":"ra","lineId":"l1","stationId":"a"},
+                {"id":"rb","lineId":"l2","stationId":"b"}],
+             "geometry":{"segments":[]},"openingPhases":[]}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Two Lines","document",seed,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        String stationEndpoint="/api/projects/"+id+"/operations";
+        mvc.perform(authorized(post(stationEndpoint)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "type","station.rename","station",Map.of("id","a","name","Renamed A")))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+
+        String topology="/api/projects/"+id+"/operations/line-append-new";
+        JsonNode newStation=mapper.readTree("""
+            {"id":"c","name":"C","x":150,"y":20,"labelOffsetX":0,"labelOffsetY":0}
+            """);
+        JsonNode relation=mapper.readTree("""
+            {"id":"rc","stationId":"c","lineId":"l2"}
+            """);
+        JsonNode segment=mapper.readTree("""
+            {"id":"bc","lineId":"l2","fromStationId":"b","toStationId":"c",
+             "mode":"straight","structureType":"underground","waypoints":[]}
+            """);
+        String disjoint=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","l2","fromStationId","b",
+            "station",newStation,"relation",relation,"segment",segment));
+        mvc.perform(authorized(post(topology).contentType(MediaType.APPLICATION_JSON)
+            .content(disjoint),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4))
+            .andExpect(jsonPath("$.document.stations[0].name").value("Renamed A"))
+            .andExpect(jsonPath("$.document.lines[1].stationSequence.length()").value(2));
+
+        mvc.perform(authorized(post(stationEndpoint)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",4,
+                "type","station.rename","station",Map.of("id","b","name","Renamed B")))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(5));
+        String sameLine=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",4,
+            "lineId","l2","fromStationId","c",
+            "station",mapper.readTree("""
+                {"id":"d","name":"D","x":200,"y":30,
+                 "labelOffsetX":0,"labelOffsetY":0}
+                """),
+            "relation",mapper.readTree("""
+                {"id":"rd","stationId":"d","lineId":"l2"}
+                """),
+            "segment",mapper.readTree("""
+                {"id":"cd","lineId":"l2","fromStationId":"c","toStationId":"d",
+                 "mode":"straight","structureType":"underground","waypoints":[]}
+                """)));
+        mvc.perform(authorized(post(topology).contentType(MediaType.APPLICATION_JSON)
+            .content(sameLine),owner)).andExpect(status().isConflict());
+    }
+
+    @Test
     void independentSplitAndNewStationRebaseAcrossLinesButRejectSameLine() throws Exception {
         Session owner=account("crossTopology");
         String id=createProject(owner);

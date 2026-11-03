@@ -1,6 +1,6 @@
 import type { ActualRouteProject } from './model';
 import { serializeProject } from '../import-export/projectJson';
-import type { CloudLineAppend, CloudSegmentSplit, CloudMiddleStationRemoval, CloudNewLineStation, CloudNewLine } from './cloudProjectApi';
+import type { CloudLineAppend, CloudSegmentSplit, CloudMiddleStationRemoval, CloudNewLineStation, CloudNewLine, CloudLoopClose } from './cloudProjectApi';
 
 /**
  * The backend's line-append endpoint intentionally supports only an existing,
@@ -475,4 +475,57 @@ export function detectCanvasNewLine(baseJson: string, project: ActualRouteProjec
   } else if(line.stationSequence.length || phase.stationRelationIds.length ||
             phase.revealStartStationId) return null;
   return { line, phase, ...(seedRelation?{seedRelation}:{}) };
+}
+
+/**
+ * The normal canvas closes a loop by connecting its final station to the
+ * first one. The station sequence and membership remain unchanged; only
+ * the closing interval (and its phase ownership) are appended.
+ */
+export function detectCanvasLoopClosure(baseJson: string, project: ActualRouteProject):
+  Omit<CloudLoopClose, 'operationId' | 'expectedRevision'> | null {
+  let before: ActualRouteProject;
+  try { before=JSON.parse(baseJson) as ActualRouteProject; } catch { return null; }
+  const after=JSON.parse(serializeProject(project)) as ActualRouteProject;
+  if(!equal({...before,openingPhases:[],geometry:{...before.geometry,segments:[]}},
+            {...after,openingPhases:[],geometry:{...after.geometry,segments:[]}}) ||
+     before.geometry.segments.length+1!==after.geometry.segments.length ||
+     before.openingPhases.length!==after.openingPhases.length ||
+     !before.geometry.segments.every((item,i)=>equal(item,after.geometry.segments[i]))) return null;
+  const segment=after.geometry.segments.at(-1);
+  const line=segment && before.lines.find(item=>item.id===segment.lineId);
+  if(!segment || !line || line.locked || line.isFake || line.source ||
+     line.operationHistory?.length || line.stationSequence.length<3 ||
+     new Set(line.stationSequence).size!==line.stationSequence.length ||
+     line.stationSequence[0]!==segment.toStationId ||
+     line.stationSequence.at(-1)!==segment.fromStationId ||
+     segment.mode!=='straight' || segment.structureType!=='underground' ||
+     segment.structureNodes?.length || segment.waypoints.length ||
+     segment.source || segment.operationHistory?.length ||
+     segment.lineHistory?.length || segment.lineStyleId!==undefined ||
+     segment.cornerRadius!==undefined ||
+     before.geometry.segments.filter(item=>item.lineId===line.id).length!==
+       line.stationSequence.length-1 ||
+     !line.stationSequence.slice(1).every((id,i)=>
+       before.geometry.segments.filter(item=>item.lineId===line.id &&
+         item.fromStationId===line.stationSequence[i] && item.toStationId===id).length===1) ||
+     ![segment.fromStationId,segment.toStationId].every(id=>
+       before.stationLineRelations.some(rel=>rel.lineId===line.id && rel.stationId===id)))
+    return null;
+  const changed=after.openingPhases.filter((phase,i)=>!equal(phase,before.openingPhases[i]));
+  if(changed.length>1) return null;
+  const phase=changed[0];
+  if(phase) {
+    const original=before.openingPhases.find(p=>p.id===phase.id);
+    if(!original || original.lineId!==line.id ||
+       !equal({...original,segmentIds:[]},{...phase,segmentIds:[]}) ||
+       !equal(phase.segmentIds,[...original.segmentIds,segment.id]) ||
+       !before.openingPhases.every((p,i)=>p.id===after.openingPhases[i].id &&
+         (p.id===phase.id || equal(p,after.openingPhases[i])))) return null;
+  } else if(before.openingPhases.some(p=>p.lineId===line.id)) return null;
+  if(before.openingPhases.filter(p=>p.lineId===line.id).length!==(phase?1:0) ||
+     (segment.openedAt??null)!==(phase?.openedAt??line.openedAt??before.timeline.currentDate??null) ||
+     (segment.closedAt??null)!==null) return null;
+  return {lineId:line.id,segmentId:segment.id,
+    ...(phase?{openingPhaseId:phase.id}:{})};
 }

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyProject } from './storage';
 import { serializeProject } from '../import-export/projectJson';
-import { connectExistingStation, insertStationIntoSegment, appendStationToLineWithWaypoints } from './operations';
+import { connectExistingStation, insertStationIntoSegment, appendStationToLineWithWaypoints, createLine } from './operations';
 import { deleteStationPreservingNetwork } from './stationDeletion';
 import { createOpeningPhase } from './openingPhases';
-import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation, mergeOnePendingCanvasStation } from './collaborationRouting';
+import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation, mergeOnePendingCanvasStation, detectCanvasNewLine } from './collaborationRouting';
 import type { ActualRouteProject } from './model';
 
 function makeProject(): ActualRouteProject {
@@ -41,6 +41,24 @@ function appended(p: ActualRouteProject): ActualRouteProject {
 }
 
 describe('ordinary canvas collaboration routing', () => {
+  it('recognizes the native new line dialog with its initial opening phase', () => {
+    const before=createEmptyProject();
+    const added=createLine(before,{name:'New line',color:'#33cc88',openedAt:'2026-04-01'});
+    const phased=createOpeningPhase(added.project,{
+      lineId:added.lineId,name:'一期',openedAt:'2026-04-01',
+    });
+    const candidate=detectCanvasNewLine(serializeProject(before),phased.project);
+    expect(candidate).toMatchObject({
+      line:{id:added.lineId,stationSequence:[]},
+      phase:{lineId:added.lineId,segmentIds:[],stationRelationIds:[]},
+    });
+    const unrelated=structuredClone(phased.project);
+    unrelated.projectName='Other name';
+    expect(detectCanvasNewLine(serializeProject(before),unrelated)).toBeNull();
+    const seeded=connectExistingStation(phased.project,added.lineId,'unrelated');
+    expect(detectCanvasNewLine(serializeProject(before),seeded)).toBeNull();
+  });
+
   it('recognizes an isolated terminal connection to an existing station', () => {
     const before = makeProject();
     expect(canUseLiveLineAppend(before, 'line-1', 'b', 'c')).toBe(true);

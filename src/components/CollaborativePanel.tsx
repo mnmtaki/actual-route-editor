@@ -7,6 +7,8 @@ import type { CloudUndoEntry, CloudOperationHistoryItem } from '../data/cloudPro
 import { detectStationOperation } from '../data/stationLiveOperations';
 import { detectWaypointMove } from '../data/waypointLiveOperations';
 import { detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation } from '../data/collaborationRouting';
+import { pendingTopologyRead, pendingTopologySave, pendingTopologyClear } from '../data/pendingTopology';
+import type { PendingTopologyOperation } from '../data/pendingTopology';
 
 export interface CollaborativeSession {
   id: string;
@@ -397,7 +399,7 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   // visit a second set of drawing controls in the collaboration toolbar.
   useEffect(() => {
     if (busy || working.current || fetching.current || permissionLost ||
-        draftActive || !dirty) return;
+        draftActive || !dirty || pendingTopologyRead(session.id)) return;
     if (detectStationOperation(session.baseJson, project) ||
         detectWaypointMove(session.baseJson, project)) return;
     const newLineStation = detectCanvasNewLineStation(session.baseJson, project);
@@ -424,35 +426,44 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       setLiveStatus(newLineStation ? '正在同步绘制的新车站…' : lineAppend ? '正在同步线路接站…' : segmentSplit ? '正在同步区间插站…' : middleRemoval ? '正在同步删除中间站…' : '正在同步画布修改…');
       setError('');
       const operationId = crypto.randomUUID();
-      const sendTopology = () => newLineStation
-        ? cloudApi.appendNewStation(session.id, {
-            ...newLineStation, operationId, expectedRevision: session.revision,
-          })
+      const topologyOperation: PendingTopologyOperation | null = newLineStation
+        ? { kind: 'new-station', payload: { ...newLineStation, operationId, expectedRevision: session.revision } }
         : lineAppend
-        ? cloudApi.appendExistingStation(session.id, {
-            ...lineAppend, operationId, expectedRevision: session.revision,
-          })
-        : segmentSplit
-          ? cloudApi.splitSegment(session.id, {
-              ...segmentSplit, operationId, expectedRevision: session.revision,
-            })
-          : cloudApi.removeMiddleStation(session.id, {
-              ...middleRemoval!, operationId, expectedRevision: session.revision,
-            });
-      const submitted = newLineStation || lineAppend || segmentSplit || middleRemoval
+          ? { kind: 'append', payload: { ...lineAppend, operationId, expectedRevision: session.revision } }
+          : segmentSplit
+            ? { kind: 'split', payload: { ...segmentSplit, operationId, expectedRevision: session.revision } }
+            : middleRemoval
+              ? { kind: 'remove', payload: { ...middleRemoval, operationId, expectedRevision: session.revision } }
+              : null;
+      if (topologyOperation && !pendingTopologySave({
+        projectId: session.id, snapshot, operation: topologyOperation,
+      })) {
+        working.current = false;
+        setBusy(false);
+        setRecoveryOpen(true);
+        setError('无法持久化待提交协作操作，已停止自动同步；请先导出本地备份。');
+        return;
+      }
+      const sendTopology = () => {
+        if (!topologyOperation) throw new Error('没有待提交拓扑操作');
+        switch (topologyOperation.kind) {
+          case 'new-station': return cloudApi.appendNewStation(session.id, topologyOperation.payload);
+          case 'append': return cloudApi.appendExistingStation(session.id, topologyOperation.payload);
+          case 'split': return cloudApi.splitSegment(session.id, topologyOperation.payload);
+          case 'remove': return cloudApi.removeMiddleStation(session.id, topologyOperation.payload);
+        }
+      };
+      const submitted = topologyOperation
         ? sendTopology().catch(async error => {
-            // Only retry an ambiguous transport failure. Java operationId
-            // idempotency ensures a committed-but-unacknowledged mutation
-            // cannot be applied twice. HTTP 409/403/etc must not be retried.
             if (error instanceof CloudApiError) throw error;
             await new Promise<void>(resolve => window.setTimeout(resolve, 800));
             return sendTopology();
           })
-        // Full-document PUT has no idempotency key: never blind-retry it.
         : cloudApi.update(session.id, session.revision, project);
       void submitted.then(saved => {
         setRemoteRevision(previous => Math.max(previous, saved.revision));
-        if (newLineStation || lineAppend || segmentSplit || middleRemoval) {
+        if (topologyOperation) {
+          pendingTopologyClear(session.id, operationId);
           if (serializeProject(latest.current) !== snapshot || draftInProgress.current) {
             // Remote topology succeeded; never reset a newer local drawing.
             // Keep the original baseline, forcing explicit conflict recovery.
@@ -480,6 +491,17 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
           ? '画布已自动同步至 v' + saved.revision
           : '已同步 v' + saved.revision + '；后续画布修改仍保留');
       }).catch(e => {
+        // An HTTP error is definitive for this operation (unlike a network
+        // error with an unknown response). Preserve ambiguous requests for
+        // recovery using their original operationId after a reload.
+        if (topologyOperation && e instanceof CloudApiError)
+          pendingTopologyClear(session.id, operationId);
+        if (topologyOperation && !(e instanceof CloudApiError)) {
+          setRecoveryOpen(true);
+          setError('网络中断，操作结果尚未确认；待提交记录已保存，恢复网络后将使用原操作 ID 重试。');
+          setLiveStatus('等待断线恢复');
+          return;
+        }
         if (e instanceof CloudApiError && e.status === 409) {
           setRemoteRevision(previous => Math.max(previous, session.revision + 1));
           setRecoveryOpen(true);

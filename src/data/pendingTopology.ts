@@ -14,16 +14,18 @@ export interface PendingTopologyWrite {
   confirmed?: boolean;
 }
 
-const PREFIX = 'ara:pending-topology:v1:';
+// sessionStorage isolates two tabs editing the same cloud project, while
+// preserving uncertain requests across a refresh in the originating tab.
+const PREFIX = 'ara:pending-topology:v2:';
 const MAX_BYTES = 1_000_000;
 const key = (projectId: string) => PREFIX + projectId;
 
 /**
- * Persist BEFORE sending. At most one uncertain topology mutation per cloud
- * project is allowed, preventing a new operation from superseding a request
+ * Persist BEFORE sending. At most one uncertain topology mutation per editor
+ * tab/project is allowed, preventing a new operation from superseding a request
  * whose outcome is unknown. Never store cookies or authentication tokens.
  */
-export function pendingTopologyRead(projectId: string, store: Pick<Storage, 'getItem'> = localStorage):
+export function pendingTopologyRead(projectId: string, store: Pick<Storage, 'getItem'> = sessionStorage):
   PendingTopologyWrite | null {
   try {
     const raw = store.getItem(key(projectId));
@@ -38,7 +40,7 @@ export function pendingTopologyRead(projectId: string, store: Pick<Storage, 'get
 }
 
 export function pendingTopologySave(value: PendingTopologyWrite,
-  store: Pick<Storage, 'getItem' | 'setItem'> = localStorage): boolean {
+  store: Pick<Storage, 'getItem' | 'setItem'> = sessionStorage): boolean {
   try {
     const rawPending = store.getItem(key(value.projectId));
     const current = pendingTopologyRead(value.projectId, store);
@@ -53,7 +55,7 @@ export function pendingTopologySave(value: PendingTopologyWrite,
 }
 
 export function pendingTopologyClear(projectId: string, operationId: string,
-  store: Pick<Storage, 'getItem' | 'removeItem'> = localStorage): void {
+  store: Pick<Storage, 'getItem' | 'removeItem'> = sessionStorage): void {
   try {
     if (pendingTopologyRead(projectId, store)?.operation.payload.operationId === operationId)
       store.removeItem(key(projectId));
@@ -62,7 +64,7 @@ export function pendingTopologyClear(projectId: string, operationId: string,
 
 /** Mark a committed request without discarding its local recovery snapshot. */
 export function pendingTopologyConfirm(projectId: string, operationId: string,
-  store: Pick<Storage, 'getItem' | 'setItem'> = localStorage): void {
+  store: Pick<Storage, 'getItem' | 'setItem'> = sessionStorage): void {
   const existing = pendingTopologyRead(projectId, store);
   if (existing?.operation.payload.operationId === operationId) {
     pendingTopologySave({ ...existing, confirmed: true }, store);

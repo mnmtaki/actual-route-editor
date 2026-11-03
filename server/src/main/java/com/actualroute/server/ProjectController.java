@@ -306,7 +306,8 @@ public class ProjectController {
         if (input.expectedRevision() > currentRevision)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"操作基线版本超前");
         if (input.expectedRevision() < currentRevision)
-            requireDisjointGeometryHistory(id,input.expectedRevision(),currentRevision,stationId,null);
+            requireDisjointGeometryHistory(id,input.expectedRevision(),currentRevision,
+                stationId,null,input.type());
         ObjectNode document;
         try {
             document = (ObjectNode) mapper.readTree((String)row[2]);
@@ -593,7 +594,8 @@ public class ProjectController {
         if (input.expectedRevision()>current)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"版本超前");
         if (input.expectedRevision()<current)
-            requireDisjointGeometryHistory(id,input.expectedRevision(),current,null,input.segmentId());
+            requireDisjointGeometryHistory(id,input.expectedRevision(),current,
+                null,input.segmentId(),null);
         ObjectNode document;
         try {
             document=(ObjectNode)mapper.readTree((String)row[2]);
@@ -1673,7 +1675,7 @@ public class ProjectController {
      */
     /** Validate station and control-point independence using a complete journal. */
     private void requireDisjointGeometryHistory(UUID projectId,long expected,
-                                                long current,String stationId,String segmentId) {
+                                                long current,String stationId,String segmentId,String stationAction) {
         if(expected<1 || current-expected>256)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"操作历史过长");
         var records=jdbc.query("""
@@ -1713,10 +1715,12 @@ public class ProjectController {
                 String touched=resource.substring("segment:".length());
                 var attached=endpoints.get(touched);
                 if(attached==null || touched.equals(segmentId) ||
-                   stationId!=null && attached.contains(stationId))
+                   stationId!=null && !"station.rename".equals(stationAction) &&
+                   attached.contains(stationId))
                     throw new ResponseStatusException(HttpStatus.CONFLICT,"区间端点依赖冲突");
             } else if(java.util.Set.of("station.create","station.move","station.rename").contains(action)) {
                 if(resource.equals(stationId) || segmentId!=null &&
+                   !"station.rename".equals(action) &&
                    endpoints.get(segmentId).contains(resource))
                     throw new ResponseStatusException(HttpStatus.CONFLICT,"车站几何依赖冲突");
             } else throw new ResponseStatusException(HttpStatus.CONFLICT,

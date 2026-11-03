@@ -1,0 +1,57 @@
+import type { CloudNewLineStation, CloudLineAppend, CloudSegmentSplit, CloudMiddleStationRemoval } from './cloudProjectApi';
+
+export type PendingTopologyOperation =
+  | { kind: 'new-station'; payload: CloudNewLineStation }
+  | { kind: 'append'; payload: CloudLineAppend }
+  | { kind: 'split'; payload: CloudSegmentSplit }
+  | { kind: 'remove'; payload: CloudMiddleStationRemoval };
+
+export interface PendingTopologyWrite {
+  projectId: string;
+  snapshot: string;
+  operation: PendingTopologyOperation;
+}
+
+const PREFIX = 'ara:pending-topology:v1:';
+const MAX_BYTES = 1_000_000;
+const key = (projectId: string) => PREFIX + projectId;
+
+/**
+ * Persist BEFORE sending. At most one uncertain topology mutation per cloud
+ * project is allowed, preventing a new operation from superseding a request
+ * whose outcome is unknown. Never store cookies or authentication tokens.
+ */
+export function pendingTopologyRead(projectId: string, store: Pick<Storage, 'getItem'> = localStorage):
+  PendingTopologyWrite | null {
+  try {
+    const raw = store.getItem(key(projectId));
+    if (!raw || raw.length > MAX_BYTES) return null;
+    const value = JSON.parse(raw) as PendingTopologyWrite;
+    if (value.projectId !== projectId || typeof value.snapshot !== 'string' ||
+        !value.operation || !['new-station', 'append', 'split', 'remove'].includes(value.operation.kind) ||
+        typeof value.operation.payload?.operationId !== 'string' ||
+        typeof value.operation.payload.expectedRevision !== 'number') return null;
+    return value;
+  } catch { return null; }
+}
+
+export function pendingTopologySave(value: PendingTopologyWrite,
+  store: Pick<Storage, 'getItem' | 'setItem'> = localStorage): boolean {
+  try {
+    const current = pendingTopologyRead(value.projectId, store);
+    if (current && current.operation.payload.operationId !== value.operation.payload.operationId)
+      return false;
+    const raw = JSON.stringify(value);
+    if (raw.length > MAX_BYTES) return false;
+    store.setItem(key(value.projectId), raw);
+    return true;
+  } catch { return false; }
+}
+
+export function pendingTopologyClear(projectId: string, operationId: string,
+  store: Pick<Storage, 'getItem' | 'removeItem'> = localStorage): void {
+  try {
+    if (pendingTopologyRead(projectId, store)?.operation.payload.operationId === operationId)
+      store.removeItem(key(projectId));
+  } catch { /* Best effort; stale IDs remain safe to replay. */ }
+}

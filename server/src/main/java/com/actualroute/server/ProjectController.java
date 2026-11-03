@@ -1075,6 +1075,132 @@ public class ProjectController {
         return saved;
     }
 
+    /**
+     * Compound topology fallback for an ordinary canvas mutation scoped to
+     * one native line. Both snapshots must match an existing immutable
+     * baseline revision. The server patches only that line's owned resources
+     * into the CURRENT document, and rejects any unprovable overlap.
+     */
+    public record LineCompoundOperation(
+        @NotNull UUID operationId,@NotNull Long expectedRevision,
+        @NotBlank String lineId,@NotNull JsonNode beforeDocument,
+        @NotNull JsonNode afterDocument) {}
+
+    @PostMapping("/{id}/operations/line-compound")
+    @Transactional
+    public ProjectView applyLineCompound(@AuthenticationPrincipal UUID user,
+                                          @PathVariable UUID id,
+                                          @Valid @RequestBody LineCompoundOperation input) {
+        requireWritable(user,id);
+        if(input.expectedRevision()<1 || input.expectedRevision()==Long.MAX_VALUE ||
+           !validId(input.lineId()))
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效的复合操作");
+        String before=json(input.beforeDocument());
+        String after=json(input.afterDocument());
+        if(before.length()+after.length()>800_000)
+            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,
+                "复合事务超过安全范围，请保存工作副本并同步");
+        ObjectNode payload=mapper.createObjectNode();
+        payload.put("lineId",input.lineId());
+        payload.put("beforeHash",digestCompound(before));
+        payload.put("afterHash",digestCompound(after));
+        String resource="line:"+input.lineId();
+        var rows=jdbc.query("""
+            SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
+            """,(rs,n)->new Object[]{rs.getLong("revision"),rs.getString("name"),
+                rs.getString("document")},id);
+        if(rows.isEmpty())throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
+        var prior=jdbc.query("""
+            SELECT action,station_id,payload FROM cloud_project_operations
+            WHERE project_id=? AND operation_id=?
+            """,(rs,n)->new String[]{rs.getString("action"),rs.getString("station_id"),
+                rs.getString("payload")},id,input.operationId());
+        if(!prior.isEmpty()) {
+            String[] stored=prior.get(0);
+            try {
+                JsonNode entry=mapper.readTree(stored[2]);
+                if(!"line.compound".equals(stored[0]) ||
+                    !resource.equals(stored[1]) ||
+                    !input.lineId().equals(entry.path("lineId").asText()) ||
+                    !payload.path("beforeHash").equals(entry.path("beforeHash")) ||
+                    !payload.path("afterHash").equals(entry.path("afterHash")))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "复合操作 ID 被其他请求使用");
+            } catch(com.fasterxml.jackson.core.JsonProcessingException error) {
+                throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "复合操作日志损坏");
+            }
+            return get(user,id);
+        }
+        Object[] row=rows.get(0);
+        long revision=(Long)row[0];
+        // Full project snapshots are retained for the latest 10 revisions.
+        // Never trust a caller-supplied baseline after its immutable snapshot
+        // has been pruned: the server can no longer prove what was seen.
+        var original=jdbc.query("""
+            SELECT document::text FROM cloud_project_revisions
+            WHERE project_id=? AND revision=?
+            """,(rs,n)->rs.getString(1),id,input.expectedRevision());
+        if(original.size()!=1)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "复合事务基线已过期，请同步云端最新版本");
+        try {
+            if(!mapper.readTree(original.get(0)).equals(input.beforeDocument()))
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "复合事务的历史基线与服务器不一致");
+        } catch(com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                "历史工程数据不可解析");
+        }
+        requireDisjointLineHistory(id,input.expectedRevision(),revision,input.lineId());
+        ObjectNode current;
+        try { current=(ObjectNode)mapper.readTree((String)row[2]); }
+        catch(Exception error) {
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,"工程数据损坏");
+        }
+        ObjectNode merged;
+        try {
+            merged=new LineCompoundMerge(mapper).merge(
+                input.beforeDocument(),input.afterDocument(),current,input.lineId());
+        } catch(IllegalArgumentException error) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "复合操作不可安全合并："+error.getMessage());
+        }
+        // Record conservative dependencies so another stale operation never
+        // silently changes one of the compound transaction's shared stations.
+        var affected=mapper.createArrayNode();
+        java.util.Set<String> stationIds=new java.util.TreeSet<>();
+        for(JsonNode version:java.util.List.of(input.beforeDocument(),input.afterDocument())) {
+            for(JsonNode line:version.path("lines"))
+                if(input.lineId().equals(line.path("id").asText()))
+                    for(JsonNode station:line.path("stationSequence"))
+                        stationIds.add(station.asText());
+            for(JsonNode rel:version.path("stationLineRelations"))
+                if(input.lineId().equals(rel.path("lineId").asText()))
+                    stationIds.add(rel.path("stationId").asText());
+        }
+        for(String stationId:stationIds)affected.add(stationId);
+        payload.set("affectedStationIds",affected);
+        ProjectView saved=saveRevision(user,id,revision,(String)row[1],json(merged));
+        jdbc.update("""
+            INSERT INTO cloud_project_operations(project_id,operation_id,revision,
+                actor_id,action,station_id,payload)
+            VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
+            """,id,input.operationId(),saved.revision(),user,
+                "line.compound",resource,payload.toString());
+        return saved;
+    }
+
+    private String digestCompound(String value) {
+        try {
+            var bytes=java.security.MessageDigest.getInstance("SHA-256").digest(
+                value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(bytes);
+        } catch(java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 不可用",e);
+        }
+    }
+
     /** Closing a native loop adds one interval, never a duplicate station. */
     public record LoopClosureOperation(
         @NotNull UUID operationId,@NotNull Long expectedRevision,
@@ -2095,6 +2221,26 @@ public class ProjectController {
                 throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "并发操作版本不连续，拒绝自动重基");
             switch(action) {
+                case "line.compound" -> {
+                    if(!resource.startsWith("line:") ||
+                       resource.equals("line:"+lineId))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "复合操作涉及当前线路");
+                    try {
+                        JsonNode payload=mapper.readTree((String)item[3]);
+                        if(!(payload.path("affectedStationIds") instanceof ArrayNode))
+                            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                                "复合日志缺少受影响车站");
+                        for(JsonNode station:payload.path("affectedStationIds"))
+                            if(!station.isTextual() ||
+                               stationsOnLine.contains(station.asText()))
+                                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                                    "跨线复合操作影响当前线路共用车站");
+                    } catch(com.fasterxml.jackson.core.JsonProcessingException e) {
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "复合事务依赖记录损坏");
+                    }
+                }
                 case "line.create","line.loop-close","line.append-new","line.append-existing","segment.split-station" -> {
                     if(!resource.startsWith("line:") ||
                         resource.equals("line:"+lineId))

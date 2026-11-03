@@ -29,6 +29,7 @@ export interface CloudNewLine {
   expectedRevision: number;
   line: ActualRouteProject['lines'][number];
   phase: ActualRouteProject['openingPhases'][number];
+  seedRelation?: ActualRouteProject['stationLineRelations'][number];
 }
 export interface CloudNewLineStation {
   operationId: string;

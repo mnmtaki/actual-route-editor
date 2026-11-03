@@ -663,6 +663,141 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void seededBranchCreationAndContinuationAreAtomicAndIdempotent() throws Exception {
+        Session owner=account("branchAtomic");
+        String id=createProject(owner);
+        JsonNode base=mapper.readTree("""
+            {"version":1,"name":"Branch",
+             "stations":[{"id":"a","name":"A","x":0,"y":0},
+                         {"id":"b","name":"B","x":100,"y":0}],
+             "lines":[{"id":"parent","name":"Parent","color":"#112233",
+                       "stationSequence":["a","b"],"lineOrder":0,
+                       "openedAt":"2026-01-01","visible":true,"locked":false}],
+             "stationLineRelations":[
+               {"id":"ra","lineId":"parent","stationId":"a"},
+               {"id":"rb","lineId":"parent","stationId":"b"}],
+             "geometry":{"segments":[{"id":"ab","lineId":"parent",
+                 "fromStationId":"a","toStationId":"b",
+                 "mode":"straight","structureType":"underground","waypoints":[]}]},
+             "openingPhases":[],"timeline":{"currentDate":"2026-01-01"}}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Branch","document",base,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        JsonNode child=mapper.readTree("""
+            {"id":"branch","name":"","color":"#112233","parentLineId":"parent",
+             "stationSequence":["b"],"lineBadges":[],"lineOrder":1,
+             "openedAt":"2026-01-01","closedAt":null,
+             "visible":true,"locked":false}
+            """);
+        JsonNode phase=mapper.readTree("""
+            {"id":"branch-phase","lineId":"branch","name":"一期",
+             "openedAt":"2026-01-01","segmentIds":[],
+             "stationRelationIds":["branch-b"],"revealStartStationId":"b",
+             "overriddenSegmentIds":[],"overriddenStationRelationIds":[]}
+            """);
+        JsonNode relation=mapper.readTree("""
+            {"id":"branch-b","lineId":"branch","stationId":"b",
+             "openedAt":"2026-01-01","closedAt":null}
+            """);
+        String endpoint="/api/projects/"+id+"/operations/line-create";
+        String create=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "line",child,"phase",phase,"seedRelation",relation));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(create),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.lines[1].parentLineId").value("parent"))
+            .andExpect(jsonPath("$.document.lines[1].stationSequence[0]").value("b"))
+            .andExpect(jsonPath("$.document.openingPhases[0].stationRelationIds[0]").value("branch-b"))
+            .andExpect(jsonPath("$.document.stationLineRelations.length()").value(3));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(create),owner)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(3));
+
+        JsonNode station=mapper.readTree("""
+            {"id":"c","name":"C","x":150,"y":35,
+             "labelOffsetX":10,"labelOffsetY":-10}
+            """);
+        JsonNode nextRel=mapper.readTree("""
+            {"id":"branch-c","lineId":"branch","stationId":"c",
+             "openedAt":"2026-01-01","closedAt":null}
+            """);
+        JsonNode segment=mapper.readTree("""
+            {"id":"bc","lineId":"branch","fromStationId":"b","toStationId":"c",
+             "mode":"straight","structureType":"underground",
+             "structureNodes":[],"waypoints":[],
+             "openedAt":"2026-01-01","closedAt":null}
+            """);
+        mvc.perform(authorized(post("/api/projects/"+id+"/operations/line-append-new")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",3,
+                "lineId","branch","fromStationId","b",
+                "station",station,"relation",nextRel,"segment",segment,
+                "openingPhaseId","branch-phase"))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4))
+            .andExpect(jsonPath("$.document.lines[1].stationSequence[1]").value("c"))
+            .andExpect(jsonPath("$.document.openingPhases[0].segmentIds[0]").value("bc"));
+    }
+
+    @Test
+    void nativeLoopClosureAddsOneSegmentAndRejectsConcurrentDuplicate() throws Exception {
+        Session owner=account("loopAtomic");
+        String id=createProject(owner);
+        JsonNode base=mapper.readTree("""
+            {"version":1,"name":"Loop",
+             "stations":[{"id":"a","name":"A","x":0,"y":0},
+                         {"id":"b","name":"B","x":100,"y":0},
+                         {"id":"c","name":"C","x":100,"y":100}],
+             "lines":[{"id":"loop","name":"Loop","color":"#aabbcc",
+                       "stationSequence":["a","b","c"],"lineOrder":0,
+                       "openedAt":"2026-01-01","visible":true,"locked":false}],
+             "stationLineRelations":[
+               {"id":"ra","lineId":"loop","stationId":"a"},
+               {"id":"rb","lineId":"loop","stationId":"b"},
+               {"id":"rc","lineId":"loop","stationId":"c"}],
+             "geometry":{"segments":[
+               {"id":"ab","lineId":"loop","fromStationId":"a","toStationId":"b",
+                "mode":"straight","structureType":"underground","waypoints":[]},
+               {"id":"bc","lineId":"loop","fromStationId":"b","toStationId":"c",
+                "mode":"straight","structureType":"underground","waypoints":[]}]},
+             "openingPhases":[{"id":"phase","lineId":"loop","openedAt":"2026-01-01",
+               "segmentIds":["ab","bc"],"stationRelationIds":["ra","rb","rc"],
+               "overriddenSegmentIds":[],"overriddenStationRelationIds":[]}],
+             "timeline":{"currentDate":"2026-01-01"}}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Loop","document",base,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        String endpoint="/api/projects/"+id+"/operations/loop-close";
+        String first=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","loop","segmentId","ca","openingPhaseId","phase"));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(first),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.geometry.segments.length()").value(3))
+            .andExpect(jsonPath("$.document.geometry.segments[2].fromStationId").value("c"))
+            .andExpect(jsonPath("$.document.geometry.segments[2].toStationId").value("a"))
+            .andExpect(jsonPath("$.document.lines[0].stationSequence.length()").value(3))
+            .andExpect(jsonPath("$.document.stationLineRelations.length()").value(3))
+            .andExpect(jsonPath("$.document.openingPhases[0].segmentIds.length()").value(3));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(first),owner)).andExpect(status().isOk())
+            .andExpect(jsonPath("$.revision").value(3));
+        String duplicate=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","loop","segmentId","ca-other","openingPhaseId","phase"));
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(duplicate),owner)).andExpect(status().isConflict());
+    }
+
+    @Test
     void independentLineCreationRebasesAndResolvesConcurrentOrdering() throws Exception {
         Session owner=account("twoNewLines");
         String id=createProject(owner);

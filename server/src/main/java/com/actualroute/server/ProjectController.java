@@ -881,6 +881,10 @@ public class ProjectController {
             || !validId(input.relationId()) || !validName(mapper.getNodeFactory().textNode(input.stationName()))
             || !Double.isFinite(input.x()) || !Double.isFinite(input.y())
             || Math.abs(input.x())>1_000_000 || Math.abs(input.y())>1_000_000
+            || (input.labelOffsetX()!=null &&
+                (!Double.isFinite(input.labelOffsetX()) || Math.abs(input.labelOffsetX())>1_000_000))
+            || (input.labelOffsetY()!=null &&
+                (!Double.isFinite(input.labelOffsetY()) || Math.abs(input.labelOffsetY())>1_000_000))
             || input.splitWaypointIndex()<0
             || input.segmentId().equals(input.beforeSegmentId())
             || input.segmentId().equals(input.afterSegmentId())

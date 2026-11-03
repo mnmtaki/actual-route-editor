@@ -783,3 +783,59 @@ test('same-station concurrent writes produce one winner and never lose a version
     await peer.close();
   }
 });
+
+test('rapid native line creation then first station survives a concurrent peer line creation', async ({ browser }) => {
+  const owner=await browser.newContext();
+  const peer=await browser.newContext();
+  try {
+    const ownerCsrf=await registerAndLogin(owner,USERS.owner);
+    await registerAndLogin(peer,USERS.peer);
+    const bootstrap=await owner.newPage();
+    await bootstrap.goto(SITE);
+    const empty=await bootstrap.evaluate(async ()=>
+      (await import('/src/data/storage.ts')).createEmptyProject());
+    await bootstrap.close();
+    const project=await write(owner,ownerCsrf,'/api/projects',{
+      name:'Fast Concurrent First Station',document:empty,
+    });
+    const id=project.id;
+    await write(owner,ownerCsrf,'/api/projects/'+id+'/access-rules',{
+      username:USERS.peer,action:'edit',allowed:true,
+    });
+    const a=await openCanvas(owner,id);
+    const b=await openCanvas(peer,id);
+    await Promise.all([
+      a.getByRole('button',{name:'＋ 新建线路'}).click(),
+      b.getByRole('button',{name:'＋ 新建线路'}).click(),
+    ]);
+    await a.locator('.line-dialog input').first().fill('Fast A');
+    await b.locator('.line-dialog input').first().fill('Fast B');
+    await Promise.all([
+      a.locator('.line-dialog').getByRole('button',{name:'开始绘制'}).click(),
+      b.locator('.line-dialog').getByRole('button',{name:'开始绘制'}).click(),
+    ]);
+    // Do not wait for either line-create acknowledgement.
+    await Promise.all([
+      a.locator('#network-canvas').click({position:{x:330,y:285}}),
+      b.locator('#network-canvas').click({position:{x:700,y:480}}),
+    ]);
+    await expect.poll(async ()=>{
+      const latest=await (await owner.request.get(API+'/api/projects/'+id)).json();
+      return {
+        names:latest.document.lines.map(line=>line.name).sort(),
+        stations:latest.document.stations.length,
+        phases:latest.document.openingPhases.length,
+      };
+    },{timeout:30000}).toEqual({
+      names:['Fast A','Fast B'],stations:2,phases:2,
+    });
+    for(const page of [a,b]) {
+      await expect(page.getByRole('region',{name:'协同工作区'})
+        .getByText(/本地基线 v5 · 远端 v5/))
+        .toBeVisible({timeout:20000});
+    }
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});

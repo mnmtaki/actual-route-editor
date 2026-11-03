@@ -24,6 +24,12 @@ export interface CloudWaypointMove {
   x: number;
   y: number;
 }
+export interface CloudProjectAtomic {
+  operationId: string;
+  expectedRevision: number;
+  name: string;
+  document: ActualRouteProject;
+}
 export interface CloudLineCompound {
   operationId: string;
   expectedRevision: number;
@@ -216,6 +222,14 @@ export const cloudApi = {
   moveWaypoint: async (id: string, operation: CloudWaypointMove) => {
     const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
       `/api/projects/${encodeURIComponent(id)}/operations/waypoint`, {
+        method: 'POST', body: JSON.stringify(operation),
+      },
+    );
+    return { ...raw, document: parseProjectJson(JSON.stringify(raw.document)) } as CloudProject;
+  },
+  applyProjectAtomic: async (id: string, operation: CloudProjectAtomic) => {
+    const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
+      `/api/projects/${encodeURIComponent(id)}/operations/project-atomic`, {
         method: 'POST', body: JSON.stringify(operation),
       },
     );

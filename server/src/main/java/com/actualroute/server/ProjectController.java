@@ -1692,10 +1692,12 @@ public class ProjectController {
             throw new ResponseStatusException(HttpStatus.CONFLICT,"无法核实几何依赖");
         }
         java.util.Map<String,java.util.Set<String>> endpoints=new java.util.HashMap<>();
-        for(JsonNode segment:document.path("geometry").path("segments"))
-            endpoints.put(segment.path("id").asText(),java.util.Set.of(
-                segment.path("fromStationId").asText(),
-                segment.path("toStationId").asText()));
+        for(JsonNode segment:document.path("geometry").path("segments")) {
+            var stationEnds=new java.util.HashSet<String>();
+            stationEnds.add(segment.path("fromStationId").asText());
+            stationEnds.add(segment.path("toStationId").asText());
+            endpoints.put(segment.path("id").asText(),stationEnds);
+        }
         if(segmentId!=null && !endpoints.containsKey(segmentId))
             throw new ResponseStatusException(HttpStatus.CONFLICT,"区间不存在");
         long next=expected+1;

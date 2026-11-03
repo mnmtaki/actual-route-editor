@@ -1767,12 +1767,32 @@ public class ProjectController {
                 }
                 java.util.Set<String> attached=new java.util.HashSet<>();
                 if("line.append-new".equals(action)) {
-                    attached.add(changedPayload.path("fromStationId").asText());
+                    if(!changedPayload.has("station") ||
+                        !validId(changedPayload.path("station").path("id").asText()) ||
+                        !changedLine.equals(changedPayload.path("lineId").asText()))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "建站历史操作参数不完整");
+                    String anchor=changedPayload.path("fromStationId").asText("");
+                    if(!anchor.isEmpty()) {
+                        if(!validId(anchor))
+                            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                                "历史建站端点无效");
+                        attached.add(anchor);
+                    }
                     attached.add(changedPayload.path("station").path("id").asText());
                 } else if("line.append-existing".equals(action)) {
+                    if(!changedLine.equals(changedPayload.path("lineId").asText()) ||
+                       !validId(changedPayload.path("fromStationId").asText()) ||
+                       !validId(changedPayload.path("toStationId").asText()))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "接站历史操作参数不完整");
                     attached.add(changedPayload.path("fromStationId").asText());
                     attached.add(changedPayload.path("toStationId").asText());
                 } else {
+                    if(!changedLine.equals(changedPayload.path("lineId").asText()) ||
+                       !validId(changedPayload.path("stationId").asText()))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "删除历史操作参数不完整");
                     attached.add(changedPayload.path("stationId").asText());
                     // Deletion can also alter the surviving line's endpoints.
                     for(JsonNode relation:document.path("stationLineRelations"))

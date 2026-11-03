@@ -1167,11 +1167,11 @@ public class ProjectController {
         }
         if(count!=sequence.size()-1)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"不完整的环线链");
-        for(JsonNode stationId:java.util.List.of(first,last)) {
+        for(String stationId:java.util.List.of(first,last)) {
             boolean member=false;
             for(JsonNode relation:relations)
                 if(input.lineId().equals(relation.path("lineId").asText()) &&
-                   stationId.asText().equals(relation.path("stationId").asText()))
+                   stationId.equals(relation.path("stationId").asText()))
                     member=true;
             if(!member)
                 throw new ResponseStatusException(HttpStatus.CONFLICT,

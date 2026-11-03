@@ -909,6 +909,8 @@ public class ProjectController {
         if(rows.isEmpty())
             throw new ResponseStatusException(HttpStatus.NOT_FOUND,"工程不存在");
 
+        // Keep legacy segment-scoped operationId comparisons for requests
+        // issued before line-scoped journaling was introduced.
         String resource="segment:"+input.segmentId();
         var previous=jdbc.query("""
             SELECT action,station_id,payload FROM cloud_project_operations
@@ -918,7 +920,8 @@ public class ProjectController {
         if(!previous.isEmpty()) {
             String[] prior=previous.get(0);
             try {
-                if(!"segment.split-station".equals(prior[0]) || !resource.equals(prior[1])
+                if(!"segment.split-station".equals(prior[0])
+                    || !(resource.equals(prior[1]) || prior[1].startsWith("line:"))
                     || !mapper.readTree(prior[2]).equals(payload))
                     throw new ResponseStatusException(HttpStatus.CONFLICT,"operationId 已用于不同操作");
             } catch(com.fasterxml.jackson.core.JsonProcessingException ex) {
@@ -1093,7 +1096,7 @@ public class ProjectController {
                 action,station_id,payload)
             VALUES(?,?,?,?,?,?,CAST(? AS jsonb))
             """,id,input.operationId(),saved.revision(),user,
-                "segment.split-station",resource,payload.toString());
+                "segment.split-station","line:"+source.path("lineId").asText(),payload.toString());
         return saved;
     }
 
@@ -1597,7 +1600,7 @@ public class ProjectController {
             WHERE project_id=? AND revision>? AND revision<=?
               AND (station_id=? OR station_id NOT LIKE 'line:%'
                 OR action NOT IN ('line.append-new','line.append-existing',
-                                  'line.remove-middle-station'))
+                                  'line.remove-middle-station','segment.split-station'))
             """,Long.class,projectId,expected,current,"line:"+lineId);
         if(total==null || total!=current-expected || unsafe==null || unsafe>0)
             throw new ResponseStatusException(HttpStatus.CONFLICT,

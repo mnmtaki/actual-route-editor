@@ -34,6 +34,15 @@ final class LineCompoundMerge {
         JsonNode liveLine=find(current.path("lines"),lineId);
         require(oldLine!=null && newLine!=null && liveLine!=null &&
                 oldLine.equals(liveLine), "目标线路已被其他用户修改");
+        require(newLine.path("lineOrder").equals(oldLine.path("lineOrder")) &&
+                newLine.path("parentLineId").equals(oldLine.path("parentLineId")),
+                "复合操作不能改变线路排序或父线路归属");
+        if(oldLine.path("parentLineId").isTextual()) {
+            String parentId=oldLine.path("parentLineId").asText();
+            require(Objects.equals(find(before.path("lines"),parentId),
+                                   find(current.path("lines"),parentId)),
+                    "复合操作所属支线的主线发生变化");
+        }
         require(!oldLine.path("locked").asBoolean(false) &&
                 !oldLine.path("isFake").asBoolean(false) &&
                 !oldLine.has("source") &&
@@ -172,7 +181,8 @@ final class LineCompoundMerge {
         return x.equals(y);
     }
     private boolean otherLinesEqual(JsonNode a,JsonNode b,String lineId) {
-        var x=new LinkedHashMap<String,JsonNode>(),y=new LinkedHashMap<String,JsonNode>();
+        var x=new LinkedHashMap<String,JsonNode>();
+        var y=new LinkedHashMap<String,JsonNode>();
         for(JsonNode item:a)
             if(!lineId.equals(item.path("id").asText()))
                 x.put(item.path("id").asText(),item);

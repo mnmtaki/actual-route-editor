@@ -1078,7 +1078,7 @@ public class ProjectController {
     /** Concurrent creation of independent empty native lines and first phases. */
     public record LineCreateOperation(
         @NotNull UUID operationId, @NotNull Long expectedRevision,
-        @NotNull JsonNode line, @NotNull JsonNode phase) {}
+        @NotNull JsonNode line, @NotNull JsonNode phase, JsonNode seedRelation) {}
 
     @PostMapping("/{id}/operations/line-create")
     @Transactional
@@ -1099,8 +1099,21 @@ public class ProjectController {
             || !line.path("id").asText().equals(phase.path("lineId").asText())
             || !validName(line.path("name"))
             || !line.path("color").asText("").matches("#[0-9a-fA-F]{6}")
-            || !(line.path("stationSequence") instanceof ArrayNode)
-            || !line.path("stationSequence").isEmpty()
+            || !(line.path("stationSequence") instanceof ArrayNode sequence)
+            || sequence.size()>(input.seedRelation()==null?0:1)
+            || (input.seedRelation()==null && !sequence.isEmpty())
+            || (input.seedRelation()!=null &&
+                (sequence.size()!=1 || !(input.seedRelation() instanceof ObjectNode rel) ||
+                !onlyFields(rel,java.util.Set.of("id","lineId","stationId","openedAt","closedAt")) ||
+                !validId(rel.path("id").asText()) ||
+                !line.path("id").asText().equals(rel.path("lineId").asText()) ||
+                !sequence.get(0).asText().equals(rel.path("stationId").asText()) ||
+                !phase.path("revealStartStationId").asText("").equals(rel.path("stationId").asText()) ||
+                !phase.path("stationRelationIds").isArray() ||
+                phase.path("stationRelationIds").size()!=1 ||
+                !rel.path("id").asText().equals(phase.path("stationRelationIds").get(0).asText()) ||
+                !java.util.Objects.equals(rel.path("openedAt").asText(""),
+                                          phase.path("openedAt").asText(""))))
             || !line.path("lineBadges").isArray() || !line.path("lineBadges").isEmpty()
             || !line.path("lineOrder").canConvertToInt()
             || !line.path("visible").asBoolean(false) || line.path("locked").asBoolean(true)
@@ -1110,7 +1123,7 @@ public class ProjectController {
             || !(phase.path("segmentIds") instanceof ArrayNode)
             || !phase.path("segmentIds").isEmpty()
             || !(phase.path("stationRelationIds") instanceof ArrayNode)
-            || !phase.path("stationRelationIds").isEmpty()
+            || (input.seedRelation()==null && !phase.path("stationRelationIds").isEmpty())
             || !(phase.path("overriddenSegmentIds") instanceof ArrayNode)
             || !phase.path("overriddenSegmentIds").isEmpty()
             || !(phase.path("overriddenStationRelationIds") instanceof ArrayNode)
@@ -1120,6 +1133,7 @@ public class ProjectController {
         ObjectNode payload=mapper.createObjectNode();
         payload.set("line",line.deepCopy());
         payload.set("phase",phase.deepCopy());
+        if(input.seedRelation()!=null)payload.set("seedRelation",input.seedRelation().deepCopy());
         String resource="line:"+line.path("id").asText();
         var rows=jdbc.query("""
             SELECT revision,name,document FROM cloud_projects WHERE id=? FOR UPDATE
@@ -1156,7 +1170,9 @@ public class ProjectController {
                 "工程 JSON 无效");
         }
         if(!(document.path("lines") instanceof ArrayNode lines)
-            || !(document.path("openingPhases") instanceof ArrayNode phases))
+            || !(document.path("openingPhases") instanceof ArrayNode phases)
+            || !(document.path("stations") instanceof ArrayNode stations)
+            || !(document.path("stationLineRelations") instanceof ArrayNode relations))
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                 "工程线路数据不完整");
         // A native branch is an independent line with a live, editable
@@ -1183,6 +1199,33 @@ public class ProjectController {
         for(JsonNode oldPhase:phases)
             if(phase.path("id").asText().equals(oldPhase.path("id").asText()))
                 throw new ResponseStatusException(HttpStatus.CONFLICT,"分期 ID 已存在");
+        if(input.seedRelation()!=null) {
+            JsonNode relation=input.seedRelation();
+            String seed=relation.path("stationId").asText();
+            boolean present=false;
+            for(JsonNode station:stations)
+                if(seed.equals(station.path("id").asText()))present=true;
+            if(!present)throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "支线起点车站已不存在");
+            for(JsonNode old:relations)
+                if(relation.path("id").asText().equals(old.path("id").asText()) ||
+                   (line.path("id").asText().equals(old.path("lineId").asText()) &&
+                    seed.equals(old.path("stationId").asText())))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,
+                        "起点站归属关系冲突");
+            // If the parent station was modified since expectedRevision,
+            // reject rather than attaching to a changed anchor.
+            if(revision!=input.expectedRevision()) {
+                var stationEvents=jdbc.queryForList("""
+                    SELECT action,station_id FROM cloud_project_operations
+                    WHERE project_id=? AND revision>? AND revision<=?
+                    """,id,input.expectedRevision(),revision);
+                for(var event:stationEvents)
+                    if(seed.equals(String.valueOf(event.get("station_id"))))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "分叉起点在并发期间被修改");
+            }
+        }
         ObjectNode addedLine=line.deepCopy();
         int nextLineOrder=0;
         for(JsonNode existing:lines)
@@ -1190,6 +1233,7 @@ public class ProjectController {
         addedLine.put("lineOrder",nextLineOrder); // Also handles existing ordering gaps.
         lines.add(addedLine);
         phases.add(phase.deepCopy());
+        if(input.seedRelation()!=null)relations.add(input.seedRelation().deepCopy());
         ProjectView result=saveRevision(user,id,revision,(String)row[1],json(document));
         jdbc.update("""
             INSERT INTO cloud_project_operations(project_id,operation_id,revision,

@@ -426,10 +426,23 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       void submitted.then(saved => {
         setRemoteRevision(current => Math.max(current, saved.revision));
         if (serializeProject(latest.current) !== snapshot || draftInProgress.current) {
-          // The server accepted the operation, but the user continued drawing
-          // during the request. Do not discard the newer local working state.
-          setLiveStatus('操作已保存至 v' + saved.revision + '；本地还有新修改，请手动检查并加载云端版本');
-          setError('操作已提交，画布在提交期间又发生变化。为避免覆盖后续编辑，未自动替换当前工作副本。');
+          if (serializeProject(saved.document) === snapshot) {
+            // Previous mutation was acknowledged without concurrent remote
+            // changes. Keep newer local edits and advance only the baseline:
+            // the next effect submits the next normal-canvas mutation.
+            const next = { id: session.id, name: saved.name,
+              revision: saved.revision, baseJson: snapshot };
+            activeSession.current = next;
+            onUpdate(next);
+            setLiveStatus('上一操作已确认至 v' + saved.revision + '；继续同步后续画布修改');
+            setError('');
+            return;
+          }
+          // A different remote edit was merged while the local user continued.
+          // Without a proven three-way patch, do not overwrite either branch.
+          setRecoveryOpen(true);
+          setLiveStatus('上一操作已保存，但还存在需要合并的远端修改');
+          setError('服务器结果和本地提交快照不同，后续画布已保留，请先比较差异。');
           return;
         }
         const next = {
@@ -530,10 +543,18 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
         setRemoteRevision(previous => Math.max(previous, saved.revision));
         if (topologyOperation) {
           if (serializeProject(latest.current) !== snapshot || draftInProgress.current) {
+            if (serializeProject(saved.document) === snapshot) {
+              pendingTopologyClear(session.id, operationId);
+              const next = { id: session.id, name: saved.name,
+                revision: saved.revision, baseJson: snapshot };
+              activeSession.current = next;
+              onUpdate(next);
+              setError('');
+              setLiveStatus('上一笔拓扑操作已确认至 v' + saved.revision + '；后续画布修改继续同步');
+              return;
+            }
             pendingTopologyConfirm(session.id, operationId);
-            // Remote topology succeeded; never reset a newer local drawing.
-            // Keep the original baseline, forcing explicit conflict recovery.
-            setError('拓扑修改已保存，但提交期间还有本地修改。为防止丢失画布内容，请对比并同步云端版本。');
+            setError('拓扑操作已保存，但同时存在其他云端变化；已保留后续绘制，请比较差异。');
             setRecoveryOpen(true);
             return;
           }

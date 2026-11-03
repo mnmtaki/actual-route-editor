@@ -2306,17 +2306,33 @@ public class ProjectController {
                         resource.equals("line:"+lineId))
                         throw new ResponseStatusException(HttpStatus.CONFLICT,
                             "存在同线或无法识别的拓扑操作");
-                    if("line.append-existing".equals(action)) {
+                    String changedLine=resource.substring("line:".length());
+                    if("line.append-existing".equals(action) ||
+                       "line.append-new".equals(action) ||
+                       "line.create".equals(action)) {
                         try {
                             JsonNode payload=mapper.readTree((String)item[3]);
-                            if(stationsOnLine.contains(payload.path("toStationId").asText()) ||
-                               stationsOnLine.contains(payload.path("fromStationId").asText()))
+                            String from=payload.path("fromStationId").asText("");
+                            String to=payload.path("toStationId").asText("");
+                            String seed=payload.path("seedRelation").path("stationId").asText("");
+                            if((!from.isEmpty() && stationsOnLine.contains(from)) ||
+                               (!to.isEmpty() && stationsOnLine.contains(to)) ||
+                               (!seed.isEmpty() && stationsOnLine.contains(seed)))
                                 throw new ResponseStatusException(HttpStatus.CONFLICT,
-                                    "跨线接站触及共享站点，拒绝自动合并");
+                                    "跨线拓扑操作触及共享车站");
                         } catch(com.fasterxml.jackson.core.JsonProcessingException e) {
                             throw new ResponseStatusException(HttpStatus.CONFLICT,
-                                "无法核实跨线接站依赖");
+                                "跨线拓扑操作日志无效");
                         }
+                    } else if("line.loop-close".equals(action) ||
+                              "segment.split-station".equals(action)) {
+                        // Without the complete old geometry dependency payload,
+                        // fail closed when two lines share any station.
+                        for(JsonNode relation:document.path("stationLineRelations"))
+                            if(changedLine.equals(relation.path("lineId").asText()) &&
+                               stationsOnLine.contains(relation.path("stationId").asText()))
+                                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                                    "跨线拓扑操作与共享车站存在依赖");
                     }
                 }
                 case "line.remove-middle-station" -> {

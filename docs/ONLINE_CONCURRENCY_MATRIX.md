@@ -4,7 +4,7 @@ Branch: `feat/java-accounts-cloud-saves-20261101`
 
 ## Core contract
 
-The ordinary editor toolbar is the write entry point. Operation-level changes
+The ordinary editor toolbar is the write entry point. Independent browser tabs use per-tab sessionStorage outboxes, with migration from legacy localStorage journals. Operation-level changes
 are serialized by a PostgreSQL project-row lock and logged with a stable
 `operationId`; a stale operation may rebase only across a complete, provably
 disjoint revision journal. Otherwise the server returns 409 and the client
@@ -37,6 +37,12 @@ All test results must be recorded from a real execution before release.
 | Delete middle station + other-line topology | Merge only if no shared station; otherwise 409 | `removeSharedMiddleStationKeepsGlobalStationForOtherLine` and line-journal dependency guard; pair E2E pending |
 | Segment split + other-line waypoint | Merge only when line ownership is provable | Java dependency guard; pair E2E pending |
 | Existing-station terminal append + unrelated station change | Merge only with proof of no shared endpoint | Java dependency guard; pair E2E pending |
+| Station move vs waypoint edit on its endpoint (both orders) | 409 | `endpointAndWaypointConflictsButDisjointStationCanRebase` |
+| Station rename vs waypoint edit on its endpoint (both orders) | Merge | Same Java test |
+| Same station rename from two browser accounts | Exactly one 200, one 409; converge | `same-station concurrent writes produce one winner and never lose a version` |
+| Existing topology first, unrelated station change later | Merge only after journal dependency proof | `independentStationCanRebaseAfterTopologyButSharedEndpointCannot` |
+| Missing operation journal entry | 409, no revision change | `missingOperationJournalRevisionBlocksOtherwiseDisjointRebase` |
+| Mid-session editor permission revoked | 404 on subsequent write, no revision change | `permissionRevocationRejectsStaleCollaboratorWriteWithoutAdvancingRevision` |
 | Full document save/restore vs any stale operation | 409 (conflict boundary) | `differentLinesRebaseTopologyWhileSameLineAndFullSaveConflict`, waypoint/station tests |
 | Unknown/legacy action or missing operation journal revision | 409 | Guarded by complete contiguous journal; fault-injection test pending |
 | Same `operationId`, identical payload | Idempotent, no extra revision | Multiple Java IT cases |

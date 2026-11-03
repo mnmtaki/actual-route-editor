@@ -60,7 +60,7 @@ All test results must be recorded from a real execution before release.
 | Simple native loop closure (last station to first) | Atomic closing interval, no duplicate station; same-line concurrent closure rejected | `nativeLoopClosureAddsOneSegmentAndRejectsConcurrentDuplicate`, `collaborationRouting.test.ts` |
 | Loop closure on line A + seeded child branch on independent parent B | Merge after line/parent dependency proof | `loop closure and independently seeded branch creation converge across browsers` (added, not executed) |
 | Multi-object edit confined to one native line | Verified historical baseline, scoped three-way merge; no global overwrite | `LineCompoundMergeTest`, `lineCompoundMergesDisjointRemoteStationEditAndRejectsSameLineOverlap` |
-| Compound edit touching multiple lines or global fields | Strict document CAS / 409; no automatic inferred merge | `collaborationRouting.test.ts`, `LineCompoundMergeTest` |
+| Compound edit touching multiple lines or global fields | Idempotent full-project atomic transaction with strict revision CAS; never infer independence | `projectAtomicCompoundIsIdempotentAndRejectsConcurrentWholeMapEdits` |
 | Compound transaction with deleted or shared station | Reject unless independently covered by dedicated safe operation | `LineCompoundMergeTest`; extended scope pending |
 | Arbitrary phase-history / AARC / imported geometry edits | Strict document CAS; never automatically replay unknown metadata | Routing exclusions; dedicated E2E pending |
 | Multi-server WebSocket deployments | Database writes remain serialized; realtime delivery needs shared pubsub | **Not implemented**, 30s polling fallback only |
@@ -93,8 +93,12 @@ available (up to the retained snapshot window).
 
 Automatic merging is **not** promised for arbitrary cross-line compound edits,
 unbounded sequences, global settings, imported AARC metadata, historical phase
-operations, or deletions of globally shared stations. These must use strict
-whole-document CAS with local recovery or a dedicated operation-level handler.
+operations, or deletions of globally shared stations. For smaller maps, these
+ordinary edits use `project.atomic`: a single version-checked, idempotent
+all-or-nothing save that never partially applies a batch. Large maps retain
+the legacy whole-document CAS fallback. Neither path automatically merges
+overlapping multi-line changes. In-flight compound requests are tracked with
+per-tab persisted operation IDs where within storage limits.
 
 All newly added branch/loop/compound tests are **committed but unexecuted** in
 this environment. Do not mark this release complete until the release gate

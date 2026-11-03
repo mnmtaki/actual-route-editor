@@ -55,7 +55,7 @@ describe('persisted topology outbox', () => {
 
   it('rejects oversized or malformed persisted data without crashing', () => {
     const store = memoryStore();
-    store.setItem('ara:pending-topology:v1:project-a', '{bad');
+    store.setItem('ara:pending-topology:v2:project-a', '{bad');
     expect(pendingTopologyRead('project-a', store)).toBeNull();
     expect(pendingTopologySave({...pending('project-a'), snapshot: 'x'.repeat(1_000_100)}, store))
       .toBe(false);
@@ -75,8 +75,19 @@ describe('persisted topology outbox', () => {
 
   it('does not overwrite an unreadable existing journal', () => {
     const store = memoryStore();
-    store.setItem('ara:pending-topology:v1:project-a', '{bad');
+    store.setItem('ara:pending-topology:v2:project-a', '{bad');
     expect(pendingTopologySave(pending('project-a'), store)).toBe(false);
+  });
+
+  it('isolates identical projects in independent tab stores', () => {
+    const tabA=memoryStore();
+    const tabB=memoryStore();
+    expect(pendingTopologySave(pending('project-a','editor-A'),tabA)).toBe(true);
+    expect(pendingTopologySave(pending('project-a','editor-B'),tabB)).toBe(true);
+    expect(pendingTopologyRead('project-a',tabA)?.operation.payload.operationId)
+      .toBe('editor-A');
+    expect(pendingTopologyRead('project-a',tabB)?.operation.payload.operationId)
+      .toBe('editor-B');
   });
 
   it('fails closed if local storage throws rather than submitting an unjournaled operation', () => {

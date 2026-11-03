@@ -24,6 +24,12 @@ export interface CloudWaypointMove {
   x: number;
   y: number;
 }
+export interface CloudNewLine {
+  operationId: string;
+  expectedRevision: number;
+  line: ActualRouteProject['lines'][number];
+  phase: ActualRouteProject['openingPhases'][number];
+}
 export interface CloudNewLineStation {
   operationId: string;
   expectedRevision: number;
@@ -195,6 +201,14 @@ export const cloudApi = {
   moveWaypoint: async (id: string, operation: CloudWaypointMove) => {
     const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
       `/api/projects/${encodeURIComponent(id)}/operations/waypoint`, {
+        method: 'POST', body: JSON.stringify(operation),
+      },
+    );
+    return { ...raw, document: parseProjectJson(JSON.stringify(raw.document)) } as CloudProject;
+  },
+  createLine: async (id: string, operation: CloudNewLine) => {
+    const raw = await api<{ id: string; name: string; revision: number; updatedAt: string; visibility: CloudProjectSummary['visibility']; canEdit: boolean; document: unknown }>(
+      `/api/projects/${encodeURIComponent(id)}/operations/line-create`, {
         method: 'POST', body: JSON.stringify(operation),
       },
     );

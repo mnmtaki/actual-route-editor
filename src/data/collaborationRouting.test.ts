@@ -4,7 +4,7 @@ import { serializeProject } from '../import-export/projectJson';
 import { connectExistingStation, insertStationIntoSegment, appendStationToLineWithWaypoints } from './operations';
 import { deleteStationPreservingNetwork } from './stationDeletion';
 import { createOpeningPhase } from './openingPhases';
-import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation } from './collaborationRouting';
+import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation, mergeOnePendingCanvasStation } from './collaborationRouting';
 import type { ActualRouteProject } from './model';
 
 function makeProject(): ActualRouteProject {
@@ -116,6 +116,34 @@ describe('ordinary canvas collaboration routing', () => {
     const more=appendStationToLineWithWaypoints(ambiguous,'line-1',{x:65,y:30},[],
       'b',phased.phaseId);
     expect(detectCanvasNewLineStation(serializeProject(ambiguous),more.project)).toBeNull();
+  });
+
+  it('merges a continued ordinary station append with an independent remote line edit', () => {
+    const base = makeProject();
+    base.lines.push({ id:'line-2', name:'Second', color:'#123456',
+      stationSequence:[], lineOrder:1, visible:true, locked:false });
+    const local = appendStationToLineWithWaypoints(base,'line-1',{x:50,y:30},[],'b');
+    const remote = structuredClone(base);
+    remote.lines[1].name = 'Edited remotely';
+    const merged = mergeOnePendingCanvasStation(serializeProject(base),local.project,remote);
+    expect(merged).not.toBeNull();
+    expect(merged?.lines[1].name).toBe('Edited remotely');
+    expect(merged?.lines[0].stationSequence.at(-1)).toBe(local.stationId);
+    expect(merged?.stations.some(station=>station.id===local.stationId)).toBe(true);
+  });
+
+  it('refuses to merge same-line remote edits or compound local edits', () => {
+    const base = makeProject();
+    const local = appendStationToLineWithWaypoints(base,'line-1',{x:50,y:30},[],'b');
+    const sameLine = structuredClone(base);
+    sameLine.lines[0].name = 'Concurrent rename';
+    expect(mergeOnePendingCanvasStation(serializeProject(base),local.project,sameLine)).toBeNull();
+    const compound = structuredClone(local.project);
+    compound.stations[0].name = 'Unrelated local rename';
+    expect(mergeOnePendingCanvasStation(serializeProject(base),compound,base)).toBeNull();
+    const collision = structuredClone(base);
+    collision.stations.push(structuredClone(local.project.stations.at(-1)!));
+    expect(mergeOnePendingCanvasStation(serializeProject(base),local.project,collision)).toBeNull();
   });
 
   it('rejects mixed changes and non-terminal connections', () => {

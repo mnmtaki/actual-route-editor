@@ -1362,6 +1362,82 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void independentSplitAndNewStationRebaseAcrossLinesButRejectSameLine() throws Exception {
+        Session owner=account("crossTopology");
+        String id=createProject(owner);
+        JsonNode original=mapper.readTree("""
+            {"version":1,"name":"Concurrent Lines",
+             "stations":[
+              {"id":"a","name":"A","x":0,"y":0,"labelOffsetX":0,"labelOffsetY":0},
+              {"id":"b","name":"B","x":100,"y":0,"labelOffsetX":0,"labelOffsetY":0},
+              {"id":"c","name":"C","x":200,"y":0,"labelOffsetX":0,"labelOffsetY":0}],
+             "lines":[
+              {"id":"line-a","name":"A","color":"#113355","stationSequence":["a","b"],
+               "lineOrder":0,"visible":true,"locked":false},
+              {"id":"line-b","name":"B","color":"#551133","stationSequence":["c"],
+               "lineOrder":1,"visible":true,"locked":false}],
+             "stationLineRelations":[
+              {"id":"ra","stationId":"a","lineId":"line-a"},
+              {"id":"rb","stationId":"b","lineId":"line-a"},
+              {"id":"rc","stationId":"c","lineId":"line-b"}],
+             "geometry":{"segments":[
+              {"id":"ab","lineId":"line-a","fromStationId":"a","toStationId":"b",
+               "mode":"straight","structureType":"underground","waypoints":[]}]},
+             "openingPhases":[]}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Concurrent Lines","document",original,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+
+        UUID splitId=UUID.randomUUID();
+        String split=mapper.writeValueAsString(splitPayload(
+            "operationId",splitId,"expectedRevision",2,
+            "segmentId","ab","stationId","middle","stationName","M",
+            "x",50,"y",0,"beforeSegmentId","am","afterSegmentId","mb",
+            "relationId","rm","splitWaypointIndex",0));
+        mvc.perform(authorized(post("/api/projects/"+id+"/operations/segment-split")
+            .contentType(MediaType.APPLICATION_JSON).content(split),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        assertEquals("line:line-a",jdbc.queryForObject("""
+            SELECT station_id FROM cloud_project_operations
+            WHERE project_id=? AND operation_id=?
+            """,String.class,UUID.fromString(id),splitId));
+
+        JsonNode newStation=mapper.readTree("""
+            {"id":"d","name":"D","x":300,"y":0,"labelOffsetX":0,"labelOffsetY":0}
+            """);
+        JsonNode relation=mapper.readTree("""
+            {"id":"rd","stationId":"d","lineId":"line-b"}
+            """);
+        JsonNode segment=mapper.readTree("""
+            {"id":"cd","lineId":"line-b","fromStationId":"c","toStationId":"d",
+             "mode":"straight","structureType":"underground","waypoints":[]}
+            """);
+        String disjoint=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "lineId","line-b","fromStationId","c",
+            "station",newStation,"relation",relation,"segment",segment));
+        mvc.perform(authorized(post("/api/projects/"+id+"/operations/line-append-new")
+            .contentType(MediaType.APPLICATION_JSON).content(disjoint),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4))
+            .andExpect(jsonPath("$.document.lines[0].stationSequence.length()").value(3))
+            .andExpect(jsonPath("$.document.lines[1].stationSequence.length()").value(2))
+            .andExpect(jsonPath("$.document.geometry.segments.length()").value(3));
+
+        // Splitting another segment of line A using the stale v2 must reject.
+        String sameLine=mapper.writeValueAsString(splitPayload(
+            "operationId",UUID.randomUUID(),"expectedRevision",2,
+            "segmentId","am","stationId","other","stationName","X",
+            "x",25,"y",0,"beforeSegmentId","ax","afterSegmentId","xm",
+            "relationId","rx","splitWaypointIndex",0));
+        mvc.perform(authorized(post("/api/projects/"+id+"/operations/segment-split")
+            .contentType(MediaType.APPLICATION_JSON).content(sameLine),owner))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
     void canvasMiddleStationRemovalPreservesStraightAndSmoothGeometry() throws Exception {
         for(String mode:java.util.List.of("straight","smooth")) {
             Session owner=account("deleteCanvas");

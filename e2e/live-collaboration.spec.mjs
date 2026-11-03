@@ -730,3 +730,56 @@ test('same-account tabs keep independent pending operations during concurrent li
     await context.close();
   }
 });
+
+test('same-station concurrent writes produce one winner and never lose a version', async ({ browser }) => {
+  const owner=await browser.newContext();
+  const peer=await browser.newContext();
+  try {
+    const ownerCsrf=await registerAndLogin(owner,USERS.owner);
+    const peerCsrf=await registerAndLogin(peer,USERS.peer);
+    const bootstrap=await owner.newPage();
+    await bootstrap.goto(SITE);
+    const seed=await bootstrap.evaluate(async ()=>{
+      const project=(await import('/src/data/storage.ts')).createEmptyProject();
+      project.stations.push({
+        id:'shared-station',name:'Original',x:100,y:200,
+        labelOffsetX:14,labelOffsetY:-14,
+      });
+      return project;
+    });
+    await bootstrap.close();
+    const created=await write(owner,ownerCsrf,'/api/projects',{
+      name:'Shared Station Concurrent Conflict',document:seed,
+    });
+    const id=created.id;
+    await write(owner,ownerCsrf,'/api/projects/'+id+'/access-rules',{
+      username:USERS.peer,action:'edit',allowed:true,
+    });
+    const a=await openCanvas(owner,id);
+    const b=await openCanvas(peer,id);
+    const endpoint=API+'/api/projects/'+id+'/operations';
+    const body=(name)=>({
+      operationId:crypto.randomUUID(),expectedRevision:1,
+      type:'station.rename',station:{id:'shared-station',name},
+    });
+    const responses=await Promise.all([
+      owner.request.post(endpoint,{
+        data:body('Owner Edit'),headers:{'X-ARA-CSRF':ownerCsrf,Origin:SITE},
+      }),
+      peer.request.post(endpoint,{
+        data:body('Peer Edit'),headers:{'X-ARA-CSRF':peerCsrf,Origin:SITE},
+      }),
+    ]);
+    expect(responses.map(response=>response.status()).sort()).toEqual([200,409]);
+    const saved=await (await owner.request.get(API+'/api/projects/'+id)).json();
+    expect(saved.revision).toBe(2);
+    expect(['Owner Edit','Peer Edit']).toContain(saved.document.stations[0].name);
+    for(const page of [a,b])
+      await expect(page.getByRole('region',{name:'协同工作区'})
+        .getByText(/本地基线 v2 · 远端 v2/))
+        .toBeVisible({timeout:20000});
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});

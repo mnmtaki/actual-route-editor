@@ -366,7 +366,10 @@ export function mergeOnePendingCanvasStation(
   const remote = JSON.parse(serializeProject(committedRemote)) as ActualRouteProject;
   const oldLine = baseline.lines.find(line => line.id === next.lineId);
   const remoteLine = remote.lines.find(line => line.id === next.lineId);
-  if (!oldLine || !remoteLine || !equal(oldLine, remoteLine)) return null;
+  // Concurrent new-line creation may assign a different lineOrder on the
+  // server. Ordering does not affect append geometry; retain the server order.
+  if (!oldLine || !remoteLine ||
+      !equal({...oldLine,lineOrder:0},{...remoteLine,lineOrder:0})) return null;
   const oldPhases = baseline.openingPhases.filter(phase => phase.lineId === next.lineId);
   const newPhases = remote.openingPhases.filter(phase => phase.lineId === next.lineId);
   if (!equal(oldPhases,newPhases)) return null;

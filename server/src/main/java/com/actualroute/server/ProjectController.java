@@ -316,7 +316,8 @@ public class ProjectController {
             Long overlaps = jdbc.queryForObject("""
                 SELECT count(*) FROM cloud_project_operations
                  WHERE project_id=? AND revision>? AND revision<=?
-                   AND (station_id=? OR action NOT LIKE 'station.%')
+                   AND (station_id=? OR (
+                        action NOT LIKE 'station.%' AND action<>'segment.waypoint.move'))
                 """, Long.class, id, input.expectedRevision(), currentRevision, stationId);
             if (recorded == null || recorded != currentRevision-input.expectedRevision()
                 || overlaps == null || overlaps > 0)
@@ -618,7 +619,8 @@ public class ProjectController {
             Long unsafe=jdbc.queryForObject("""
                 SELECT count(*) FROM cloud_project_operations
                  WHERE project_id=? AND revision>? AND revision<=?
-                   AND (station_id=? OR action<>'segment.waypoint.move')
+                   AND (station_id=? OR (
+                        action<>'segment.waypoint.move' AND action NOT LIKE 'station.%'))
                 """,Long.class,id,input.expectedRevision(),current,resource);
             if (recorded==null || recorded!=current-input.expectedRevision()
                 || unsafe==null || unsafe>0)

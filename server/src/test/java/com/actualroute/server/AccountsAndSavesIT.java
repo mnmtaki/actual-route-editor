@@ -1355,6 +1355,10 @@ class AccountsAndSavesIT {
             SELECT count(*) FROM cloud_project_operations
             WHERE project_id=? AND action='segment.split-station'
             """,Integer.class,UUID.fromString(id)));
+        assertEquals("line:line-a",jdbc.queryForObject("""
+            SELECT station_id FROM cloud_project_operations
+            WHERE project_id=? AND operation_id=?
+            """,String.class,UUID.fromString(id),operation));
     }
 
     @Test

@@ -575,8 +575,6 @@ public class ProjectController {
         if (input.expectedRevision()<1 || input.expectedRevision()==Long.MAX_VALUE
             || !Double.isFinite(input.x()) || !Double.isFinite(input.y())
             || Math.abs(input.x())>1_000_000 || Math.abs(input.y())>1_000_000
-            || (input.labelOffsetX()!=null && (!Double.isFinite(input.labelOffsetX()) || Math.abs(input.labelOffsetX())>1_000_000))
-            || (input.labelOffsetY()!=null && (!Double.isFinite(input.labelOffsetY()) || Math.abs(input.labelOffsetY())>1_000_000))
             || input.segmentId().length()>120 || input.waypointId().length()>128)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"无效控制点操作");
         String resource="segment:"+input.segmentId();

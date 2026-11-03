@@ -839,3 +839,98 @@ test('rapid native line creation then first station survives a concurrent peer l
     await peer.close();
   }
 });
+
+test('loop closure and independently seeded branch creation converge across browsers', async ({ browser }) => {
+  const owner=await browser.newContext();
+  const peer=await browser.newContext();
+  try {
+    const ownerCsrf=await registerAndLogin(owner,USERS.owner);
+    const peerCsrf=await registerAndLogin(peer,USERS.peer);
+    const bootstrap=await owner.newPage();
+    await bootstrap.goto(SITE);
+    const seed=await bootstrap.evaluate(async ()=>{
+      const project=(await import('/src/data/storage.ts')).createEmptyProject();
+      project.stations=[
+        {id:'a',name:'A',x:100,y:100,labelOffsetX:14,labelOffsetY:-14},
+        {id:'b',name:'B',x:320,y:100,labelOffsetX:14,labelOffsetY:-14},
+        {id:'c',name:'C',x:320,y:310,labelOffsetX:14,labelOffsetY:-14},
+        {id:'d',name:'D',x:600,y:400,labelOffsetX:14,labelOffsetY:-14},
+      ];
+      project.lines=[
+        {id:'loop-line',name:'Loop',color:'#ff6600',lineOrder:0,
+          stationSequence:['a','b','c'],visible:true,locked:false,
+          openedAt:project.timeline.currentDate},
+        {id:'parent-line',name:'Parent',color:'#3366ff',lineOrder:1,
+          stationSequence:['d'],visible:true,locked:false,
+          openedAt:project.timeline.currentDate},
+      ];
+      project.stationLineRelations=[
+        {id:'ra',lineId:'loop-line',stationId:'a'},
+        {id:'rb',lineId:'loop-line',stationId:'b'},
+        {id:'rc',lineId:'loop-line',stationId:'c'},
+        {id:'rd',lineId:'parent-line',stationId:'d'},
+      ];
+      project.geometry.segments=[
+        {id:'ab',lineId:'loop-line',fromStationId:'a',toStationId:'b',
+          mode:'straight',structureType:'underground',waypoints:[]},
+        {id:'bc',lineId:'loop-line',fromStationId:'b',toStationId:'c',
+          mode:'straight',structureType:'underground',waypoints:[]},
+      ];
+      return project;
+    });
+    await bootstrap.close();
+    const created=await write(owner,ownerCsrf,'/api/projects',{
+      name:'Loop and Branch Race',document:seed,
+    });
+    const id=created.id;
+    await write(owner,ownerCsrf,'/api/projects/'+id+'/access-rules',{
+      username:USERS.peer,action:'edit',allowed:true,
+    });
+    const a=await openCanvas(owner,id);
+    const b=await openCanvas(peer,id);
+    const endpoint='/api/projects/'+id+'/operations';
+    const phaseDate=seed.timeline.currentDate;
+    const operations=await Promise.all([
+      write(owner,ownerCsrf,endpoint+'/loop-close',{
+        operationId:crypto.randomUUID(),expectedRevision:1,
+        lineId:'loop-line',segmentId:'ca',
+      }),
+      write(peer,peerCsrf,endpoint+'/line-create',{
+        operationId:crypto.randomUUID(),expectedRevision:1,
+        line:{id:'new-branch',name:'',color:'#3366ff',
+          parentLineId:'parent-line',stationSequence:['d'],
+          lineBadges:[],lineOrder:2,openedAt:phaseDate,
+          closedAt:null,visible:true,locked:false},
+        phase:{id:'new-phase',lineId:'new-branch',
+          name:'一期',openedAt:phaseDate,segmentIds:[],
+          stationRelationIds:['branch-d'],revealStartStationId:'d',
+          overriddenSegmentIds:[],overriddenStationRelationIds:[]},
+        seedRelation:{id:'branch-d',lineId:'new-branch',stationId:'d',
+          openedAt:phaseDate,closedAt:null},
+      }),
+    ]);
+    expect(new Set(operations.map(item=>item.revision))).toEqual(new Set([2,3]));
+    await expect.poll(async ()=>{
+      const saved=await (await owner.request.get(API+'/api/projects/'+id)).json();
+      return {
+        revision:saved.revision,
+        lines:saved.document.lines.length,
+        segments:saved.document.geometry.segments.length,
+        branchStart:saved.document.lines.find(line=>line.id==='new-branch')
+          ?.stationSequence[0],
+        branchRelations:saved.document.stationLineRelations
+          .filter(relation=>relation.lineId==='new-branch').length,
+      };
+    },{timeout:30000}).toEqual({
+      revision:3,lines:3,segments:3,branchStart:'d',branchRelations:1,
+    });
+    for(const page of [a,b]) {
+      await expect(page.getByRole('region',{name:'协同工作区'})
+        .getByText(/本地基线 v3 · 远端 v3/))
+        .toBeVisible({timeout:20000});
+    }
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});

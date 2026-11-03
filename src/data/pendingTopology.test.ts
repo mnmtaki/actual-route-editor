@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  pendingTopologyRead, pendingTopologySave, pendingTopologyClear,
+  pendingTopologyRead, pendingTopologySave, pendingTopologyClear, pendingTopologyConfirm,
   type PendingTopologyWrite,
 } from './pendingTopology';
 
@@ -59,6 +59,24 @@ describe('persisted topology outbox', () => {
     expect(pendingTopologyRead('project-a', store)).toBeNull();
     expect(pendingTopologySave({...pending('project-a'), snapshot: 'x'.repeat(1_000_100)}, store))
       .toBe(false);
+  });
+
+  it('retains confirmed divergent snapshots until a matching explicit clear', () => {
+    const store = memoryStore();
+    expect(pendingTopologySave(pending('project-a'), store)).toBe(true);
+    pendingTopologyConfirm('project-a', 'stable-operation', store);
+    expect(pendingTopologyRead('project-a', store)).toEqual({
+      ...pending('project-a'), confirmed: true,
+    });
+    expect(pendingTopologySave(pending('project-a', 'second'), store)).toBe(false);
+    pendingTopologyClear('project-a', 'stable-operation', store);
+    expect(pendingTopologyRead('project-a', store)).toBeNull();
+  });
+
+  it('does not overwrite an unreadable existing journal', () => {
+    const store = memoryStore();
+    store.setItem('ara:pending-topology:v1:project-a', '{bad');
+    expect(pendingTopologySave(pending('project-a'), store)).toBe(false);
   });
 
   it('fails closed if local storage throws rather than submitting an unjournaled operation', () => {

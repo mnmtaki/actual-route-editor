@@ -6,7 +6,7 @@ import { cloudApi, cloudSocketUrl, CloudApiError } from '../data/cloudProjectApi
 import type { CloudUndoEntry, CloudOperationHistoryItem } from '../data/cloudProjectApi';
 import { detectStationOperation } from '../data/stationLiveOperations';
 import { detectWaypointMove } from '../data/waypointLiveOperations';
-import { detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation } from '../data/collaborationRouting';
+import { detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation, mergeOnePendingCanvasStation } from '../data/collaborationRouting';
 import { pendingTopologyRead, pendingTopologySave, pendingTopologyClear, pendingTopologyConfirm } from '../data/pendingTopology';
 import type { PendingTopologyOperation } from '../data/pendingTopology';
 
@@ -552,6 +552,21 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
               setError('');
               setLiveStatus('上一笔拓扑操作已确认至 v' + saved.revision + '；后续画布修改继续同步');
               return;
+            }
+            if (!draftInProgress.current) {
+              const merged = mergeOnePendingCanvasStation(snapshot, latest.current, saved.document);
+              if (merged) {
+                pendingTopologyClear(session.id, operationId);
+                const next = { id: session.id, name: saved.name,
+                  revision: saved.revision, baseJson: serializeProject(saved.document) };
+                activeSession.current = next;
+                latest.current = merged;
+                onLoadRef.current(merged, next);
+                setError('');
+                setRecoveryOpen(false);
+                setLiveStatus('已保留远端独立修改，并继续同步本地下一站');
+                return;
+              }
             }
             pendingTopologyConfirm(session.id, operationId);
             setError('拓扑操作已保存，但同时存在其他云端变化；已保留后续绘制，请比较差异。');

@@ -370,6 +370,26 @@ export function mergeOnePendingCanvasStation(
   const oldPhases = baseline.openingPhases.filter(phase => phase.lineId === next.lineId);
   const newPhases = remote.openingPhases.filter(phase => phase.lineId === next.lineId);
   if (!equal(oldPhases,newPhases)) return null;
+  // Line structure alone does not capture transfers, endpoint moves, segment
+  // styles or global drawing settings. Require the entire dependency closure
+  // of the locally edited line to remain unchanged.
+  const stationIds = new Set(oldLine.stationSequence);
+  if (!equal(
+        baseline.stations.filter(station => stationIds.has(station.id)),
+        remote.stations.filter(station => stationIds.has(station.id))) ||
+      !equal(
+        baseline.stationLineRelations.filter(relation => relation.lineId === next.lineId ||
+          stationIds.has(relation.stationId)),
+        remote.stationLineRelations.filter(relation => relation.lineId === next.lineId ||
+          stationIds.has(relation.stationId))) ||
+      !equal(
+        baseline.geometry.segments.filter(segment => segment.lineId === next.lineId),
+        remote.geometry.segments.filter(segment => segment.lineId === next.lineId)) ||
+      !equal(
+        { ...baseline, stations:[], lines:[], stationLineRelations:[],
+          openingPhases:[], geometry:{...baseline.geometry, segments:[]} },
+        { ...remote, stations:[], lines:[], stationLineRelations:[],
+          openingPhases:[], geometry:{...remote.geometry, segments:[]} })) return null;
   if (remote.stations.some(station => station.id === next.station.id) ||
       remote.stationLineRelations.some(relation => relation.id === next.relation.id) ||
       (next.segment && remote.geometry.segments.some(segment => segment.id === next.segment!.id))) return null;

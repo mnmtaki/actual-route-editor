@@ -305,25 +305,8 @@ public class ProjectController {
         long currentRevision = (Long) row[0];
         if (input.expectedRevision() > currentRevision)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"操作基线版本超前");
-        if (input.expectedRevision() < currentRevision) {
-            // Accept stale writes only when EVERY intervening revision is a
-            // station operation on a different station. A full-project save,
-            // restore or missing operation record is an unsafe merge boundary.
-            Long recorded = jdbc.queryForObject("""
-                SELECT count(*) FROM cloud_project_operations
-                 WHERE project_id=? AND revision>? AND revision<=?
-                """, Long.class, id, input.expectedRevision(), currentRevision);
-            Long overlaps = jdbc.queryForObject("""
-                SELECT count(*) FROM cloud_project_operations
-                 WHERE project_id=? AND revision>? AND revision<=?
-                   AND (station_id=? OR (
-                        action NOT LIKE 'station.%' AND action<>'segment.waypoint.move'))
-                """, Long.class, id, input.expectedRevision(), currentRevision, stationId);
-            if (recorded == null || recorded != currentRevision-input.expectedRevision()
-                || overlaps == null || overlaps > 0)
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "存在同站或整图更改，无法自动合并，请同步最新版");
-        }
+        if (input.expectedRevision() < currentRevision)
+            requireDisjointGeometryHistory(id,input.expectedRevision(),currentRevision,stationId,null);
         ObjectNode document;
         try {
             document = (ObjectNode) mapper.readTree((String)row[2]);
@@ -609,22 +592,8 @@ public class ProjectController {
         long current=(Long)row[0];
         if (input.expectedRevision()>current)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"版本超前");
-        if (input.expectedRevision()<current) {
-            Long recorded=jdbc.queryForObject("""
-                SELECT count(*) FROM cloud_project_operations
-                 WHERE project_id=? AND revision>? AND revision<=?
-                """,Long.class,id,input.expectedRevision(),current);
-            Long unsafe=jdbc.queryForObject("""
-                SELECT count(*) FROM cloud_project_operations
-                 WHERE project_id=? AND revision>? AND revision<=?
-                   AND (station_id=? OR (
-                        action<>'segment.waypoint.move' AND action NOT LIKE 'station.%'))
-                """,Long.class,id,input.expectedRevision(),current,resource);
-            if (recorded==null || recorded!=current-input.expectedRevision()
-                || unsafe==null || unsafe>0)
-                throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "同区间或其他类型修改发生冲突，请同步最新版");
-        }
+        if (input.expectedRevision()<current)
+            requireDisjointGeometryHistory(id,input.expectedRevision(),current,null,input.segmentId());
         ObjectNode document;
         try {
             document=(ObjectNode)mapper.readTree((String)row[2]);
@@ -1702,6 +1671,57 @@ public class ProjectController {
      * its base. Called while holding the project row lock. Do not infer safety
      * from revision numbers alone, from partial logs, or from unknown actions.
      */
+    /** Validate station and control-point independence using a complete journal. */
+    private void requireDisjointGeometryHistory(UUID projectId,long expected,
+                                                long current,String stationId,String segmentId) {
+        if(expected<1 || current-expected>256)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"操作历史过长");
+        var records=jdbc.query("""
+            SELECT revision,action,station_id FROM cloud_project_operations
+            WHERE project_id=? AND revision>? AND revision<=? ORDER BY revision
+            """,(rs,n)->new Object[]{rs.getLong("revision"),
+                rs.getString("action"),rs.getString("station_id")},
+            projectId,expected,current);
+        if(records.size()!=current-expected)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"并发日志缺口");
+        JsonNode document;
+        try { document=mapper.readTree(jdbc.queryForObject("""
+            SELECT document::text FROM cloud_projects WHERE id=?
+            """,String.class,projectId)); }
+        catch(Exception e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"无法核实几何依赖");
+        }
+        java.util.Map<String,java.util.Set<String>> endpoints=new java.util.HashMap<>();
+        for(JsonNode segment:document.path("geometry").path("segments"))
+            endpoints.put(segment.path("id").asText(),java.util.Set.of(
+                segment.path("fromStationId").asText(),
+                segment.path("toStationId").asText()));
+        if(segmentId!=null && !endpoints.containsKey(segmentId))
+            throw new ResponseStatusException(HttpStatus.CONFLICT,"区间不存在");
+        long next=expected+1;
+        for(Object[] record:records) {
+            if((Long)record[0]!=next++)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"并发日志不连续");
+            String action=(String)record[1], resource=(String)record[2];
+            if(action==null || resource==null)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"并发日志无效");
+            if("segment.waypoint.move".equals(action)) {
+                if(!resource.startsWith("segment:"))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"控制点日志无效");
+                String touched=resource.substring("segment:".length());
+                var attached=endpoints.get(touched);
+                if(attached==null || touched.equals(segmentId) ||
+                   stationId!=null && attached.contains(stationId))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"区间端点依赖冲突");
+            } else if(java.util.Set.of("station.create","station.move","station.rename").contains(action)) {
+                if(resource.equals(stationId) || segmentId!=null &&
+                   endpoints.get(segmentId).contains(resource))
+                    throw new ResponseStatusException(HttpStatus.CONFLICT,"车站几何依赖冲突");
+            } else throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "拓扑或整图变更需要重新同步");
+        }
+    }
+
     private void requireDisjointLineHistory(UUID projectId, long expected,
                                             long current, String lineId) {
         if(expected>current)

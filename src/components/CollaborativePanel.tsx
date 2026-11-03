@@ -639,7 +639,10 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
         working.current = false;
         setBusy(false);
       });
-    }, 1200);
+    }, newLine ? 0 : 1200);
+    // Commit the empty line + phase as soon as the ordinary toolbar creates
+    // them; waiting for the general 1200ms debounce could batch a rapidly
+    // drawn station into an unsupported compound full-document PUT.
     return () => window.clearTimeout(timer);
   }, [project, session.id, session.baseJson, session.revision,
       busy, permissionLost, draftActive, dirty, remoteRevision, onUpdate]);

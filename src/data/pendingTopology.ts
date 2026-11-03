@@ -17,6 +17,7 @@ export interface PendingTopologyWrite {
 // sessionStorage isolates two tabs editing the same cloud project, while
 // preserving uncertain requests across a refresh in the originating tab.
 const PREFIX = 'ara:pending-topology:v2:';
+const LEGACY_PREFIX = 'ara:pending-topology:v1:';
 const MAX_BYTES = 1_000_000;
 const key = (projectId: string) => PREFIX + projectId;
 
@@ -28,7 +29,24 @@ const key = (projectId: string) => PREFIX + projectId;
 export function pendingTopologyRead(projectId: string, store: Pick<Storage, 'getItem'> = sessionStorage):
   PendingTopologyWrite | null {
   try {
-    const raw = store.getItem(key(projectId));
+    let raw = store.getItem(key(projectId));
+    // Upgrade a previously in-flight v1 localStorage request. The first
+    // tab opening the project adopts the legacy journal; later tabs get
+    // separate v2 sessionStorage outboxes.
+    if (!raw && typeof sessionStorage !== 'undefined' &&
+        store === sessionStorage && typeof localStorage !== 'undefined') {
+      const legacyKey = LEGACY_PREFIX + projectId;
+      const legacy = localStorage.getItem(legacyKey);
+      if (legacy) {
+        if (legacy.length > MAX_BYTES) return null;
+        const migrated = JSON.parse(legacy) as PendingTopologyWrite;
+        if (migrated.projectId !== projectId ||
+            !migrated.operation?.payload?.operationId) return null;
+        sessionStorage.setItem(key(projectId), legacy);
+        localStorage.removeItem(legacyKey);
+        raw = legacy;
+      }
+    }
     if (!raw || raw.length > MAX_BYTES) return null;
     const value = JSON.parse(raw) as PendingTopologyWrite;
     if (value.projectId !== projectId || typeof value.snapshot !== 'string' ||
@@ -43,6 +61,11 @@ export function pendingTopologySave(value: PendingTopologyWrite,
   store: Pick<Storage, 'getItem' | 'setItem'> = sessionStorage): boolean {
   try {
     const rawPending = store.getItem(key(value.projectId));
+    // An invalid legacy journal may contain an unacknowledged mutation.
+    // Fail closed instead of creating a new operation that could replay it.
+    if (typeof sessionStorage !== 'undefined' && store === sessionStorage &&
+        typeof localStorage !== 'undefined' &&
+        localStorage.getItem(LEGACY_PREFIX + value.projectId)) return false;
     const current = pendingTopologyRead(value.projectId, store);
     if (rawPending && !current) return false; // Corrupt journal: fail closed.
     if (current && current.operation.payload.operationId !== value.operation.payload.operationId)

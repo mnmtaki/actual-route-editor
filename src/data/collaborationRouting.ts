@@ -438,7 +438,7 @@ export function detectCanvasNewLine(baseJson: string, project: ActualRouteProjec
       !before.openingPhases.every((phase,i)=>equal(phase,after.openingPhases[i])))
     return null;
   const line=after.lines.at(-1), phase=after.openingPhases.at(-1);
-  if(!line || !phase || line.parentLineId || line.isFake || line.source ||
+  if(!line || !phase || line.isFake || line.source ||
       line.operationHistory?.length || line.stationSequence.length ||
       line.lineBadges?.length || !line.visible || line.locked ||
       !line.name.trim() || !/^#[0-9a-fA-F]{6}$/.test(line.color) ||
@@ -449,7 +449,14 @@ export function detectCanvasNewLine(baseJson: string, project: ActualRouteProjec
       phase.overriddenStationRelationIds?.length ||
       phase.revealStartStationId || phase.revealEndStationId ||
       before.lines.some(item=>item.id===line.id) ||
-      before.openingPhases.some(item=>item.id===phase.id))
+      before.openingPhases.some(item=>item.id===phase.id) ||
+      (line.parentLineId && (
+        !before.lines.some(parent=>parent.id===line.parentLineId &&
+          !parent.locked && !parent.isFake) ||
+        // Child color must match the actual parent service family.
+        // A complex color-inheritance history is not suitable for this path.
+        before.lines.find(parent=>parent.id===line.parentLineId)?.source
+      )))
     return null;
   return { line, phase };
 }

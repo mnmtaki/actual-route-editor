@@ -691,3 +691,42 @@ test('two editors create independent native lines concurrently through regular t
     await peer.close();
   }
 });
+
+test('same-account tabs keep independent pending operations during concurrent line creation', async ({ browser }) => {
+  const context=await browser.newContext();
+  try {
+    const csrf=await registerAndLogin(context,USERS.owner);
+    const bootstrap=await context.newPage();
+    await bootstrap.goto(SITE);
+    const empty=await bootstrap.evaluate(async ()=>
+      (await import('/src/data/storage.ts')).createEmptyProject());
+    await bootstrap.close();
+    const created=await write(context,csrf,'/api/projects',{
+      name:'Same Account Two Tabs',document:empty,
+    });
+    const id=created.id;
+    const first=await openCanvas(context,id);
+    const second=await openCanvas(context,id);
+    await Promise.all([
+      first.getByRole('button',{name:'＋ 新建线路'}).click(),
+      second.getByRole('button',{name:'＋ 新建线路'}).click(),
+    ]);
+    await first.locator('.line-dialog input').first().fill('Tab One');
+    await second.locator('.line-dialog input').first().fill('Tab Two');
+    await Promise.all([
+      first.locator('.line-dialog').getByRole('button',{name:'开始绘制'}).click(),
+      second.locator('.line-dialog').getByRole('button',{name:'开始绘制'}).click(),
+    ]);
+    await expect.poll(async ()=>{
+      const response=await context.request.get(API+'/api/projects/'+id);
+      const doc=(await response.json()).document;
+      return doc.lines.map(line=>line.name).sort();
+    },{timeout:30000}).toEqual(['Tab One','Tab Two']);
+    for(const page of [first,second])
+      await expect(page.getByRole('region',{name:'协同工作区'})
+        .getByText(/本地基线 v3 · 远端 v3/))
+        .toBeVisible({timeout:20000});
+  } finally {
+    await context.close();
+  }
+});

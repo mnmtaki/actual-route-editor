@@ -1588,25 +1588,108 @@ public class ProjectController {
      * the project's SELECT ... FOR UPDATE lock, the journal proof and the
      * following CAS save are serialized with other topology transactions.
      */
+    /**
+     * Prove a stale topology operation is independent of every revision since
+     * its base. Called while holding the project row lock. Do not infer safety
+     * from revision numbers alone, from partial logs, or from unknown actions.
+     */
     private void requireDisjointLineHistory(UUID projectId, long expected,
                                             long current, String lineId) {
         if(expected>current)
             throw new ResponseStatusException(HttpStatus.CONFLICT,"操作基线版本超前");
         if(expected==current)return;
-        Long total=jdbc.queryForObject("""
-            SELECT count(*) FROM cloud_project_operations
-            WHERE project_id=? AND revision>? AND revision<=?
-            """,Long.class,projectId,expected,current);
-        Long unsafe=jdbc.queryForObject("""
-            SELECT count(*) FROM cloud_project_operations
-            WHERE project_id=? AND revision>? AND revision<=?
-              AND (station_id=? OR station_id NOT LIKE 'line:%'
-                OR action NOT IN ('line.append-new','line.append-existing',
-                                  'line.remove-middle-station','segment.split-station'))
-            """,Long.class,projectId,expected,current,"line:"+lineId);
-        if(total==null || total!=current-expected || unsafe==null || unsafe>0)
+        if(expected<1 || current-expected>256)
             throw new ResponseStatusException(HttpStatus.CONFLICT,
-                "同线修改、整图保存或操作日志缺口，无法安全合并");
+                "并发操作历史过长，需先同步最新版");
+        var journal=jdbc.query("""
+            SELECT revision,action,station_id,payload
+            FROM cloud_project_operations
+            WHERE project_id=? AND revision>? AND revision<=?
+            ORDER BY revision
+            """,(rs,n)->new Object[]{
+                rs.getLong("revision"),rs.getString("action"),
+                rs.getString("station_id"),rs.getString("payload")
+            },projectId,expected,current);
+        if(journal.size()!=current-expected)
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "并发操作日志不完整，拒绝自动重基");
+
+        JsonNode document;
+        try {
+            String raw=jdbc.queryForObject("""
+                SELECT document::text FROM cloud_projects WHERE id=?
+                """,String.class,projectId);
+            document=mapper.readTree(raw);
+        } catch(Exception e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "无法核实最新拓扑依赖，拒绝自动重基");
+        }
+        java.util.Set<String> stationsOnLine=new java.util.HashSet<>();
+        for(JsonNode line:document.path("lines"))
+            if(lineId.equals(line.path("id").asText()))
+                for(JsonNode station:line.path("stationSequence"))
+                    stationsOnLine.add(station.asText());
+        for(JsonNode rel:document.path("stationLineRelations"))
+            if(lineId.equals(rel.path("lineId").asText()))
+                stationsOnLine.add(rel.path("stationId").asText());
+
+        long next=expected+1;
+        for(Object[] item:journal) {
+            long journalRevision=(Long)item[0];
+            String action=(String)item[1], resource=(String)item[2];
+            if(journalRevision!=next++ || action==null || resource==null)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "并发操作版本不连续，拒绝自动重基");
+            switch(action) {
+                case "line.append-new","line.append-existing","segment.split-station" -> {
+                    if(!resource.startsWith("line:") ||
+                        resource.equals("line:"+lineId))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "存在同线或无法识别的拓扑操作");
+                }
+                case "line.remove-middle-station" -> {
+                    if(!resource.startsWith("line:") ||
+                        resource.equals("line:"+lineId))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "存在同线删除操作");
+                    // Shared transfer stations can have global anchor metadata
+                    // modified when a different line drops its membership.
+                    try {
+                        JsonNode payload=mapper.readTree((String)item[3]);
+                        if(stationsOnLine.contains(payload.path("stationId").asText()))
+                            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                                "删除操作涉及当前线路的共用车站");
+                    } catch(com.fasterxml.jackson.core.JsonProcessingException e) {
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "无法核实删除操作依赖");
+                    }
+                }
+                case "station.create","station.rename","station.move" -> {
+                    if(stationsOnLine.contains(resource))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "并发车站操作影响当前线路");
+                }
+                case "segment.waypoint.move" -> {
+                    if(!resource.startsWith("segment:"))
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "无法核实控制点归属");
+                    String segmentId=resource.substring("segment:".length());
+                    boolean found=false;
+                    for(JsonNode segment:document.path("geometry").path("segments"))
+                        if(segmentId.equals(segment.path("id").asText())) {
+                            found=true;
+                            if(lineId.equals(segment.path("lineId").asText()))
+                                throw new ResponseStatusException(HttpStatus.CONFLICT,
+                                    "并发控制点修改影响当前线路");
+                        }
+                    if(!found)
+                        throw new ResponseStatusException(HttpStatus.CONFLICT,
+                            "无法核实历史控制点所属区间");
+                }
+                default -> throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "存在整图保存或未知操作，拒绝自动重基");
+            }
+        }
     }
 
     private boolean validId(String id) {

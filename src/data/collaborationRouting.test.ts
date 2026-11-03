@@ -55,7 +55,8 @@ describe('ordinary canvas collaboration routing', () => {
     const unrelated=structuredClone(phased.project);
     unrelated.projectName='Other name';
     expect(detectCanvasNewLine(serializeProject(before),unrelated)).toBeNull();
-    const seeded=connectExistingStation(phased.project,added.lineId,'unrelated');
+    const seeded=structuredClone(phased.project);
+    seeded.lines.at(-1)!.stationSequence.push('already-on-canvas');
     expect(detectCanvasNewLine(serializeProject(before),seeded)).toBeNull();
   });
 

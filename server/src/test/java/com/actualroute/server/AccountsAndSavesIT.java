@@ -929,6 +929,38 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void missingOperationJournalRevisionBlocksOtherwiseDisjointRebase() throws Exception {
+        Session owner=account("journalGap");
+        String id=createProject(owner);
+        String endpoint="/api/projects/"+id+"/operations";
+        for(int rev=1;rev<=2;rev++) {
+            mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+                .content(mapper.writeValueAsString(splitPayload(
+                    "operationId",UUID.randomUUID(),"expectedRevision",rev,
+                    "type","station.create",
+                    "station",Map.of("id","station-"+rev,
+                        "name","Station "+rev,"x",rev*10,"y",rev*20)))),owner))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.revision").value(rev+1));
+        }
+        int deleted=jdbc.update("""
+            DELETE FROM cloud_project_operations
+            WHERE project_id=? AND revision=2
+            """,UUID.fromString(id));
+        assertEquals(1,deleted);
+        mvc.perform(authorized(post(endpoint).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",1,
+                "type","station.create",
+                "station",Map.of("id","station-3",
+                    "name","Station 3","x",30,"y",60)))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3))
+            .andExpect(jsonPath("$.document.stations.length()").value(2));
+    }
+
+    @Test
     void permissionRevocationRejectsStaleCollaboratorWriteWithoutAdvancingRevision() throws Exception {
         Session owner=account("revocationOwner");
         Session editor=account("revocationEditor");

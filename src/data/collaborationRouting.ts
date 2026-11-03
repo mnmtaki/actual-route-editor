@@ -1,6 +1,6 @@
 import type { ActualRouteProject } from './model';
 import { serializeProject } from '../import-export/projectJson';
-import type { CloudLineAppend, CloudSegmentSplit, CloudMiddleStationRemoval, CloudNewLineStation } from './cloudProjectApi';
+import type { CloudLineAppend, CloudSegmentSplit, CloudMiddleStationRemoval, CloudNewLineStation, CloudNewLine } from './cloudProjectApi';
 
 /**
  * The backend's line-append endpoint intentionally supports only an existing,
@@ -415,4 +415,38 @@ export function mergeOnePendingCanvasStation(
   // must be bitwise equal to the ordinary editor's intended serialized map.
   if (equal(remote,baseline) && !equal(merged,local)) return null;
   return merged;
+}
+
+/**
+ * Native "new line" dialog produces exactly one empty main line and first
+ * phase. Recognize only that atomic pair; branched / seeded construction
+ * remains a strict-CAS document edit.
+ */
+export function detectCanvasNewLine(baseJson: string, project: ActualRouteProject):
+  Omit<CloudNewLine, 'operationId' | 'expectedRevision'> | null {
+  let before: ActualRouteProject;
+  try { before=JSON.parse(baseJson) as ActualRouteProject; } catch { return null; }
+  const after=JSON.parse(serializeProject(project)) as ActualRouteProject;
+  if (!equal({...before,lines:[],openingPhases:[]},
+             {...after,lines:[],openingPhases:[]}) ||
+      after.lines.length!==before.lines.length+1 ||
+      after.openingPhases.length!==before.openingPhases.length+1 ||
+      !before.lines.every((line,i)=>equal(line,after.lines[i])) ||
+      !before.openingPhases.every((phase,i)=>equal(phase,after.openingPhases[i])))
+    return null;
+  const line=after.lines.at(-1), phase=after.openingPhases.at(-1);
+  if(!line || !phase || line.parentLineId || line.isFake || line.source ||
+      line.operationHistory?.length || line.stationSequence.length ||
+      line.lineBadges?.length || !line.visible || line.locked ||
+      !line.name.trim() || !/^#[0-9a-fA-F]{6}$/.test(line.color) ||
+      line.openedAt!==phase.openedAt || phase.lineId!==line.id ||
+      !phase.openedAt || phase.segmentIds.length ||
+      phase.stationRelationIds.length ||
+      phase.overriddenSegmentIds?.length ||
+      phase.overriddenStationRelationIds?.length ||
+      phase.revealStartStationId || phase.revealEndStationId ||
+      before.lines.some(item=>item.id===line.id) ||
+      before.openingPhases.some(item=>item.id===phase.id))
+    return null;
+  return { line, phase };
 }

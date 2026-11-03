@@ -254,11 +254,14 @@ final class LineCompoundMerge {
         require(line.path("stationSequence").isArray(),"线路站序格式无效");
         var membershipIds=new HashSet<String>();
         for(JsonNode rel:scoped(doc.path("stationLineRelations"),lineId))
-            membershipIds.add(rel.path("stationId").asText());
+            require(membershipIds.add(rel.path("stationId").asText()),
+                "线路存在重复车站成员关系");
+        var sequenceIds=new HashSet<String>();
         for(JsonNode id:line.path("stationSequence"))
-            require(stations.containsKey(id.asText()) &&
+            require(sequenceIds.add(id.asText()) &&
+                    stations.containsKey(id.asText()) &&
                     membershipIds.contains(id.asText()),
-                    "线路站序引用了无成员关系的车站");
+                    "线路站序存在重复或无效车站");
         for(JsonNode station:doc.path("stations")) {
             String id=station.path("id").asText("");
             require(!id.isEmpty() && id.length()<=128,
@@ -279,8 +282,10 @@ final class LineCompoundMerge {
             require(seg.path("waypoints").isArray() &&
                     java.util.Set.of("straight","smooth").contains(
                         seg.path("mode").asText("")),"区间几何格式无效");
+            var waypointIds=new HashSet<String>();
             for(JsonNode waypoint:seg.path("waypoints"))
                 require(waypoint.path("id").isTextual() &&
+                        waypointIds.add(waypoint.path("id").asText()) &&
                         Double.isFinite(waypoint.path("x").asDouble(Double.NaN)) &&
                         Double.isFinite(waypoint.path("y").asDouble(Double.NaN)),
                         "区间控制点格式无效");

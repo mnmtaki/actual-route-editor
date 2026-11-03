@@ -82,6 +82,11 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       setRemoteRevision(previous => Math.max(previous, revision));
       const current = activeSession.current;
       if (revision <= current.revision || working.current || fetching.current) return;
+      if (pendingTopologyRead(current.id)) {
+        setRecoveryOpen(true);
+        setMessage('有待确认的操作；已阻止自动载入云端版本，以免覆盖本地绘制');
+        return;
+      }
       // Never replace local unsaved drawings, even for disjoint changes.
       if (draftInProgress.current || serializeProject(latest.current) !== current.baseJson) {
         setMessage('云端有新版本；当前画布有未发布修改，已保留，请手动处理冲突');
@@ -207,6 +212,60 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
       socket?.close();
     };
   }, [session.id]);
+
+  // An uncertain committed operation survives a tab refresh. Re-use its
+  // persisted operationId, never invent a fresh id or replay a compound PUT.
+  // Reconnect and the next browser session each trigger at most one attempt.
+  useEffect(() => {
+    const pending = pendingTopologyRead(session.id);
+    if (!pending) return;
+    if (!connected || permissionLost || working.current || fetching.current) return;
+    let cancelled = false;
+    working.current = true;
+    setBusy(true);
+    setLiveStatus('正在核对断线前的拓扑操作…');
+    const { operation } = pending;
+    const resend = () => {
+      switch (operation.kind) {
+        case 'new-station': return cloudApi.appendNewStation(session.id, operation.payload);
+        case 'append': return cloudApi.appendExistingStation(session.id, operation.payload);
+        case 'split': return cloudApi.splitSegment(session.id, operation.payload);
+        case 'remove': return cloudApi.removeMiddleStation(session.id, operation.payload);
+      }
+    };
+    void resend().then(saved => {
+      if (cancelled) return;
+      pendingTopologyClear(session.id, operation.payload.operationId);
+      setRemoteRevision(previous => Math.max(previous, saved.revision));
+      if (serializeProject(latest.current) !== pending.snapshot || draftInProgress.current) {
+        setRecoveryOpen(true);
+        setError('操作已确认提交，但当前画布与原始待提交快照不同；已保留本地修改，请先备份并比较差异。');
+        return;
+      }
+      const next = { id: session.id, name: saved.name, revision: saved.revision,
+        baseJson: serializeProject(saved.document) };
+      activeSession.current = next;
+      latest.current = saved.document;
+      onLoadRef.current(saved.document, next);
+      setLiveStatus('断线操作已确认并同步至 v' + saved.revision);
+      setRecoveryOpen(false);
+      setError('');
+    }).catch(error => {
+      if (cancelled) return;
+      if (error instanceof CloudApiError) {
+        pendingTopologyClear(session.id, operation.payload.operationId);
+        if (error.status === 403 || error.status === 404) setPermissionLost(true);
+        setError('待提交操作被服务器拒绝：' + error.message + '。本地画布未被覆盖。');
+      } else {
+        setError('网络仍不可用；待提交操作已保留，下次重连时继续使用原 ID。');
+      }
+      setRecoveryOpen(true);
+    }).finally(() => {
+      working.current = false;
+      if (!cancelled) setBusy(false);
+    });
+    return () => { cancelled = true; };
+  }, [session.id, connected, permissionLost]);
 
   useEffect(() => {
     let active = true;

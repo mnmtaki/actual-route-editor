@@ -4,7 +4,7 @@ import { serializeProject } from '../import-export/projectJson';
 import { connectExistingStation, insertStationIntoSegment, appendStationToLineWithWaypoints, createLine, createBranchLine } from './operations';
 import { deleteStationPreservingNetwork } from './stationDeletion';
 import { createOpeningPhase } from './openingPhases';
-import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation, mergeOnePendingCanvasStation, detectCanvasNewLine, detectCanvasLoopClosure } from './collaborationRouting';
+import { canUseLiveLineAppend, detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation, mergeOnePendingCanvasStation, detectCanvasNewLine, detectCanvasLoopClosure, detectCanvasLineCompound } from './collaborationRouting';
 import type { ActualRouteProject } from './model';
 
 function makeProject(): ActualRouteProject {
@@ -96,6 +96,32 @@ describe('ordinary canvas collaboration routing', () => {
     expect(detectCanvasLoopClosure(serializeProject(before),concurrent)).toBeNull();
     const alreadyClosed=connectExistingStation(after,'line-1','a','c');
     expect(detectCanvasLoopClosure(serializeProject(after),alreadyClosed)).toBeNull();
+  });
+
+  it('uses scoped compound operation for multi-object native line edits', () => {
+    const before=makeProject();
+    const drawn=appendStationToLineWithWaypoints(before,'line-1',
+      {x:35,y:15},[{id:'control-new',x:24,y:9}],'b');
+    const next=structuredClone(drawn.project);
+    next.geometry.segments[0].mode='smooth';
+    const compound=detectCanvasLineCompound(serializeProject(before),next);
+    expect(compound).toMatchObject({
+      lineId:'line-1',
+      beforeDocument:{lines:[{id:'line-1',stationSequence:['a','b']}]},
+    });
+    expect(compound?.afterDocument.geometry.segments).toHaveLength(2);
+    expect(compound?.afterDocument.lines[0].stationSequence.at(-1))
+      .toBe(drawn.stationId);
+    const global=structuredClone(next);
+    global.settings.lineWidth+=2;
+    expect(detectCanvasLineCompound(serializeProject(before),global)).toBeNull();
+    const other=structuredClone(before);
+    other.lines.push({id:'second',name:'Second',color:'#abcdef',
+      stationSequence:[],lineOrder:1,visible:true,locked:false});
+    const changed=structuredClone(next);
+    changed.lines.push({id:'second',name:'Changed',color:'#abcdef',
+      stationSequence:[],lineOrder:1,visible:true,locked:false});
+    expect(detectCanvasLineCompound(serializeProject(other),changed)).toBeNull();
   });
 
   it('recognizes an isolated terminal connection to an existing station', () => {

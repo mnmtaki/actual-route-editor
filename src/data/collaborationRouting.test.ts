@@ -149,6 +149,12 @@ describe('ordinary canvas collaboration routing', () => {
     expect(merged?.lines[1].name).toBe('Edited remotely');
     expect(merged?.lines[0].stationSequence.at(-1)).toBe(local.stationId);
     expect(merged?.stations.some(station=>station.id===local.stationId)).toBe(true);
+    const reordered=structuredClone(remote);
+    reordered.lines[0].lineOrder=2;
+    const afterOrder=mergeOnePendingCanvasStation(
+      serializeProject(base),local.project,reordered);
+    expect(afterOrder?.lines[0].lineOrder).toBe(2);
+    expect(afterOrder?.lines[0].stationSequence.at(-1)).toBe(local.stationId);
   });
 
   it('refuses to merge same-line remote edits or compound local edits', () => {

@@ -1583,6 +1583,64 @@ class AccountsAndSavesIT {
     }
 
     @Test
+    void independentStationCanRebaseAfterTopologyButSharedEndpointCannot() throws Exception {
+        Session owner=account("reverseTopology");
+        String id=createProject(owner);
+        JsonNode seed=mapper.readTree("""
+            {"version":1,"name":"Reverse Merge",
+             "stations":[
+               {"id":"a","name":"A","x":0,"y":0},
+               {"id":"b","name":"B","x":100,"y":0}],
+             "lines":[
+               {"id":"l1","name":"L1","color":"#113355",
+                "stationSequence":["a"],"lineOrder":0,"visible":true,"locked":false},
+               {"id":"l2","name":"L2","color":"#335511",
+                "stationSequence":["b"],"lineOrder":1,"visible":true,"locked":false}],
+             "stationLineRelations":[
+               {"id":"ra","lineId":"l1","stationId":"a"},
+               {"id":"rb","lineId":"l2","stationId":"b"}],
+             "geometry":{"segments":[]},"openingPhases":[]}
+            """);
+        mvc.perform(authorized(put("/api/projects/"+id).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(Map.of(
+                "name","Reverse Merge","document",seed,"expectedRevision",1))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(2));
+        String topology="/api/projects/"+id+"/operations/line-append-new";
+        mvc.perform(authorized(post(topology).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "lineId","l2","fromStationId","b",
+                "station",mapper.readTree("""
+                    {"id":"c","name":"C","x":200,"y":0,
+                     "labelOffsetX":0,"labelOffsetY":0}
+                    """),
+                "relation",mapper.readTree("""
+                    {"id":"rc","lineId":"l2","stationId":"c"}
+                    """),
+                "segment",mapper.readTree("""
+                    {"id":"bc","lineId":"l2","fromStationId":"b",
+                     "toStationId":"c","mode":"straight",
+                     "structureType":"underground","waypoints":[]}
+                    """))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
+        String stationApi="/api/projects/"+id+"/operations";
+        mvc.perform(authorized(post(stationApi).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "type","station.move","station",Map.of("id","a","x",10,"y",5)))),owner))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4));
+        mvc.perform(authorized(post(stationApi).contentType(MediaType.APPLICATION_JSON)
+            .content(mapper.writeValueAsString(splitPayload(
+                "operationId",UUID.randomUUID(),"expectedRevision",2,
+                "type","station.move","station",Map.of("id","b","x",110,"y",5)))),owner))
+            .andExpect(status().isConflict());
+        mvc.perform(get("/api/projects/"+id).cookie(owner.cookies()))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(4))
+            .andExpect(jsonPath("$.document.stations[0].x").value(10))
+            .andExpect(jsonPath("$.document.lines[1].stationSequence.length()").value(2));
+    }
+
+    @Test
     void unrelatedStationEditDoesNotBlockOtherLineTopologyButSameLineDoes() throws Exception {
         Session owner=account("mixedRebase");
         String id=createProject(owner);

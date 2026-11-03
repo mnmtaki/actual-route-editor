@@ -844,7 +844,8 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     {pendingWrite && <>
       <span role="status">断线操作{pendingWrite.confirmed ? '已确认，等待备份处理' : '待确认'}</span>
       <button type="button" onClick={() => downloadText(
-        pendingWrite.snapshot, 'actual-route-pending-' + session.id + '.json'
+        'actual-route-pending-' + session.id + '.json',
+        pendingWrite.snapshot, 'application/json'
       )}>导出断线前画布备份</button>
       {pendingWrite.confirmed && <button type="button" onClick={() => {
         if (!window.confirm('确认已导出备份？这会清除待恢复记录，但不会删除云端操作。')) return;

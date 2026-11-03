@@ -1478,11 +1478,22 @@ public class ProjectController {
                 line=(ObjectNode)item;
         if(line==null || line.path("locked").asBoolean(false)
             || line.path("isFake").asBoolean(false)
-            || line.path("parentLineId").isTextual()
             || !line.path("source").isMissingNode()
             || line.path("operationHistory").isArray() && !line.path("operationHistory").isEmpty()
             || !(line.path("stationSequence") instanceof ArrayNode sequence))
             throw new ResponseStatusException(HttpStatus.CONFLICT,"线路不支持此类原子绘制");
+        if(line.path("parentLineId").isTextual()) {
+            String parentId=line.path("parentLineId").asText();
+            boolean validParent=false;
+            for(JsonNode parent:lines)
+                if(parentId.equals(parent.path("id").asText()) &&
+                   !parent.path("locked").asBoolean(false) &&
+                   !parent.path("isFake").asBoolean(false))
+                    validParent=true;
+            if(!validParent)
+                throw new ResponseStatusException(HttpStatus.CONFLICT,"支线主线不存在或不可编辑");
+            requireDisjointLineHistory(id,input.expectedRevision(),revision,parentId);
+        }
         if((input.fromStationId()==null) != sequence.isEmpty())
             throw new ResponseStatusException(HttpStatus.CONFLICT,"绘制起点与线路站序不一致");
         if(input.fromStationId()!=null &&

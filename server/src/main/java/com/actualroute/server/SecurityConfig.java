@@ -38,6 +38,12 @@ public class SecurityConfig {
             .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(
                 (request, response, error) -> response.sendError(HttpStatus.UNAUTHORIZED.value())))
             .authorizeHttpRequests(auth -> auth
+                // Preserve the original HTTP status from business exceptions
+                // (notably 409 concurrency conflicts and 429 rate limits).
+                // Spring Boot dispatches error responses to /error; requiring
+                // fresh authentication during ERROR dispatch would mask those
+                // statuses as 401 even for valid CSRF-authenticated requests.
+                .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/api/auth/register", "/api/auth/login").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/projects/public",

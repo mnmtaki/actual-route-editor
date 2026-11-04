@@ -215,7 +215,8 @@ final class LineCompoundMerge {
     }
     private boolean crossMembershipEqual(JsonNode before,JsonNode current,
                                          String stationId,String lineId) {
-        var a=new LinkedHashMap<String,JsonNode>(),b=new LinkedHashMap<String,JsonNode>();
+        var a=new LinkedHashMap<String,JsonNode>();
+        var b=new LinkedHashMap<String,JsonNode>();
         for(JsonNode rel:before.path("stationLineRelations"))
             if(stationId.equals(rel.path("stationId").asText()) &&
                !lineId.equals(rel.path("lineId").asText()))

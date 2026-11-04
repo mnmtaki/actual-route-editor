@@ -4,7 +4,10 @@ import { test, expect, request } from '@playwright/test';
 const API = 'http://127.0.0.1:8080';
 const SITE = 'http://127.0.0.1:5173';
 const suffix = () => Math.random().toString(36).slice(2, 11);
-const USERS = { owner: 'e2eOwner' + suffix(), peer: 'e2eEditor' + suffix() };
+// Keep one identity per CI run even if Playwright restarts its worker after
+// a failure. Otherwise the register-ip limiter is exhausted by retries.
+const runSuffix = (process.env.GITHUB_RUN_ID || suffix()).replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
+const USERS = { owner: 'e2eOwner' + runSuffix, peer: 'e2eEditor' + runSuffix };
 const PASSWORD = 'browser-test-password-123';
 test.beforeAll(async () => {
   const api = await request.newContext();
@@ -13,7 +16,7 @@ test.beforeAll(async () => {
       const response = await api.post(API + '/api/auth/register', {
         data: { username, password: PASSWORD },
       });
-      expect(response.status(), await response.text()).toBe(201);
+      expect([201, 409], await response.text()).toContain(response.status());
     }
   } finally {
     await api.dispose();
@@ -525,7 +528,7 @@ test('normal line drawing tool syncs first and next stations without collaborati
       return { lines: data.document.lines.length, phases: data.document.openingPhases.length };
     }, { timeout: 20000 }).toEqual({ lines: 1, phases: 1 });
 
-    await drawing.click({ position: { x: 390, y: 310 } });
+    await drawing.click({ position: { x: 390, y: 90 } });
     await expect.poll(async () => {
       const res = await owner.request.get(API + '/api/projects/' + id);
       const data = await res.json();
@@ -534,7 +537,7 @@ test('normal line drawing tool syncs first and next stations without collaborati
 
     // Cloud acknowledgement must not close the normal line drawing tool.
     await expect(drawing).toHaveClass(/is-drawing/);
-    await drawing.click({ position: { x: 700, y: 490 } });
+    await drawing.click({ position: { x: 700, y: 145 } });
     await a.getByRole('button', { name: '完成绘制' }).click();
     await expect.poll(async () => {
       const res = await owner.request.get(API + '/api/projects/' + id);
@@ -762,15 +765,23 @@ test('same-station concurrent writes produce one winner and never lose a version
       operationId:crypto.randomUUID(),expectedRevision:1,
       type:'station.rename',station:{id:'shared-station',name},
     });
+    // Issue both writes from the already authenticated browser tabs.
+    // This checks the same cookie + CSRF flow as the real editor, avoiding
+    // divergence between Playwright API contexts and browser cookie state.
+    const postFromCanvas=(page,csrf,payload)=>page.evaluate(async ({url,csrf,payload})=>{
+      const response=await fetch(url,{
+        method:'POST',credentials:'include',
+        headers:{'Content-Type':'application/json','X-ARA-CSRF':csrf},
+        body:JSON.stringify(payload),
+      });
+      return {status:response.status,body:await response.text()};
+    },{url:endpoint,csrf,payload});
     const responses=await Promise.all([
-      owner.request.post(endpoint,{
-        data:body('Owner Edit'),headers:{'X-ARA-CSRF':ownerCsrf,Origin:SITE},
-      }),
-      peer.request.post(endpoint,{
-        data:body('Peer Edit'),headers:{'X-ARA-CSRF':peerCsrf,Origin:SITE},
-      }),
+      postFromCanvas(a,ownerCsrf,body('Owner Edit')),
+      postFromCanvas(b,peerCsrf,body('Peer Edit')),
     ]);
-    expect(responses.map(response=>response.status()).sort()).toEqual([200,409]);
+    expect(responses.map(response=>response.status).sort((a,b)=>a-b),
+      JSON.stringify(responses)).toEqual([200,409]);
     const saved=await (await owner.request.get(API+'/api/projects/'+id)).json();
     expect(saved.revision).toBe(2);
     expect(['Owner Edit','Peer Edit']).toContain(saved.document.stations[0].name);
@@ -816,8 +827,8 @@ test('rapid native line creation then first station survives a concurrent peer l
     ]);
     // Do not wait for either line-create acknowledgement.
     await Promise.all([
-      a.locator('#network-canvas').click({position:{x:330,y:285}}),
-      b.locator('#network-canvas').click({position:{x:700,y:480}}),
+      a.locator('#network-canvas').click({position:{x:330,y:85}}),
+      b.locator('#network-canvas').click({position:{x:700,y:130}}),
     ]);
     await expect.poll(async ()=>{
       const latest=await (await owner.request.get(API+'/api/projects/'+id)).json();

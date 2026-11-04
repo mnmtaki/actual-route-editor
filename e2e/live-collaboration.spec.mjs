@@ -9,37 +9,45 @@ const suffix = () => Math.random().toString(36).slice(2, 11);
 const runSuffix = (process.env.GITHUB_RUN_ID || suffix()).replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
 const USERS = { owner: 'e2eOwner' + runSuffix, peer: 'e2eEditor' + runSuffix };
 const PASSWORD = 'browser-test-password-123';
+// One authenticated session per test identity PER Playwright worker. Every
+// browser context gets an isolated copy of that session's cookies; repeating
+// login for every test otherwise trips the production login-user limiter.
+const authCookies = new Map();
 test.beforeAll(async () => {
   const api = await request.newContext();
   try {
     for (const username of Object.values(USERS)) {
-      const response = await api.post(API + '/api/auth/register', {
-        data: { username, password: PASSWORD },
-      });
-      if (response.status() !== 201) {
-        // Playwright re-runs beforeAll in a replacement worker after failures.
-        // A prior worker may have already registered this run's account.
-        // Authenticate the known test user; never bypass auth or rate limits.
-        const login = await api.post(API + '/api/auth/login', {
-          data: { username, password: PASSWORD },
+      const credentials = { username, password: PASSWORD };
+      let login = await api.post(API + '/api/auth/login', { data: credentials });
+      if (login.status() !== 200) {
+        const registration = await api.post(API + '/api/auth/register', {
+          data: credentials,
         });
-        expect(login.status(),
-          'registration ' + response.status() + ': ' + await response.text()
-          + '; login: ' + await login.text()).toBe(200);
+        expect([201, 409], 'test account registration: ' +
+          await registration.text()).toContain(registration.status());
+        login = await api.post(API + '/api/auth/login', { data: credentials });
+        expect(login.status(), 'test account login: ' +
+          await login.text()).toBe(200);
       }
+      const state = await api.storageState();
+      const cookies = state.cookies.filter(cookie =>
+        ['ara_session', 'ara_csrf'].includes(cookie.name));
+      expect(cookies.map(cookie=>cookie.name).sort()).toEqual(['ara_csrf','ara_session']);
+      authCookies.set(username,cookies);
     }
   } finally {
     await api.dispose();
   }
 });
 async function registerAndLogin(context, username) {
-  const logged = await context.request.post(API + '/api/auth/login', {
-    data: { username, password: PASSWORD },
-  });
-  expect(logged.status()).toBe(200);
-  const cookies = await context.cookies(API);
-  const csrf = cookies.find(cookie => cookie.name === 'ara_csrf')?.value;
+  const cookies = authCookies.get(username);
+  expect(cookies, 'missing E2E fixture cookies for ' + username).toBeTruthy();
+  await context.addCookies(cookies);
+  const inContext = await context.cookies(API);
+  const csrf = inContext.find(cookie => cookie.name === 'ara_csrf')?.value;
   expect(csrf).toBeTruthy();
+  const identity = await context.request.get(API + '/api/auth/me');
+  expect(identity.status(), 'stored E2E session must be authenticated').toBe(200);
   return csrf;
 }
 async function write(context, csrf, endpoint, body, method = 'POST') {

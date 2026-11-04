@@ -424,11 +424,6 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     const waypointCandidate = candidate ? null : detectWaypointMove(session.baseJson, project);
     if (!candidate && !waypointCandidate) return;
     const snapshot = serializeProject(project);
-    // Fallback for cross-line compound edits is a strict-revision atomic
-    // request. Define it only in the effect that detects topology changes.
-    const projectAtomic = !newLine && !loopClosure && !newLineStation &&
-      !lineAppend && !segmentSplit && !middleRemoval && !compound &&
-      snapshot.length <= 360_000;
     const attemptKey = session.id + ':' + session.revision + ':' + snapshot;
     if (lastAutoAttempt.current === attemptKey) return;
     const timer = window.setTimeout(() => {
@@ -519,6 +514,9 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     // fallback remains strictly version-checked and must stop.
     if (remoteRevision > session.revision &&
         !newLine && !loopClosure && !newLineStation && !lineAppend && !segmentSplit && !middleRemoval && !compound) return;
+    const projectAtomic = !newLine && !loopClosure && !newLineStation &&
+      !lineAppend && !segmentSplit && !middleRemoval && !compound &&
+      serializeProject(project).length <= 360_000;
     const snapshot = serializeProject(project);
     const attemptKey = session.id + ':' + session.revision + ':' + snapshot;
     if (lastAutoAttempt.current === attemptKey) return;

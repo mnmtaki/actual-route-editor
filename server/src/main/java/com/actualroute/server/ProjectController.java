@@ -2179,7 +2179,7 @@ public class ProjectController {
                     String raw=jdbc.queryForObject("""
                         SELECT payload::text FROM cloud_project_operations
                         WHERE project_id=? AND revision=?
-                        """,String.class,projectId,revision);
+                        """,String.class,projectId,(Long)record[0]);
                     changedPayload=mapper.readTree(raw);
                 } catch(Exception error) {
                     throw new ResponseStatusException(HttpStatus.CONFLICT,

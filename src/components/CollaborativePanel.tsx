@@ -424,10 +424,8 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     const waypointCandidate = candidate ? null : detectWaypointMove(session.baseJson, project);
     if (!candidate && !waypointCandidate) return;
     const snapshot = serializeProject(project);
-    // A scoped mutation uses the fine-grained transaction above. Arbitrary
-    // compound edits use a strict-revision, idempotent all-or-nothing write.
-    // Large maps keep the existing CAS fallback to avoid browser storage
-    // quota failures while persisting the pending operation.
+    // Fallback for cross-line compound edits is a strict-revision atomic
+    // request. Define it only in the effect that detects topology changes.
     const projectAtomic = !newLine && !loopClosure && !newLineStation &&
       !lineAppend && !segmentSplit && !middleRemoval && !compound &&
       snapshot.length <= 360_000;
@@ -583,7 +581,11 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
             await new Promise<void>(resolve => window.setTimeout(resolve, 800));
             return sendTopology();
           })
-        : cloudApi.update(session.id, session.revision, project);
+        : cloudApi.update(session.id, session.revision, project)
+            // A CAS PUT returns metadata only. Its acknowledged document is
+            // exactly the serialized snapshot submitted, never an imagined
+            // document property on CloudProjectSummary.
+            .then(saved => ({ ...saved, document: JSON.parse(snapshot) as ActualRouteProject }));
       void submitted.then(saved => {
         setRemoteRevision(previous => Math.max(previous, saved.revision));
         if (topologyOperation) {

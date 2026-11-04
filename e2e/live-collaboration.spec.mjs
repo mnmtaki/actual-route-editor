@@ -16,7 +16,17 @@ test.beforeAll(async () => {
       const response = await api.post(API + '/api/auth/register', {
         data: { username, password: PASSWORD },
       });
-      expect([201, 409], await response.text()).toContain(response.status());
+      if (response.status() !== 201) {
+        // Playwright re-runs beforeAll in a replacement worker after failures.
+        // A prior worker may have already registered this run's account.
+        // Authenticate the known test user; never bypass auth or rate limits.
+        const login = await api.post(API + '/api/auth/login', {
+          data: { username, password: PASSWORD },
+        });
+        expect(login.status(),
+          'registration ' + response.status() + ': ' + await response.text()
+          + '; login: ' + await login.text()).toBe(200);
+      }
     }
   } finally {
     await api.dispose();

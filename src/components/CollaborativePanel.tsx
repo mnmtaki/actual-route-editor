@@ -920,7 +920,8 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
   }
 
   return <section aria-label="协同工作区" className="creation-banner"
-    style={{ position: 'relative', margin: '8px', padding: '10px', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+    style={{ position: 'relative', margin: '8px', padding: '10px', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
+      maxHeight: 126, overflowY: 'auto', overscrollBehavior: 'contain' }}>
     <strong>协同编辑 · {session.name}（普通绘制工具自动同步）</strong>
     <span>本地基线 v{session.revision} · 远端 v{remoteRevision}</span>
     <span>{dirty ? '● 未发布修改' : draftActive ? '绘制操作进行中' : '✓ 与已加载版本一致'}</span>

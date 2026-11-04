@@ -1998,7 +1998,7 @@ class AccountsAndSavesIT {
                     {"id":"bc","lineId":"l2","fromStationId":"b",
                      "toStationId":"c","mode":"straight",
                      "structureType":"underground","waypoints":[]}
-                    """))),owner))
+                    """)))),owner))
             .andExpect(status().isOk()).andExpect(jsonPath("$.revision").value(3));
         String stationApi="/api/projects/"+id+"/operations";
         mvc.perform(authorized(post(stationApi).contentType(MediaType.APPLICATION_JSON)

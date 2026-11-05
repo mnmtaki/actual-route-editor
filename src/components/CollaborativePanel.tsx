@@ -6,7 +6,7 @@ import { cloudApi, cloudSocketUrl, CloudApiError } from '../data/cloudProjectApi
 import type { CloudUndoEntry, CloudOperationHistoryItem } from '../data/cloudProjectApi';
 import { detectStationOperation } from '../data/stationLiveOperations';
 import { detectWaypointMove } from '../data/waypointLiveOperations';
-import { detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation, mergeOnePendingCanvasStation, detectCanvasNewLine, detectCanvasLoopClosure, detectCanvasLineCompound } from '../data/collaborationRouting';
+import { detectCanvasLineAppend, detectCanvasSegmentSplit, detectCanvasMiddleStationRemoval, detectCanvasNewLineStation, mergeOnePendingCanvasStation, detectCanvasNewLine, detectCanvasLoopClosure, detectCanvasLineCompound, detectCanvasStationAfterRemoteEmptyLine, missingCloudObjects } from '../data/collaborationRouting';
 import { pendingTopologyRead, pendingTopologySave, pendingTopologyClear, pendingTopologyConfirm } from '../data/pendingTopology';
 import type { PendingTopologyOperation } from '../data/pendingTopology';
 
@@ -502,7 +502,9 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
         detectWaypointMove(session.baseJson, project)) return;
     const newLine = detectCanvasNewLine(session.baseJson, project);
     const loopClosure = newLine ? null : detectCanvasLoopClosure(session.baseJson, project);
-    const newLineStation = newLine || loopClosure ? null : detectCanvasNewLineStation(session.baseJson, project);
+    const newLineStation = newLine || loopClosure ? null :
+      (detectCanvasNewLineStation(session.baseJson, project) ??
+       detectCanvasStationAfterRemoteEmptyLine(session.baseJson, project));
     const lineAppend = newLine || loopClosure || newLineStation ? null : detectCanvasLineAppend(session.baseJson, project);
     const segmentSplit = newLine || loopClosure || newLineStation || lineAppend ? null : detectCanvasSegmentSplit(session.baseJson, project);
     const middleRemoval = newLine || loopClosure || newLineStation || lineAppend || segmentSplit ? null : detectCanvasMiddleStationRemoval(session.baseJson, project);
@@ -514,6 +516,13 @@ export function CollaborativePanel({ session, project, draftActive, onCreateStan
     // fallback remains strictly version-checked and must stop.
     if (remoteRevision > session.revision &&
         !newLine && !loopClosure && !newLineStation && !lineAppend && !segmentSplit && !middleRemoval && !compound) return;
+    if (!newLine && !loopClosure && !newLineStation && !lineAppend &&
+        !segmentSplit && !middleRemoval && !compound &&
+        missingCloudObjects(session.baseJson, project)) {
+      setRecoveryOpen(true);
+      setError('当前画布缺少云端已确认的对象。已禁止自动整图覆盖；请先核对差异，或使用有明确目标的操作删除。');
+      return;
+    }
     const projectAtomic = !newLine && !loopClosure && !newLineStation &&
       !lineAppend && !segmentSplit && !middleRemoval && !compound &&
       serializeProject(project).length <= 360_000;

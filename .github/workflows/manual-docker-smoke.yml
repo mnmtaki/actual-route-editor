@@ -1,0 +1,78 @@
+name: Manual Docker collaboration smoke test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/java-accounts-cloud-saves-20261101
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create isolated local-only Compose secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
+            echo "ARA_ORIGIN=http://127.0.0.1:8088"
+            echo "ARA_COOKIE_SECURE=false"
+            echo "ARA_BIND_ADDRESS=127.0.0.1"
+            echo "ARA_HTTP_PORT=8088"
+          } > deploy/.env
+          chmod 600 deploy/.env
+      - name: Build and start Postgres, Java and Nginx
+        run: docker compose --env-file deploy/.env -f deploy/compose.yaml up -d --build
+      - name: Verify reverse proxy, authentication, REST write, Flyway and WebSocket upgrade
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:8088/ >/dev/null &&
+               [ "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8088/api/auth/me)" = 401 ]; then
+              break
+            fi
+            if [ "$i" = 120 ]; then
+              echo 'The three-service stack did not become ready'
+              exit 1
+            fi
+            sleep 2
+          done
+          username="smoke${GITHUB_RUN_ID}"
+          credentials="{\"username\":\"${username}\",\"password\":\"test-password-123456789\"}"
+          code="$(curl -sS -o /tmp/register.json -w '%{http_code}' -H 'Content-Type: application/json' -d "$credentials" http://127.0.0.1:8088/api/auth/register)"
+          test "$code" = 201
+          code="$(curl -sS -c /tmp/ara-cookies -o /tmp/login.json -w '%{http_code}' -H 'Content-Type: application/json' -d "$credentials" http://127.0.0.1:8088/api/auth/login)"
+          test "$code" = 200
+          csrf="$(awk '$6 == "ara_csrf" {print $7}' /tmp/ara-cookies)"
+          test -n "$csrf"
+          code="$(curl -sS -b /tmp/ara-cookies -o /tmp/me.json -w '%{http_code}' http://127.0.0.1:8088/api/auth/me)"
+          test "$code" = 200
+          doc='{"name":"Container smoke","document":{"version":1,"name":"Container smoke","stations":[],"lines":[],"stationLineRelations":[],"geometry":{"segments":[]},"openingPhases":[]}}'
+          code="$(curl -sS -b /tmp/ara-cookies -o /tmp/project.json -w '%{http_code}' -H 'Content-Type: application/json' -H "X-ARA-CSRF: $csrf" -d "$doc" http://127.0.0.1:8088/api/projects)"
+          test "$code" = 201
+          id="$(python3 -c 'import json; print(json.load(open("/tmp/project.json"))["id"])')"
+          test -n "$id"
+          code="$(curl -sS -b /tmp/ara-cookies -o /tmp/read.json -w '%{http_code}' "http://127.0.0.1:8088/api/projects/$id")"
+          test "$code" = 200
+          python3 -c 'import json; x=json.load(open("/tmp/read.json")); assert x["revision"]==1'
+          migrated="$(docker compose --env-file deploy/.env -f deploy/compose.yaml exec -T database psql -U actual_route -d actual_route -t -A -c "SELECT success FROM flyway_schema_history WHERE version='16'")"
+          test "$migrated" = t
+          # A 101 indicates Spring accepted the cookie-authenticated upgrade
+          # through nginx. curl may exit 28 after 101 because the socket stays open.
+          ws_code="$(curl --max-time 3 -sS -o /tmp/websocket.json -w '%{http_code}' -b /tmp/ara-cookies -H 'Upgrade: websocket' -H 'Connection: Upgrade' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Version: 13' -H 'Origin: http://127.0.0.1:8088' "http://127.0.0.1:8088/ws/projects/$id" || true)"
+          test "$ws_code" = 101
+          echo "Smoke PASS: nginx frontend, auth cookie, CSRF, project CRUD, Flyway V16, WebSocket 101"
+      - name: Show service diagnostics on failure
+        if: failure()
+        run: docker compose --env-file deploy/.env -f deploy/compose.yaml logs --tail=150
+      - name: Stop and delete ephemeral CI volumes
+        if: always()
+        run: docker compose --env-file deploy/.env -f deploy/compose.yaml down -v --remove-orphans

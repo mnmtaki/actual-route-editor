@@ -1,0 +1,13 @@
+node_modules
+dist
+dist-vite
+coverage
+test-results
+.git
+.github
+*.log
+*.zip
+*.docx
+deploy/.env
+server/target
+android

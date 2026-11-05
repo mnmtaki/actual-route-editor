@@ -848,6 +848,13 @@ test('rapid native line creation then first station survives a concurrent peer l
       a.locator('#network-canvas').click({position:{x:330,y:85}}),
       b.locator('#network-canvas').click({position:{x:700,y:130}}),
     ]);
+    // A click may create a pending geometric control point rather than a
+    // committed station. Finish the native line draft in BOTH browsers before
+    // asserting cloud station counts; never confuse draft state with a save.
+    await Promise.all([
+      a.getByRole('button',{name:'完成绘制'}).click(),
+      b.getByRole('button',{name:'完成绘制'}).click(),
+    ]);
     await expect.poll(async ()=>{
       const latest=await (await owner.request.get(API+'/api/projects/'+id)).json();
       return {

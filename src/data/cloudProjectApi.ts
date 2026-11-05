@@ -120,7 +120,12 @@ export interface CloudCompensation {
 }
 export interface CloudProjectStatus { id: string; name: string; revision: number; visibility: CloudProjectSummary['visibility']; canEdit: boolean }
 export function cloudSocketUrl(id: string): string {
-  return API_BASE.replace(/^http/i, 'ws') + '/ws/projects/' + encodeURIComponent(id);
+  // Resolve either a fully qualified API base (local development) or a
+  // same-origin relative base (Docker reverse proxy / HTTPS deployment).
+  const locationOrigin = typeof window === 'undefined' ? 'http://localhost:8080' : window.location.origin;
+  const url = new URL(API_BASE + '/ws/projects/' + encodeURIComponent(id), locationOrigin);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.toString();
 }
 export interface CloudAccessRule {
   id: string; userId: string; username: string;

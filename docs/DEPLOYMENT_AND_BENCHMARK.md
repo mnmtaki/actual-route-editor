@@ -77,7 +77,13 @@ mvn -B -ntp -Dtest=ConcurrentEditorBenchmarkIT test
 
 这些是 Spring MVC MockMvc + PostgreSQL 的服务端事务基准，不代表经过 HTTP、TLS、浏览器渲染和公网 WebSocket 的端到端性能。要证明公网多人体验，还需实测真实网络与较大项目。
 
-## 5. 验收范围与未完成项
+## 5. Docker 构建与单实例链路冒烟
+
+除手动运行外，仓库还提供 `Manual Docker collaboration smoke test`。它在隔离的 CI Docker 主机上构建三项服务，核对 Nginx 静态前端、登录 Cookie、CSRF、工程创建与读取、Flyway V16，以及 WebSocket 101 升级，然后删除临时数据库卷。真实生产环境需要自行提供 HTTPS 和数据库备份。
+
+压力基准与 Docker 冒烟默认不随普通代码修改执行；分别可在 Actions 中手动触发。开发分支的提交信息同时包含 `[bench]` 和 `[deploy]` 时，会触发两项独立的验收工作流，结果依旧必须以实际日志为准。
+
+## 6. 验收范围与未完成项
 
 - ✅ 单实例 PostgreSQL 事务 + 幂等操作 ID 的核心链路已有 CI 证据。
 - ✅ 普通画布、简单支线、环线、复合线级拓扑有对应操作和测试。

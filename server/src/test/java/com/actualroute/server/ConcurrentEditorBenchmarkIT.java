@@ -44,9 +44,12 @@ class ConcurrentEditorBenchmarkIT {
 
     @Test
     void measureAndVerifyIndependentWritesAt10_20_50Clients() throws Exception {
-        String jdbcUrl=Objects.toString(jdbc.getDataSource().getConnection().getMetaData().getURL(),"");
-        assertFalse(jdbcUrl.toLowerCase(Locale.ROOT).contains("prod"),
-            "Refusing to benchmark a production-named database");
+        String jdbcUrl;
+        try(var connection=Objects.requireNonNull(jdbc.getDataSource()).getConnection()) {
+            jdbcUrl=Objects.toString(connection.getMetaData().getURL(),"");
+        }
+        assertTrue(jdbcUrl.contains("actual_route_bench"),
+            "Benchmark requires its dedicated isolated actual_route_bench database");
         var actors=new ArrayList<Actor>();
         for(int i=0;i<50;i++)actors.add(createActor(i));
         var results=new ArrayList<Result>();

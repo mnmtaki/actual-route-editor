@@ -963,3 +963,107 @@ test('loop closure and independently seeded branch creation converge across brow
     await peer.close();
   }
 });
+
+test('lost success response retries the exact same operation without duplicate line creation', async ({ browser }) => {
+  const context = await browser.newContext();
+  try {
+    const csrf = await registerAndLogin(context, USERS.owner);
+    const bootstrap = await context.newPage();
+    await bootstrap.goto(SITE);
+    const empty = await bootstrap.evaluate(async () =>
+      (await import('/src/data/storage.ts')).createEmptyProject());
+    await bootstrap.close();
+    const project = await write(context, csrf, '/api/projects', {
+      name: 'Lost ACK recovery', document: empty,
+    });
+    const id = project.id;
+    const page = await openCanvas(context, id);
+    let intercepted = 0;
+    let firstOperationId = null;
+    await page.route('**/api/projects/*/operations/line-create', async route => {
+      const body = JSON.parse(route.request().postData() || '{}');
+      if (!firstOperationId) firstOperationId = body.operationId;
+      expect(body.operationId).toBe(firstOperationId);
+      intercepted++;
+      if (intercepted === 1) {
+        // Commit the POST in Java, then discard its response at the transport
+        // boundary. Client must retry with its original operation ID.
+        const committed = await route.fetch();
+        expect(committed.status(), await committed.text()).toBe(200);
+        await route.abort('failed');
+      } else {
+        await route.continue();
+      }
+    });
+    await page.getByRole('button', { name: '＋ 新建线路' }).click();
+    await page.locator('.line-dialog input').first().fill('Recovered Once');
+    await page.locator('.line-dialog')
+      .getByRole('button', { name: '开始绘制' }).click();
+    await expect.poll(async () => {
+      const response = await context.request.get(API + '/api/projects/' + id);
+      const latest = await response.json();
+      return { revision: latest.revision,
+        lines: latest.document.lines.map(line => line.name) };
+    }, {timeout: 20000}).toEqual({revision: 2, lines: ['Recovered Once']});
+    await expect.poll(() => intercepted, {timeout: 15000}).toBe(2);
+    await expect(page.getByRole('region', {name: '协同工作区'})
+      .getByText(/本地基线 v2 · 远端 v2/)).toBeVisible({timeout: 20000});
+    const storage = await page.evaluate(id =>
+      sessionStorage.getItem('ara:pending-topology:v2:' + id), id);
+    expect(storage).toBeNull();
+    expect(firstOperationId).toBeTruthy();
+    const ops = await context.request.get(API + '/api/projects/' + id + '/operations');
+    if (ops.ok()) {
+      const data = await ops.json();
+      expect(JSON.stringify(data)).toContain('line.create');
+    }
+  } finally {
+    await context.close();
+  }
+});
+
+test('revoked collaborator cannot commit a stale write after opening the canvas', async ({ browser }) => {
+  const owner = await browser.newContext();
+  const peer = await browser.newContext();
+  try {
+    const ownerCsrf = await registerAndLogin(owner, USERS.owner);
+    const peerCsrf = await registerAndLogin(peer, USERS.peer);
+    const bootstrap = await owner.newPage();
+    await bootstrap.goto(SITE);
+    const seed = await bootstrap.evaluate(async () =>
+      (await import('/src/data/storage.ts')).createEmptyProject());
+    await bootstrap.close();
+    const created = await write(owner, ownerCsrf, '/api/projects', {
+      name: 'Mid-edit revocation', document: seed,
+    });
+    const id = created.id;
+    await write(owner, ownerCsrf, '/api/projects/' + id + '/access-rules', {
+      username: USERS.peer, action: 'edit', allowed: true,
+    });
+    const ownerPage = await openCanvas(owner, id);
+    const peerPage = await openCanvas(peer, id);
+    await write(owner, ownerCsrf, '/api/projects/' + id + '/access-rules', {
+      username: USERS.peer, action: 'edit', allowed: false,
+    });
+    const response = await peerPage.evaluate(async ({ endpoint, csrf }) => {
+      const res = await fetch(endpoint, {
+        method: 'POST', credentials: 'include',
+        headers: {'Content-Type': 'application/json', 'X-ARA-CSRF': csrf},
+        body: JSON.stringify({
+          operationId: crypto.randomUUID(), expectedRevision: 1,
+          type: 'station.create',
+          station: {id:'unauthorized-station', name:'Denied', x:10, y:10},
+        }),
+      });
+      return {status: res.status, body: await res.text()};
+    }, {endpoint:API+'/api/projects/'+id+'/operations',csrf:peerCsrf});
+    expect([403, 404]).toContain(response.status);
+    const after = await (await owner.request.get(API + '/api/projects/' + id)).json();
+    expect(after.revision).toBe(1);
+    expect(after.document.stations).toHaveLength(0);
+    await expect(ownerPage.getByText('WebSocket 已连接')).toBeVisible();
+  } finally {
+    await owner.close();
+    await peer.close();
+  }
+});

@@ -1,0 +1,56 @@
+name: Manual concurrent editor benchmark
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: actual-route-editor-concurrency-benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    name: PostgreSQL 10-20-50 actors (isolated CI database)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: actual_route
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: actual_route_bench
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U actual_route -d actual_route_bench"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: jdbc:postgresql://localhost:5432/actual_route_bench
+      DATABASE_USER: actual_route
+      DATABASE_PASSWORD: test-password
+      ARA_RUN_CONCURRENCY_BENCH: 'true'
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: server/pom.xml
+      - name: Run authenticated concurrent database benchmark
+        run: mvn -B -ntp -Dtest=ConcurrentEditorBenchmarkIT test
+      - name: Upload real measured benchmark JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: concurrency-benchmark-results
+          path: server/target/concurrency-benchmark.json
+          if-no-files-found: warn

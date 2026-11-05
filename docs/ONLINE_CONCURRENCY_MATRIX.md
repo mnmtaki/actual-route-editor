@@ -11,8 +11,7 @@ disjoint revision journal. Otherwise the server returns 409 and the client
 retains its working copy. Whole-project PUT/restore is an explicit conflict
 boundary, not an automatic three-way merge.
 
-**Important: code and test cases committed ≠ CI or browser acceptance passed.**
-All test results must be recorded from a real execution before release.
+**Verification status:** [CI #316](https://github.com/mnmtaki/actual-route-editor/actions/runs/42004154969) passed Java, Web and 16 Playwright scenarios (including lost ACK and revoked permissions); [Docker smoke #2](https://github.com/mnmtaki/actual-route-editor/actions/runs/42005024376) passed; [concurrency benchmark #4](https://github.com/mnmtaki/actual-route-editor/actions/runs/42005024394) passed. Every later commit still requires its own latest-HEAD CI verification.
 
 ## Operation-pair matrix
 
@@ -29,7 +28,7 @@ All test results must be recorded from a real execution before release.
 | New main line + new main line | Merge; server assigns unique line order | `independentLineCreationRebasesAndResolvesConcurrentOrdering` |
 | Two regular new-line toolbar actions in different browser accounts | Merge, both rendered | `two editors create independent native lines concurrently through regular toolbar` |
 | Two regular new-line toolbar actions in same-account tabs | Merge, per-tab outboxes | `same-account tabs keep independent pending operations during concurrent line creation` |
-| Fast new-line creation + immediate first station on both clients | Must retain both lines/stations; test is expected to expose any compound-edit gap | `rapid native line creation then first station survives a concurrent peer line creation` (not executed) |
+| Fast new-line creation + immediate first station on both clients | Must retain both lines/stations; test is expected to expose any compound-edit gap | `rapid native line creation then first station survives a concurrent peer line creation` (CI #316 passed) |
 | New station / terminal append on independent lines | Merge | `differentLinesRebaseTopologyWhileSameLineAndFullSaveConflict` |
 | Split a segment on line A + append new station on line B | Merge | `independentSplitAndNewStationRebaseAcrossLinesButRejectSameLine` |
 | Same-line topology writes | 409 unless explicitly ordered by a fresh revision | Same tests |
@@ -48,11 +47,11 @@ All test results must be recorded from a real execution before release.
 | Unknown/legacy action or missing operation journal revision | 409 | Guarded by complete contiguous journal; fault-injection test pending |
 | Same `operationId`, identical payload | Idempotent, no extra revision | Multiple Java IT cases |
 | Same `operationId`, different payload | 409 | Multiple Java IT cases |
-| Network response lost after server commit | Replay same operation ID | `pendingTopology.test.ts` + server idempotency; browser fault injection pending |
-| New local drawing while prior request is in flight | Preserve local canvas; auto-continue only with safe proven merge | `collaborationRouting.test.ts`; `rapid native line creation then first station survives a concurrent peer line creation` (added, not executed) |
+| Network response lost after server commit | Replay same operation ID | `pendingTopology.test.ts` + server idempotency; lost-ACK browser fault injection passed in CI #316; offline-queue stress pending |
+| New local drawing while prior request is in flight | Preserve local canvas; auto-continue only with safe proven merge | `collaborationRouting.test.ts`; `rapid native line creation then first station survives a concurrent peer line creation` (CI #316 passed) |
 | New remote revision while local canvas is clean | Update canvas promptly | WebSocket + poll catch-up; E2E tests, missed-event test pending |
 | New remote revision while local canvas is dirty | Do not replace locally; show recovery | `collaboration history and conflict recovery preserve the local canvas and export backup` |
-| Permissions revoked while editing | Reject further writes; preserve local document | Auth/permission Java IT; browser race pending |
+| Permissions revoked while editing | Reject further writes; preserve local document | Auth/permission Java IT; revocation browser race passed in CI #316 |
 | Phase-owned terminal append, single unambiguous phase | Atomically update line, segment, relation and phase | `appendExistingStationUpdatesExactlyOneOpeningPhase` |
 | Concurrent edits to same phase | 409 | Line-scoped conflict; explicit pair test pending |
 | New native child branch (empty or seeded from existing parent station) | Atomic line + initial phase + optional membership; conflicting parent edits rejected | `seededBranchCreationAndContinuationAreAtomicAndIdempotent`, `collaborationRouting.test.ts` |
@@ -100,6 +99,4 @@ the legacy whole-document CAS fallback. Neither path automatically merges
 overlapping multi-line changes. In-flight compound requests are tracked with
 per-tab persisted operation IDs where within storage limits.
 
-All newly added branch/loop/compound tests are **committed but unexecuted** in
-this environment. Do not mark this release complete until the release gate
-above passes.
+Java, Web and 16 Playwright scenarios including native branches and loop closure passed in CI #316. The opt-in 10/20/50 actor PostgreSQL benchmark and single-host Docker smoke also passed on 2026-11-05. See `docs/CONCURRENCY_BENCHMARK_2026-11-05.md` for actual P50/P95 and throughput measurements. Further release gates (multi-server pubsub, very large maps, real-network soak tests, full undo for complex topology) remain separate from these verified single-instance checks.

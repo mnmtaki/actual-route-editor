@@ -348,6 +348,70 @@ export function detectCanvasNewLineStation(baseJson: string, project: ActualRout
 }
 
 /**
+ * A stale React history callback can commit the next station from the local
+ * pre-acknowledgement copy, even after a concurrent new line was included in
+ * the cloud baseline. Recover ONLY the independent first-station append:
+ * omitted remote lines must be empty and their phases must own no objects.
+ * Never infer that the user intentionally deleted those remote lines.
+ */
+export function detectCanvasStationAfterRemoteEmptyLine(
+  baseJson: string, project: ActualRouteProject,
+): Omit<CloudNewLineStation, 'operationId' | 'expectedRevision'> | null {
+  let before: ActualRouteProject;
+  try { before = JSON.parse(baseJson) as ActualRouteProject; }
+  catch { return null; }
+  const local = JSON.parse(serializeProject(project)) as ActualRouteProject;
+  if (before.lines.length <= local.lines.length) return null;
+  const localIds = new Set(local.lines.map(line => line.id));
+  if (localIds.size !== local.lines.length) return null;
+  const missingLines = before.lines.filter(line => !localIds.has(line.id));
+  if (!missingLines.length || missingLines.length > 16) return null;
+  const missingIds = new Set(missingLines.map(line => line.id));
+  // In particular, a shared transfer, branched parent or populated line is
+  // never discarded from the comparison merely because it is absent locally.
+  if (missingLines.some(line => line.stationSequence.length ||
+      before.lines.some(child => !missingIds.has(child.id) &&
+        child.parentLineId === line.id)) ||
+      before.stationLineRelations.some(rel => missingIds.has(rel.lineId)) ||
+      before.geometry.segments.some(seg => missingIds.has(seg.lineId)) ||
+      before.openingPhases.some(phase => missingIds.has(phase.lineId) &&
+        (phase.segmentIds.length || phase.stationRelationIds.length ||
+         phase.overriddenSegmentIds?.length ||
+         phase.overriddenStationRelationIds?.length))) return null;
+  const projected = structuredClone(before);
+  projected.lines = projected.lines.filter(line => localIds.has(line.id)).map(line => {
+    const localLine = local.lines.find(item => item.id === line.id);
+    // New independent lines are assigned authoritative ordering by Java.
+    // Ignore this presentation-only difference when detecting a station.
+    return { ...line, lineOrder: localLine?.lineOrder ?? line.lineOrder };
+  });
+  projected.openingPhases = projected.openingPhases.filter(
+    phase => localIds.has(phase.lineId));
+  return detectCanvasNewLineStation(serializeProject(projected), local);
+}
+
+/**
+ * An automatic whole-document transaction must not delete objects that
+ * appeared in the acknowledged cloud baseline but are missing in the local
+ * working copy. Deletions need explicit intent-aware commands, not inferred
+ * CAS replacements, especially after a concurrent WebSocket acknowledgement.
+ */
+export function missingCloudObjects(baseJson: string, project: ActualRouteProject): boolean {
+  let before: ActualRouteProject;
+  try { before = JSON.parse(baseJson) as ActualRouteProject; }
+  catch { return true; }
+  const includesAll = (base: {id:string}[],local: {id:string}[]) => {
+    const current = new Set(local.map(item => item.id));
+    return base.every(item => current.has(item.id));
+  };
+  return !includesAll(before.lines, project.lines) ||
+    !includesAll(before.stations, project.stations) ||
+    !includesAll(before.stationLineRelations, project.stationLineRelations) ||
+    !includesAll(before.geometry.segments, project.geometry.segments) ||
+    !includesAll(before.openingPhases, project.openingPhases);
+}
+
+/**
  * Three-way merge of exactly one subsequent ordinary canvas station append.
  * The server has already committed an earlier operation and may have merged
  * changes to other lines in that response. Preserve those remote changes and
